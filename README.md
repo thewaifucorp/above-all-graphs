@@ -1,6 +1,18 @@
-# AboveAllGraphs (`aag`)
+<div align="center">
+
+<img src="assets/logo.svg" width="120" alt="aag logo — an A drawn as a three-node graph">
+
+# AboveAllGraphs
 
 **A code knowledge graph that installs itself, keeps itself fresh, and works with every coding agent.**
+
+[![CI](https://github.com/thewaifucorp/above-all-graphs/actions/workflows/ci.yml/badge.svg)](https://github.com/thewaifucorp/above-all-graphs/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![rust](https://img.shields.io/badge/rust-stable-dea584.svg)](https://www.rust-lang.org)
+
+</div>
+
+---
 
 Two commands. That's the entire workflow:
 
@@ -9,9 +21,23 @@ aag bigbang   # once per repo: index it + wire up every coding agent you have
 aag ui        # whenever you want to look: opens the browser, all your repos in one app
 ```
 
-![aag ui](graph-initial.png)
-
 No API key, no native compile step, no config file, nothing to keep in sync by hand. One static Rust binary.
+
+## Highlights
+
+- **Self-installing** — `bigbang` detects every coding agent on the machine and registers MCP servers, hooks, skills, and rules for each one. Idempotent, additive, reversible.
+- **Always fresh** — native filesystem watcher, reconciliation on every MCP connect, agent hooks that resync after every edit. There is no "reindex" command to remember.
+- **Deterministic** — parsing via tree-sitter, storage in SQLite, no LLM in the indexing path. Everything local; nothing leaves your machine.
+- **100% offline UI** — interactive WebGL graph, per-module wiki, god-node report. Every asset vendored into the binary; the whole site also works as static files with no server.
+- **Multi-workspace** — every repo you index appears in one hub. Local graphs, no central server.
+
+## Install
+
+```bash
+cargo build --release               # binary at target/release/aag
+```
+
+Tagged releases (`v*`) ship prebuilt binaries for linux/macos/windows (x64 + arm64), wrapped by `npm/` as `@thewaifucorp/aag` — end users never compile anything.
 
 ## Why
 
@@ -20,8 +46,6 @@ No API key, no native compile step, no config file, nothing to keep in sync by h
 - **[GitNexus](https://github.com/abhigyanpatwari/GitNexus)** — real code graph (callers, impact, rename, cypher), but a heavy install (C++ toolchain, onnxruntime) and no incremental indexing.
 - **[Graphify](https://github.com/Graphify-Labs/graphify)** — storytelling layer over the graph (`graph.html`, `GRAPH_REPORT.md`), but CDN-dependent output and Python tooling.
 - **[CodeGraph](https://github.com/colbymchenry/codegraph)** — install-and-forget philosophy (hooks registered automatically), which `aag` adopts as a non-negotiable.
-
-Parsing via tree-sitter (deterministic, no LLM), storage in SQLite, everything local — nothing leaves your machine.
 
 ## The UI
 
@@ -56,10 +80,6 @@ The Claude Code hooks are the deepest integration: **PreToolUse** warns the agen
 ## MCP surface
 
 One strong default tool — `explore` — answers "how does X work", "how does X reach Y", area surveys: source verbatim grouped by file, call paths, and blast radius in one shot. Granular tools (`node`, `search`, `callers`, `callees`, `impact`, `rename`, `affected`, `cypher`, `detect_changes`, `wiki`) are unlisted by default; enable via `AAG_MCP_TOOLS=explore,impact,...`.
-
-## Always fresh
-
-Native filesystem watcher (FSEvents/inotify/ReadDirectoryChangesW) with debounce; reconciliation on every MCP connect absorbs edits made while nothing was running; agent hooks resync after every edit. There is no "reindex" command to remember.
 
 ## CLI
 
@@ -109,9 +129,9 @@ cargo clippy        # pedantic, zero warnings
 cargo build --release
 ```
 
-Stack: Rust, tree-sitter, rusqlite (bundled SQLite + FTS5), tiny_http, notify, clap, serde_json. Releases: tagging `v*` builds prebuilt binaries for linux/macos/windows (x64 + arm64) which the `npm/` wrapper downloads on install — end users never compile anything.
+Stack: Rust, tree-sitter, rusqlite (bundled SQLite + FTS5), tiny_http, notify, clap, serde_json.
 
-This repo dogfoods itself: the `aag` hooks are active here, and the graph you see in the screenshot is this codebase.
+This repo dogfoods itself: the `aag` hooks are active here.
 
 ## License
 

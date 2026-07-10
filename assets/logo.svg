@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- the aag mark: an "A" drawn as a three-node graph -->
+  <path d="M64 28 32 98M64 28l32 70M39.3 82h49.4" stroke="#888e99" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <circle cx="64" cy="28" r="16" fill="#ff3b3b"/>
+  <circle cx="32" cy="98" r="16" fill="#ffcf3b"/>
+  <circle cx="96" cy="98" r="16" fill="#3bd8ff"/>
+</svg>
