@@ -107,7 +107,7 @@ fn blast_radius_warning(root: &Path, file: &Path) -> Option<String> {
     if hot.is_empty() {
         return None;
     }
-    hot.sort_by(|a, b| b.0.cmp(&a.0));
+    hot.sort_by_key(|entry| std::cmp::Reverse(entry.0));
 
     let listed = hot
         .iter()
