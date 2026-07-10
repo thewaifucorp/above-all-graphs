@@ -220,7 +220,7 @@
   <a class="hbtn" href="wiki/index.html">wiki</a>
   <a class="hbtn" href="report.html">report</a>
   <button id="chat-btn" title="AI chat">&#10024; chat</button>
-  <a class="hbtn" id="star-btn" href="https://github.com/waifucorp/above-all-graphs" target="_blank" rel="noopener" title="Star on GitHub">&#9733; star</a>
+  <a class="hbtn" id="star-btn" href="https://github.com/thewaifucorp/above-all-graphs" target="_blank" rel="noopener" title="Star on GitHub">&#9733; star</a>
   <a class="hbtn" id="waifu-btn" href="https://waifucorp.org" target="_blank" rel="noopener" title="Meet WaifuCorp">&#9825; waifucorp</a>
   <button id="settings-btn" title="Graph settings">&#9881;</button>
 </div>

@@ -12,7 +12,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { pipeline } = require("node:stream/promises");
 
-const REPO = "waifucorp/above-all-graphs";
+const REPO = "thewaifucorp/above-all-graphs";
 const VERSION = require("./package.json").version;
 
 const TARGETS = {

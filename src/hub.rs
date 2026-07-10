@@ -77,7 +77,7 @@ const SHELL_HTML: &str = r##"<!doctype html>
   <select id="picker" title="workspace"><option>loading…</option></select>
   <button class="hbtn" id="add-btn" title="Index a new repository">+ index</button>
   <span class="stats" id="stats"></span>
-  <a class="hbtn star" href="https://github.com/waifucorp/above-all-graphs" target="_blank" rel="noopener" title="Star on GitHub">&#9733; star</a>
+  <a class="hbtn star" href="https://github.com/thewaifucorp/above-all-graphs" target="_blank" rel="noopener" title="Star on GitHub">&#9733; star</a>
   <a class="hbtn waifu" href="https://waifucorp.org" target="_blank" rel="noopener" title="Meet WaifuCorp">&#9825; waifucorp</a>
 </header>
 <iframe id="view"></iframe>

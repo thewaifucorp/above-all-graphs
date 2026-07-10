@@ -1,11 +1,11 @@
 {
-  "name": "@waifucorp/aag",
+  "name": "@thewaifucorp/aag",
   "version": "0.1.0",
   "description": "AboveAllGraphs — code knowledge graph that installs itself, stays fresh, and works with every coding agent. This package only downloads the prebuilt Rust binary for your platform; nothing is compiled.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/waifucorp/above-all-graphs.git"
+    "url": "https://github.com/thewaifucorp/above-all-graphs.git"
   },
   "keywords": ["mcp", "code-graph", "knowledge-graph", "tree-sitter", "ai-agents"],
   "bin": {
