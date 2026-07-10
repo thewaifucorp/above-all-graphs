@@ -34,10 +34,17 @@ No API key, no native compile step, no config file, nothing to keep in sync by h
 ## Install
 
 ```bash
-cargo build --release               # binary at target/release/aag
+npm install -g @waifucorp/aag
 ```
 
-Tagged releases (`v*`) ship prebuilt binaries for linux/macos/windows (x64 + arm64), wrapped by `npm/` as `@thewaifucorp/aag` — end users never compile anything.
+That's it — postinstall downloads the prebuilt binary for your platform (linux/macos/windows, x64 + arm64) from [GitHub Releases](https://github.com/thewaifucorp/above-all-graphs/releases); nothing compiles.
+
+Building from source instead:
+
+```bash
+git clone https://github.com/thewaifucorp/above-all-graphs
+cd above-all-graphs && cargo build --release   # binary at target/release/aag
+```
 
 ## Why
 
