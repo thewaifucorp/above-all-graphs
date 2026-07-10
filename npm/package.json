@@ -1,5 +1,5 @@
 {
-  "name": "@thewaifucorp/aag",
+  "name": "@waifucorp/aag",
   "version": "0.1.0",
   "description": "AboveAllGraphs — code knowledge graph that installs itself, stays fresh, and works with every coding agent. This package only downloads the prebuilt Rust binary for your platform; nothing is compiled.",
   "license": "MIT",
