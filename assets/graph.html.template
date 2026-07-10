@@ -1,0 +1,1611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>aag — graph</title>
+<style>
+  /* Visual identity shared with samvrai-home: neutral near-black surfaces,
+     warm off-white text, JetBrains Mono, red/yellow accents, and the
+     "spectrum" rainbow line as the brand signature. */
+  :root {
+    --bg-0:           #0a0a0a;
+    --bg-1:           #121212;
+    --bg-2:           #1c1c1c;
+    --border:         #262624;
+    --border-bright:  #373531;
+    --text-primary:   #f2f2ee;
+    --text-secondary: #8a8a84;
+    --text-dim:       #63635e;
+    --accent:         #ffc600;
+    --accent-dim:     rgba(255, 198, 0, 0.10);
+    --red:            #c1121f;
+    --red-bright:     #da3610;
+    --mono:           "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --spectrum:       linear-gradient(90deg, #ff3b3b, #ffcf3b, #3bff6e, #3bd8ff, #7a3bff);
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--mono); overflow: hidden; }
+
+  /* ---- header ---- */
+  #header { position: fixed; top: 0; left: 0; right: 0; height: 46px; box-sizing: border-box; background: var(--bg-1); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 12px; z-index: 20; font-size: 12px; color: var(--text-secondary); }
+  #header::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--spectrum); }
+  #brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text-primary); }
+  #brand .word { font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
+  #brand .sub { color: var(--text-dim); font-size: 9px; margin-top: 1px; display: block; line-height: 1; white-space: nowrap; }
+  #repo-pill { background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-secondary); white-space: nowrap; }
+  #repo-pill b { color: var(--text-primary); font-weight: 600; }
+  /* Anchored to the true screen center (not flex-centered): siblings come
+     and go — brand hides when embedded — and the search bar must not
+     drift with them. */
+  #search-wrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(420px, 36vw); }
+  #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 8px; width: 100%; font-size: 13px; outline: none; box-sizing: border-box; }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--text-dim); }
+  #header .counts { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #header .counts b { color: var(--text-primary); font-weight: 600; }
+  #header button, #header a.hbtn { background: none; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 8px; height: 28px; cursor: pointer; font-size: 12px; padding: 0 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: color 0.12s, border-color 0.12s; }
+  #header button:hover, #header a.hbtn:hover { color: var(--text-primary); border-color: var(--border-bright); }
+  #star-btn { color: var(--accent) !important; }
+  #star-btn:hover { border-color: var(--accent) !important; }
+  /* Inside the `aag ui` shell (an iframe): the shell's top bar already
+     carries the lib-level chrome (brand, star/waifucorp) — hide those
+     duplicates. Workspace-level navigation (wiki/report links) stays:
+     that's this page's job, not the shell's — and when embedded it's the
+     ONLY navigation, so it overrides the narrow-window media query that
+     would otherwise hide it. */
+  html.embedded #brand, html.embedded #star-btn, html.embedded #waifu-btn,
+  html.embedded #repo-pill { display: none; }
+  html.embedded #header a.hbtn[href="wiki/index.html"],
+  html.embedded #header a.hbtn[href="report.html"] { display: inline-flex !important; }
+  #waifu-btn { color: var(--red-bright) !important; }
+  #waifu-btn:hover { border-color: var(--red-bright) !important; }
+  #chat-btn.active, #settings-btn.active { color: var(--accent); border-color: var(--accent); }
+  /* narrow windows: shed duplicated stats (statusbar repeats them) before the
+     right-side action buttons overflow */
+  @media (max-width: 1500px) { #header .counts { display: none; } }
+  @media (max-width: 1300px) { #repo-pill { display: none; } #brand .sub { display: none; } }
+  @media (max-width: 1100px) { #header a.hbtn[href="wiki/index.html"], #header a.hbtn[href="report.html"] { display: none; } }
+
+  /* ---- sidebar ---- */
+  /* Counts stay left, action/navigation buttons cluster right — the
+     search bar owns the true center (absolutely positioned above). */
+  #sidebar-btn { margin-left: auto; }
+  /* Thin themed scrollbar — the platform default is a bright grey slab
+     that fights the dark sidebar. */
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+  #sidebar { position: fixed; top: 46px; left: 0; bottom: 24px; width: 250px; box-sizing: border-box; background: var(--bg-1); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 15; font-size: 12px; }
+  body.sidebar-closed #sidebar { display: none; }
+  #sidebar .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  #sidebar .tabs button { flex: 1; background: none; border: none; color: var(--text-secondary); padding: 9px 0; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; }
+  #sidebar .tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+  #sidebar .tab-body { flex: 1; overflow-y: auto; padding: 8px; }
+  #tab-filters { display: none; }
+  /* explorer tree */
+  #tree details { margin-left: 0; }
+  #tree details details { margin-left: 12px; }
+  #tree summary { list-style: none; cursor: pointer; padding: 3px 6px; border-radius: 6px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; }
+  #tree summary::before { content: "\25B8"; display: inline-block; width: 12px; color: var(--text-dim); transition: transform 0.1s; }
+  #tree details[open] > summary::before { transform: rotate(90deg); }
+  #tree summary:hover { background: var(--bg-2); color: var(--text-primary); }
+  #tree .leaf { display: block; padding: 3px 6px 3px 18px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tree .leaf:hover { background: var(--bg-2); color: var(--text-primary); }
+  #tree .leaf.active { background: var(--accent-dim); color: var(--text-primary); }
+  #tree .leaf .ic { color: var(--text-dim); margin-right: 5px; }
+  /* filters */
+  .fgroup { margin-bottom: 14px; }
+  .fgroup h4 { margin: 6px 6px 6px; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  .fgroup label.frow { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; }
+  .fgroup label.frow:hover { background: var(--bg-2); color: var(--text-primary); }
+  .fgroup input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  .fgroup .frow .n { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .fgroup .mod { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; }
+  .fgroup .mod:hover { background: var(--bg-2); color: var(--text-primary); }
+  .fgroup .mod.active { background: var(--accent-dim); color: var(--text-primary); }
+  .fgroup .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .fgroup .mod .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fgroup .mod .n { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+  /* ---- status bar ---- */
+  #statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; box-sizing: border-box; background: var(--bg-1); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 12px; z-index: 20; font-size: 11px; color: var(--text-dim); }
+  #statusbar .ready { color: #3bff6e; }
+  #statusbar .right { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  /* ---- graph container (sigma renders its own canvases inside) ---- */
+  #view { position: fixed; top: 46px; bottom: 24px; left: 250px; right: 0; }
+  body.sidebar-closed #view { left: 0; }
+
+  /* ---- progress ---- */
+  #progress { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 30; background: var(--bg-0); flex-direction: column; gap: 14px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.03em; }
+  #progress .bar { width: 240px; height: 3px; background: var(--bg-2); border-radius: 2px; overflow: hidden; }
+  #progress .bar i { display: block; height: 100%; width: 0; background: var(--spectrum); border-radius: 2px; transition: width 0.1s; }
+
+  /* ---- floating panels (right) ---- */
+  .fpanel { position: fixed; top: 56px; right: 10px; bottom: 34px; width: 330px; box-sizing: border-box; background: var(--bg-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow-y: auto; font-size: 13px; display: none; z-index: 16; box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
+  #settings-panel { bottom: auto; }
+  #panel h2 { font-size: 14px; margin: 0 0 8px; color: var(--text-primary); }
+  #panel h3 { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin: 16px 0 6px; }
+  #panel p { color: var(--text-secondary); margin: 4px 0; }
+  #panel code { color: var(--accent); }
+  #panel ul { padding-left: 16px; margin: 4px 0 8px; }
+  #panel li { margin-bottom: 2px; color: var(--text-secondary); }
+  #panel li code { cursor: pointer; }
+  #panel .actions { display: flex; gap: 8px; margin-top: 10px; }
+  #panel button, #panel a.btn { background: var(--bg-2); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; text-decoration: none; display: inline-block; }
+  #panel button:hover, #panel a.btn:hover { border-color: var(--accent); }
+  #panel .comm-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  #panel .comm-chip .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  #settings-panel h3 { margin: 0 0 12px; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  #settings-panel label { display: block; margin-bottom: 12px; color: var(--text-secondary); font-size: 12px; }
+  #settings-panel label span { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  #settings-panel label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #settings-panel input[type="range"] { width: 100%; accent-color: var(--accent); }
+  #settings-panel input[type="checkbox"] { accent-color: var(--accent); }
+  #settings-panel button { width: 100%; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-primary); padding: 7px; border-radius: 8px; cursor: pointer; margin-top: 4px; }
+  #settings-panel button:hover { border-color: var(--accent); }
+  /* chat */
+  #chat-panel { display: none; flex-direction: column; width: 380px; padding: 0; overflow: hidden; }
+  #chat-panel.open { display: flex; }
+  #chat-panel .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  #chat-panel .chat-head h3 { margin: 0; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  #chat-panel .chat-head button { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); height: 24px; width: 24px; cursor: pointer; font-size: 12px; }
+  #chat-panel .chat-head button:hover, #chat-panel .chat-head button.active { color: var(--accent); border-color: var(--accent); }
+  #chat-config { display: none; padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  #chat-config.open { display: block; }
+  #chat-config label { display: block; margin-bottom: 10px; color: var(--text-secondary); font-size: 11px; }
+  #chat-config input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; background: var(--bg-0); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 6px 8px; font-size: 12px; font-family: var(--mono); }
+  #chat-config input:focus { outline: none; border-color: var(--accent); }
+  /* Provider picker: colored pill navbar (samvrai-home menu style) — each
+     provider owns a spectrum hue; active pill fills with it. */
+  #cc-providers { display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 12px; }
+  #cc-providers .pv { background: none; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 10.5px; color: var(--text-secondary); cursor: pointer; font-family: var(--mono); transition: all 0.12s; }
+  #cc-providers .pv:hover { color: var(--pv, var(--text-primary)); border-color: var(--pv, var(--border-bright)); }
+  #cc-providers .pv.active { background: var(--pv); border-color: var(--pv); color: #0b0f0d; font-weight: 700; }
+  #chat-config .cc-note { margin: 0; font-size: 10.5px; color: var(--text-dim); line-height: 1.5; }
+  #chat-msgs { flex: 1; overflow-y: auto; padding: 12px 14px; font-size: 12.5px; line-height: 1.55; }
+  #chat-msgs .empty { color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+  #chat-msgs .msg { margin-bottom: 12px; }
+  #chat-msgs .msg .who { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 3px; }
+  #chat-msgs .msg.user .who { color: var(--accent); }
+  #chat-msgs .msg .body { color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
+  #chat-msgs .msg.assistant .body { color: #d8d8d2; }
+  #chat-msgs .msg.err .body { color: var(--red-bright); }
+  #chat-msgs .body pre { background: var(--bg-0); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 11.5px; white-space: pre; margin: 6px 0; }
+  #chat-msgs .body code { background: var(--bg-0); border-radius: 3px; padding: 1px 4px; font-size: 11.5px; }
+  #chat-msgs .body pre code { background: none; padding: 0; }
+  #chat-panel .chat-input { display: flex; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
+  #chat-panel .chat-input textarea { flex: 1; resize: none; background: var(--bg-0); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 7px 10px; font-size: 12.5px; font-family: var(--mono); }
+  #chat-panel .chat-input textarea:focus { outline: none; border-color: var(--accent); }
+  #chat-panel .chat-input button { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); padding: 0 14px; cursor: pointer; font-size: 14px; }
+  #chat-panel .chat-input button:hover { border-color: var(--accent); }
+  #chat-panel .chat-input button.stop { color: var(--red-bright); }
+
+  /* ---- file modal ---- */
+  #filemodal { position: fixed; inset: 0; background: rgba(0,0,0,0.66); display: none; z-index: 40; align-items: center; justify-content: center; }
+  #filemodal .frame { background: var(--bg-1); border: 1px solid var(--border-bright); border-radius: 12px; width: min(920px, 92vw); height: 86vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,0.55); }
+  #filemodal .fm-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  #filemodal .fm-header button { background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
+  #filemodal .fm-header button:hover { color: var(--text-primary); }
+  #filemodal .fm-body { overflow: auto; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 12.5px; line-height: 1.5; }
+  #filemodal .fm-line { display: flex; }
+  #filemodal .fm-line.hl { background: var(--accent-dim); }
+  #filemodal .fm-no { width: 48px; text-align: right; padding-right: 12px; color: var(--text-dim); user-select: none; flex-shrink: 0; }
+  #filemodal .fm-code { white-space: pre; padding-right: 16px; color: #c4c9d4; }
+  .tk-k { color: #c792ea; }
+  .tk-s { color: #8fd48f; }
+  .tk-c { color: #5b6273; font-style: italic; }
+  .tk-n { color: #d9a76a; }
+  .tk-t { color: #7fb4d9; }
+</style>
+<script>if (window.self !== window.top) document.documentElement.classList.add("embedded");</script>
+</head>
+<body>
+<div id="header">
+  <a href="index.html" id="brand" title="aag home">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5.5 6 18.5M12 5.5l6 13M6.8 15.5h10.4" stroke="#373531" stroke-width="1.3"/>
+      <circle cx="12" cy="5.5" r="3" fill="#ff3b3b"/>
+      <circle cx="6" cy="18.5" r="3" fill="#ffcf3b"/>
+      <circle cx="18" cy="18.5" r="3" fill="#3bd8ff"/>
+    </svg>
+    <span><span class="word">aag</span><span class="sub">above all graphs</span></span>
+  </a>
+  <span id="repo-pill"></span>
+  <div id="search-wrap"><input id="search" type="text" placeholder="Search nodes&hellip;"></div>
+  <span class="counts"><b id="c-nodes"></b> nodes &middot; <b id="c-edges"></b> edges</span>
+  <button id="sidebar-btn" title="Toggle sidebar">&#9707;</button>
+  <button id="fit-btn" title="Fit view">&#10530;</button>
+  <a class="hbtn" href="wiki/index.html">wiki</a>
+  <a class="hbtn" href="report.html">report</a>
+  <button id="chat-btn" title="AI chat">&#10024; chat</button>
+  <a class="hbtn" id="star-btn" href="https://github.com/waifucorp/above-all-graphs" target="_blank" rel="noopener" title="Star on GitHub">&#9733; star</a>
+  <a class="hbtn" id="waifu-btn" href="https://waifucorp.org" target="_blank" rel="noopener" title="Meet WaifuCorp">&#9825; waifucorp</a>
+  <button id="settings-btn" title="Graph settings">&#9881;</button>
+</div>
+
+<div id="sidebar">
+  <div class="tabs">
+    <button id="tab-btn-explorer" class="active">Explorer</button>
+    <button id="tab-btn-filters">Filters</button>
+  </div>
+  <div class="tab-body" id="tab-explorer"><div id="tree"></div></div>
+  <div class="tab-body" id="tab-filters">
+    <div class="fgroup" id="f-kinds"><h4>Node kinds</h4></div>
+    <div class="fgroup" id="f-conf"><h4>Edge confidence</h4></div>
+    <div class="fgroup" id="f-modules"><h4>Modules</h4></div>
+  </div>
+</div>
+
+<div id="view"></div>
+<div id="progress"><div>organizing graph&hellip;</div><div class="bar"><i id="progress-fill"></i></div></div>
+
+<div id="settings-panel" class="fpanel">
+  <h3>Graph settings</h3>
+  <label class="check"><input type="checkbox" id="s-livesim"> Live simulation (uses CPU)</label>
+  <label><span>Repulsion <b id="v-repulsion"></b></span><input type="range" id="s-repulsion" min="1" max="30" step="1"></label>
+  <label><span>Gravity <b id="v-gravity"></b></span><input type="range" id="s-gravity" min="0" max="20" step="1"></label>
+  <label><span>Cluster pull <b id="v-cluster"></b></span><input type="range" id="s-cluster" min="0" max="20" step="1"></label>
+  <label><span>Node size <b id="v-scale"></b></span><input type="range" id="s-scale" min="0.5" max="2" step="0.1"></label>
+  <label><span>Label density <b id="v-labels"></b></span><input type="range" id="s-labels" min="1" max="10" step="0.5"></label>
+  <label><span>Edge opacity <b id="v-edges"></b></span><input type="range" id="s-edges" min="0.05" max="0.7" step="0.05"></label>
+  <button id="s-relayout">Re-run layout</button>
+  <button id="s-reset">Reset to defaults</button>
+</div>
+
+<div id="panel" class="fpanel"></div>
+
+<div id="chat-panel" class="fpanel">
+  <div class="chat-head">
+    <h3>AI chat</h3>
+    <button id="chat-config-btn" title="Provider settings">&#9881;</button>
+  </div>
+  <div id="chat-config">
+    <label>Provider</label>
+    <div id="cc-providers"></div>
+    <label>Model <input id="cc-model" type="text" spellcheck="false"></label>
+    <label id="cc-key-row">API key <input id="cc-key" type="password" placeholder="sk-&hellip;" spellcheck="false"></label>
+    <label id="cc-url-row" style="display:none"><span id="cc-url-label">Base URL</span> <input id="cc-url" type="text" spellcheck="false"></label>
+    <p class="cc-note">Key stays in this browser (localStorage) and goes straight to the provider &mdash; no middleman server.</p>
+  </div>
+  <div id="chat-msgs"><div class="empty">Ask anything about this codebase &mdash; the graph (nodes, edges, callers) plus relevant source snippets are sent as context.<br><br>Set provider + key in &#9881; first.</div></div>
+  <div class="chat-input">
+    <textarea id="chat-text" rows="2" placeholder="Ask about this codebase&hellip;"></textarea>
+    <button id="chat-send" title="Send">&#8594;</button>
+  </div>
+</div>
+
+<div id="filemodal">
+  <div class="frame">
+    <div class="fm-header">
+      <span id="fm-title"></span>
+      <button id="fm-close">&times;</button>
+    </div>
+    <div class="fm-body" id="fm-body"></div>
+  </div>
+</div>
+
+<div id="statusbar">
+  <span class="ready">&#9679; ready</span>
+  <span>drag nodes &middot; scroll to zoom &middot; click node for source &middot; esc clears</span>
+  <span class="right" id="status-counts"></span>
+</div>
+
+<script>/*__D3_JS__*/</script>
+<script>/*__GRAPHOLOGY_JS__*/</script>
+<script>/*__SIGMA_JS__*/</script>
+<script>
+const DATA = /*__GRAPH_DATA__*/;
+const FILES = /*__FILES_DATA__*/;
+
+// Module (community) colors — muted, readable on the dark surface without
+// reading as neon. Assigned by module size; wraps past 16.
+const PALETTE = [
+  "#5e8ef7", "#4db894", "#c9a24c", "#c96a75", "#9a82d9", "#4fa8c9", "#c9825e", "#7fb85e",
+  "#b8629e", "#54b8ad", "#a8944c", "#8a7ed9", "#c96a94", "#94b85e", "#c9944c", "#6aa2d9",
+];
+const EDGE_COLOR = "#33332f";
+const EDGE_HL = "#ffc600";
+
+const DEFAULT_SETTINGS = { repulsion: 8, gravity: 6, cluster: 8, nodeScale: 1, labelDensity: 4, edgeOpacity: 0.3, liveSim: false };
+let settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("aag-graph-settings") || "{}") };
+function saveSettings() { localStorage.setItem("aag-graph-settings", JSON.stringify(settings)); }
+
+// Deterministic PRNG (mulberry32, fixed seed) — the layout must come out the
+// same every time the page opens, or the graph "moves" between visits.
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const nodes = DATA.nodes;
+const byId = new Map(nodes.map((n) => [n.id, n]));
+const links = DATA.edges.map((e) => ({ ...e, s: byId.get(e.source), t: byId.get(e.target) })).filter((e) => e.s && e.t);
+
+const degree = new Map();
+for (const e of links) {
+  degree.set(e.source, (degree.get(e.source) || 0) + 1);
+  degree.set(e.target, (degree.get(e.target) || 0) + 1);
+}
+for (const n of nodes) {
+  n.degree = degree.get(n.id) || 0;
+  n.mass = n.degree + 1;
+}
+
+// --- Community detection: deterministic label propagation ------------------
+// Each node starts as its own community and repeatedly adopts the most
+// common label among its neighbors (ties broken by smallest label, iteration
+// in id order — fully deterministic). Tiny leftover communities are folded
+// into the dominant community of their own file so stray helpers don't get
+// their own color. Surfaced in the UI as "Modules".
+function detectCommunities() {
+  const adj = new Map(nodes.map((n) => [n.id, []]));
+  for (const e of links) {
+    adj.get(e.source).push(e.target);
+    adj.get(e.target).push(e.source);
+  }
+  const label = new Map(nodes.map((n) => [n.id, n.id]));
+  const order = nodes.map((n) => n.id).sort((a, b) => a - b);
+  for (let round = 0; round < 30; round++) {
+    let changed = false;
+    for (const id of order) {
+      const counts = new Map();
+      for (const nb of adj.get(id)) {
+        const l = label.get(nb);
+        counts.set(l, (counts.get(l) || 0) + 1);
+      }
+      if (counts.size === 0) continue;
+      let best = label.get(id);
+      let bestCount = counts.get(best) || 0;
+      for (const [l, c] of counts) {
+        if (c > bestCount || (c === bestCount && l < best)) { best = l; bestCount = c; }
+      }
+      if (best !== label.get(id)) { label.set(id, best); changed = true; }
+    }
+    if (!changed) break;
+  }
+
+  const sizes = new Map();
+  for (const n of nodes) sizes.set(label.get(n.id), (sizes.get(label.get(n.id)) || 0) + 1);
+
+  const dominantByFile = new Map();
+  for (const n of nodes) {
+    const l = label.get(n.id);
+    const cur = dominantByFile.get(n.file);
+    if (!cur || sizes.get(l) > sizes.get(cur)) dominantByFile.set(n.file, l);
+  }
+  for (const n of nodes) {
+    if (sizes.get(label.get(n.id)) < 3) {
+      const dom = dominantByFile.get(n.file);
+      if (dom !== undefined && sizes.get(dom) >= 3) label.set(n.id, dom);
+    }
+  }
+
+  // Renumber by community size so index 0 = biggest = first palette color.
+  const finalSizes = new Map();
+  for (const n of nodes) finalSizes.set(label.get(n.id), (finalSizes.get(label.get(n.id)) || 0) + 1);
+  const ranked = [...finalSizes.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([l]) => l);
+  const indexOf = new Map(ranked.map((l, i) => [l, i]));
+  for (const n of nodes) n.community = indexOf.get(label.get(n.id));
+  return ranked.length;
+}
+
+const communityCount = detectCommunities();
+const communityColor = (c) => PALETTE[c % PALETTE.length];
+
+// Human-readable module names: the most common directory among members
+// plus the highest-degree symbol, e.g. "src/ · resolve_calls".
+const communityMeta = [];
+for (let c = 0; c < communityCount; c++) {
+  const members = nodes.filter((n) => n.community === c);
+  const dirCount = new Map();
+  for (const m of members) {
+    const dir = m.file.includes("/") ? m.file.slice(0, m.file.lastIndexOf("/") + 1) : "./";
+    dirCount.set(dir, (dirCount.get(dir) || 0) + 1);
+  }
+  const topDir = [...dirCount.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
+  const top = members.slice().sort((a, b) => b.degree - a.degree || a.id - b.id)[0];
+  communityMeta.push({ id: c, size: members.length, name: `${topDir} · ${top.name}` });
+}
+
+// --- Layout: ForceAtlas2 (Barnes-Hut via d3.quadtree) + noverlap -----------
+// Per SPEC section 6: GitNexus and Graphify independently converged on
+// ForceAtlas2 — generic D3 many-body doesn't settle into legible clusters at
+// real-repo scale. Vendored implementation, no CDN. The initial layout runs
+// to convergence behind the progress bar; drag reheats a short-lived
+// simulation (see "Live simulation"). Perpetual motion is opt-in — it costs
+// CPU, and the default must never freeze a weak machine.
+const rand = mulberry32(42);
+const radiusOf = (d) =>
+  (d.kind === "file" || d.kind === "doc" ? 6 : 3.5) * settings.nodeScale +
+  Math.min(Math.sqrt(d.degree) * 1.8, 14) * settings.nodeScale;
+
+// Seed each community on a circle so clusters start — and stay — spatially
+// separated instead of relying on the forces to untangle a random init.
+const seeds = [];
+{
+  const R = 160 + 26 * Math.sqrt(nodes.length);
+  for (let c = 0; c < communityCount; c++) {
+    const angle = (2 * Math.PI * c) / communityCount;
+    seeds.push({ x: Math.cos(angle) * R, y: Math.sin(angle) * R });
+  }
+  for (const n of nodes) {
+    const s = seeds[n.community];
+    const spread = 30 + 14 * Math.sqrt(communityMeta[n.community].size);
+    const a = rand() * 2 * Math.PI;
+    const r = Math.sqrt(rand()) * spread;
+    n.x = s.x + Math.cos(a) * r;
+    n.y = s.y + Math.sin(a) * r;
+  }
+}
+
+function accumulateMass(quad) {
+  if (quad.length) {
+    let m = 0, x = 0, y = 0;
+    for (let i = 0; i < 4; i++) {
+      const q = quad[i];
+      if (q && q.m) { m += q.m; x += q.x * q.m; y += q.y * q.m; }
+    }
+    quad.m = m; quad.x = x / m; quad.y = y / m;
+  } else {
+    let m = 0, q = quad;
+    do { m += q.data.mass; } while ((q = q.next));
+    quad.m = m; quad.x = quad.data.x; quad.y = quad.data.y;
+  }
+}
+
+// `stepFloor` is the minimum per-tick displacement: 0.4 during the initial
+// layout so convergence never stalls, 0 during the live simulation so idle
+// motion stays subtle instead of jittering forever.
+function fa2Step(alpha, stepFloor = 0.4) {
+  const kr = settings.repulsion;
+  const kg = settings.gravity * 0.12;
+  const kc = settings.cluster * 0.1;
+  for (const n of nodes) { n.dx = 0; n.dy = 0; }
+
+  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
+  tree.visitAfter(accumulateMass);
+  const theta2 = 1.2 * 1.2;
+
+  for (const n of nodes) {
+    tree.visit((quad, x0, y0, x1, y1) => {
+      if (!quad.m) return true;
+      const w = x1 - x0;
+      let dx = n.x - quad.x, dy = n.y - quad.y;
+      const dist2 = dx * dx + dy * dy;
+      if ((w * w) / theta2 < dist2) {
+        // Far region: treat as one body. FA2 repulsion F ∝ mass·mass / d.
+        const f = (kr * n.mass * quad.m) / Math.max(dist2, 1);
+        n.dx += dx * f; n.dy += dy * f;
+        return true;
+      }
+      if (quad.length) return false;
+      let q = quad;
+      do {
+        if (q.data !== n) {
+          let ddx = n.x - q.data.x, ddy = n.y - q.data.y;
+          let dd2 = ddx * ddx + ddy * ddy;
+          if (dd2 < 0.01) { ddx = rand() - 0.5; ddy = rand() - 0.5; dd2 = ddx * ddx + ddy * ddy; }
+          const f = (kr * n.mass * q.data.mass) / dd2;
+          n.dx += ddx * f; n.dy += ddy * f;
+        }
+      } while ((q = q.next));
+      return true;
+    });
+  }
+
+  // Attraction: linear in distance, hub-dissuaded (divide by source mass) so
+  // god nodes don't collapse their whole neighborhood onto themselves.
+  for (const e of links) {
+    const dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
+    e.s.dx += dx / e.s.mass; e.s.dy += dy / e.s.mass;
+    e.t.dx -= dx / e.t.mass; e.t.dy -= dy / e.t.mass;
+  }
+
+  for (const n of nodes) {
+    // Gravity toward origin keeps disconnected components from drifting off.
+    // Normal FA2 gravity (unit direction × mass, NOT scaled by distance) —
+    // strong gravity crushes the community separation the seeds establish.
+    const d = Math.hypot(n.x, n.y) || 1;
+    const g = kg * n.mass;
+    n.dx -= (n.x / d) * g;
+    n.dy -= (n.y / d) * g;
+    // Community pull toward its seed — this is what keeps the colored
+    // clusters *organized* instead of interleaved.
+    const s = seeds[n.community];
+    n.dx += (s.x - n.x) * kc;
+    n.dy += (s.y - n.y) * kc;
+
+    const len = Math.hypot(n.dx, n.dy);
+    if (len > 0) {
+      const step = Math.min(len, 14 * alpha + stepFloor);
+      n.x += (n.dx / len) * step;
+      n.y += (n.dy / len) * step;
+    }
+  }
+}
+
+// Noverlap pass: after the layout settles, iteratively push overlapping
+// nodes apart so every label anchor has breathing room (the dedicated pass
+// both GitNexus and Graphify run after ForceAtlas2).
+function noverlapStep() {
+  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
+  let moved = 0;
+  for (const n of nodes) {
+    const r = radiusOf(n) + 2;
+    tree.visit((quad, x0, y0, x1, y1) => {
+      if (quad.length) return x0 > n.x + r + 30 || x1 < n.x - r - 30 || y0 > n.y + r + 30 || y1 < n.y - r - 30;
+      let q = quad;
+      do {
+        const o = q.data;
+        if (o !== n && o.id > n.id) {
+          let dx = n.x - o.x, dy = n.y - o.y;
+          let dist = Math.hypot(dx, dy);
+          const min = r + radiusOf(o) + 2;
+          if (dist < min) {
+            if (dist < 0.01) { dx = rand() - 0.5; dy = rand() - 0.5; dist = Math.hypot(dx, dy); }
+            const push = (min - dist) / dist / 2;
+            n.x += dx * push; n.y += dy * push;
+            o.x -= dx * push; o.y -= dy * push;
+            moved++;
+          }
+        }
+      } while ((q = q.next));
+      return false;
+    });
+  }
+  return moved;
+}
+
+// --- Sigma rendering ---------------------------------------------------------
+// WebGL render layer (sigma.js v2 + graphology, both vendored — no CDN).
+// Our own ForceAtlas2/noverlap physics keep computing positions on the plain
+// node objects; sigma just draws them. This is what lets the same page handle
+// multi-thousand-node repos where canvas 2D dropped frames.
+const container = document.getElementById("view");
+let selected = null;
+let hoveredNode = null;
+let isolatedCommunity = null;
+let searchQuery = "";
+const hiddenKinds = new Set();
+const hiddenConf = new Set();
+let renderer = null;
+let camera = null;
+
+// Sigma sizes are radii in px at zoom-neutral scale.
+const sizeOf = (n) =>
+  (n.kind === "file" || n.kind === "doc" ? 5 : 2.5) * settings.nodeScale +
+  Math.min(Math.sqrt(n.degree) * 1.2, 9) * settings.nodeScale;
+
+// WebGL edge colors carry no per-edge alpha, so the opacity slider maps to a
+// gray ramp against the #0a0a0a background instead.
+function edgeShade() {
+  const v = Math.round(18 + settings.edgeOpacity * 110);
+  return `rgb(${v},${v},${Math.max(0, v - 4)})`;
+}
+
+const graph = new graphology.Graph({ multi: true, type: "directed" });
+for (const n of nodes) {
+  graph.addNode(String(n.id), {
+    x: n.x, y: n.y,
+    size: sizeOf(n),
+    color: communityColor(n.community),
+    label: n.name,
+    _n: n,
+  });
+}
+{
+  let ei = 0;
+  for (const e of links) {
+    graph.addEdgeWithKey(`e${ei++}`, String(e.source), String(e.target), { size: 1, _e: e });
+  }
+}
+
+function nodeVisible(n) {
+  if (hiddenKinds.has(n.kind)) return false;
+  if (isolatedCommunity !== null && n.community !== isolatedCommunity) return false;
+  if (searchQuery && !n.name.toLowerCase().includes(searchQuery) && !n.file.toLowerCase().includes(searchQuery)) return false;
+  return true;
+}
+
+// Reducers: sigma consults these on every render — all our filter/hover/
+// isolation state lives here instead of a hand-rolled draw loop.
+function nodeReducer(key, data) {
+  const n = data._n;
+  const res = { ...data };
+  if (hiddenKinds.has(n.kind)) { res.hidden = true; return res; }
+  if (hoveredNode) {
+    const nb = neighborsOf.get(hoveredNode.id);
+    if (n !== hoveredNode && !(nb && nb.has(n.id))) { res.color = "#1a1a18"; res.label = null; }
+  } else if ((isolatedCommunity !== null || searchQuery) && !nodeVisible(n)) {
+    res.color = "#161614";
+    res.label = null;
+  }
+  if (selected && n.id === selected.id) res.highlighted = true;
+  return res;
+}
+function edgeReducer(key, data) {
+  const e = data._e;
+  const res = { ...data };
+  if (hiddenConf.has(e.confidence)) { res.hidden = true; return res; }
+  res.color = edgeShade();
+  if (hoveredNode) {
+    if (e.source === hoveredNode.id || e.target === hoveredNode.id) { res.color = EDGE_HL; res.size = 1.6; }
+    else res.hidden = true;
+  } else if ((isolatedCommunity !== null || searchQuery || hiddenKinds.size > 0) && !(nodeVisible(e.s) && nodeVisible(e.t))) {
+    res.hidden = true;
+  }
+  return res;
+}
+
+function refresh() { if (renderer) renderer.refresh(); }
+function syncGraph() {
+  for (const n of nodes) graph.mergeNodeAttributes(String(n.id), { x: n.x, y: n.y });
+}
+function syncSizes() {
+  for (const n of nodes) graph.setNodeAttribute(String(n.id), "size", sizeOf(n));
+}
+
+function labelThreshold() {
+  // slider 1..10 (default 4): higher density → lower rendered-size cutoff.
+  return Math.max(0.5, 13 - settings.labelDensity * 2);
+}
+
+function initRenderer() {
+  renderer = new Sigma(graph, container, {
+    minCameraRatio: 0.03,
+    maxCameraRatio: 20,
+    labelFont: '"JetBrains Mono", ui-monospace, monospace',
+    labelSize: 10.5,
+    labelWeight: "500",
+    labelColor: { color: "#c9c9c3" },
+    labelRenderedSizeThreshold: labelThreshold(),
+    defaultEdgeColor: edgeShade(),
+    nodeReducer,
+    edgeReducer,
+    allowInvalidContainer: true,
+    // Sigma's default hover chip is a white rounded box — repaint it dark to
+    // match the theme (also used for `highlighted` selected nodes).
+    hoverRenderer: (context, data, hsettings) => {
+      if (!data.label) return;
+      const size = hsettings.labelSize;
+      context.font = `${hsettings.labelWeight} ${size}px ${hsettings.labelFont}`;
+      const w = context.measureText(data.label).width + 12;
+      const x = data.x + data.size + 5;
+      const y = data.y;
+      context.fillStyle = "#121212";
+      context.fillRect(x - 3, y - size / 2 - 5, w, size + 10);
+      context.strokeStyle = "#373531";
+      context.strokeRect(x - 3, y - size / 2 - 5, w, size + 10);
+      context.fillStyle = "#f2f2ee";
+      context.fillText(data.label, x + 3, y + size / 3);
+    },
+  });
+  camera = renderer.getCamera();
+
+  renderer.on("enterNode", ({ node }) => {
+    hoveredNode = graph.getNodeAttribute(node, "_n");
+    container.style.cursor = "pointer";
+    refresh();
+  });
+  renderer.on("leaveNode", () => {
+    hoveredNode = null;
+    container.style.cursor = "default";
+    refresh();
+  });
+  renderer.on("clickNode", ({ node }) => {
+    selected = graph.getNodeAttribute(node, "_n");
+    showPanel(selected);
+    markTreeActive();
+    refresh();
+  });
+  renderer.on("clickStage", () => {
+    selected = null;
+    document.getElementById("panel").style.display = "none";
+    markTreeActive();
+    refresh();
+  });
+
+  // Drag: the documented sigma v2 pattern — mouse captor owns the gesture,
+  // preventSigmaDefault keeps the camera from panning underneath.
+  renderer.on("downNode", (e) => {
+    dragging = graph.getNodeAttribute(e.node, "_n");
+    dragPos = [dragging.x, dragging.y];
+    startSim(0.2);
+  });
+  renderer.getMouseCaptor().on("mousemovebody", (e) => {
+    if (!dragging) return;
+    const pos = renderer.viewportToGraph(e);
+    dragPos = [pos.x, pos.y];
+    dragging.x = pos.x;
+    dragging.y = pos.y;
+    graph.mergeNodeAttributes(String(dragging.id), { x: pos.x, y: pos.y });
+    e.preventSigmaDefault();
+    e.original.preventDefault();
+    e.original.stopPropagation();
+  });
+  renderer.getMouseCaptor().on("mouseup", () => {
+    dragging = null;
+    dragPos = null;
+  });
+  renderer.getMouseCaptor().on("mousedown", () => {
+    if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
+  });
+}
+
+function zoomToNode(n, ratio = 0.25) {
+  const p = renderer && renderer.getNodeDisplayData(String(n.id));
+  if (p) camera.animate({ x: p.x, y: p.y, ratio }, { duration: 600 });
+}
+
+function fitView(duration = 500) {
+  if (!renderer) return;
+  // 2nd/98th percentile bbox: stray disconnected nodes shouldn't shrink the
+  // fit for everything actually connected.
+  const xs = nodes.map((d) => d.x).sort((a, b) => a - b);
+  const ys = nodes.map((d) => d.y).sort((a, b) => a - b);
+  const at = (arr, p) => arr[Math.floor((arr.length - 1) * p)];
+  renderer.setCustomBBox({ x: [at(xs, 0.02), at(xs, 0.98)], y: [at(ys, 0.02), at(ys, 0.98)] });
+  if (duration === 0) camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  else camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration });
+}
+
+// --- Interaction ------------------------------------------------------------
+const neighborsOf = new Map();
+for (const e of links) {
+  (neighborsOf.get(e.source) || neighborsOf.set(e.source, new Set()).get(e.source)).add(e.target);
+  (neighborsOf.get(e.target) || neighborsOf.set(e.target, new Set()).get(e.target)).add(e.source);
+}
+
+// --- Live simulation ---------------------------------------------------------
+// Drag (or the "Live simulation" toggle) reheats fa2Step at a small decaying
+// alpha. Default OFF: the perpetual ticker costs real CPU and the graph must
+// stay smooth on weak machines — motion is opt-in, drag always works.
+let simAlpha = 0;
+let simSleeping = true;
+let simQueued = false;
+let simTickCount = 0;
+let dragging = null;
+let dragPos = null;
+
+function simFloor() {
+  return settings.liveSim && nodes.length <= 2000 ? 0.012 : 0;
+}
+
+function startSim(alpha) {
+  simAlpha = Math.max(simAlpha, alpha);
+  if (simSleeping) { simSleeping = false; scheduleSim(); }
+}
+
+function scheduleSim() {
+  if (simQueued) return;
+  simQueued = true;
+  const run = () => { if (!simQueued) return; simQueued = false; simTick(); };
+  requestAnimationFrame(run);
+  setTimeout(run, 120);
+}
+
+function simTick() {
+  if (simSleeping) return;
+  fa2Step(simAlpha, 0);
+  if (dragging && simTickCount % 3 === 0 && nodes.length <= 2000) noverlapStep();
+  if (dragging && dragPos) { dragging.x = dragPos[0]; dragging.y = dragPos[1]; }
+  simAlpha = Math.max(simAlpha * 0.95, simFloor());
+  simTickCount++;
+  syncGraph();
+  refresh();
+  if (simAlpha <= 0.004 && !dragging) {
+    simSleeping = true;
+    return;
+  }
+  scheduleSim();
+}
+
+function stopSim() {
+  simSleeping = true;
+  simQueued = false;
+  simAlpha = 0;
+}
+
+// --- Panels -----------------------------------------------------------------
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function wikiSlug(path) {
+  return path.replace(/[/\\.]/g, "_");
+}
+
+function showPanel(d) {
+  const panel = document.getElementById("panel");
+  panel.style.display = "block";
+  const callers = links.filter((l) => l.target === d.id);
+  const callees = links.filter((l) => l.source === d.id);
+  const list = (edges, key) =>
+    edges
+      .map((e) => e[key])
+      .filter(Boolean)
+      .map((n) => `<li><code data-node="${n.id}">${escapeHtml(n.name)}</code> — ${escapeHtml(n.file)}:${n.startLine}</li>`)
+      .join("");
+  const hasSource = Object.hasOwn(FILES, d.file);
+  const meta = communityMeta[d.community];
+  panel.innerHTML = `
+    <h2>${escapeHtml(d.kind)} <code>${escapeHtml(d.name)}</code></h2>
+    <p>${escapeHtml(d.file)}:${d.startLine}-${d.endLine} &middot; ${d.degree} connection(s)</p>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(d.community)}"></span>${escapeHtml(meta.name)} (${meta.size})</p>
+    <div class="actions">
+      ${hasSource ? `<button id="view-file-btn">View full file</button>` : ""}
+      <a class="btn" href="wiki/${wikiSlug(d.file)}.html">Wiki page</a>
+    </div>
+    <h3>Called by / imported by</h3><ul>${list(callers, "s") || "<li>none</li>"}</ul>
+    <h3>Calls / imports</h3><ul>${list(callees, "t") || "<li>none</li>"}</ul>
+  `;
+  if (hasSource) {
+    document.getElementById("view-file-btn").addEventListener("click", () => openFile(d.file, d.startLine, d.endLine));
+  }
+  for (const el of panel.querySelectorAll("code[data-node]")) {
+    el.addEventListener("click", () => {
+      const n = byId.get(Number(el.dataset.node));
+      if (n) { selected = n; showPanel(n); zoomToNode(n); markTreeActive(); refresh(); }
+    });
+  }
+}
+
+// --- Syntax highlighting (file modal) -----------------------------------------
+// Tiny line-based tokenizer, not a real parser: comments, strings, numbers,
+// keywords, Capitalized types. Good enough to make source readable; anything
+// unrecognized falls through unstyled.
+const LANG_KEYWORDS = {
+  rust: "as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while",
+  js: "async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new null of return static super switch this throw try typeof undefined var void while yield true false",
+  py: "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield None True False self",
+  go: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false",
+  sh: "if then else elif fi for while until do done case esac function local export return exit echo",
+  conf: "",
+};
+const EXT_LANG = { rs: "rust", js: "js", jsx: "js", ts: "js", tsx: "js", mjs: "js", cjs: "js", py: "py", go: "go", sh: "sh", bash: "sh", zsh: "sh", toml: "conf", yml: "conf", yaml: "conf", json: "conf", ini: "conf" };
+const LINE_COMMENT = { rust: "//", js: "//", go: "//", py: "#", sh: "#", conf: "#" };
+const BLOCK_COMMENT = { rust: true, js: true, go: true };
+const KEYWORD_SETS = Object.fromEntries(Object.entries(LANG_KEYWORDS).map(([l, w]) => [l, new Set(w.split(" ").filter(Boolean))]));
+const TOKEN_RES = {};
+function tokenRegex(lang) {
+  if (TOKEN_RES[lang]) return TOKEN_RES[lang];
+  const parts = [];
+  if (BLOCK_COMMENT[lang]) parts.push("\\/\\*[\\s\\S]*?\\*\\/", "\\/\\*.*$");
+  const lc = LINE_COMMENT[lang];
+  if (lc === "//") parts.push("\\/\\/.*$");
+  else if (lc === "#") parts.push("#.*$");
+  parts.push('"(?:[^"\\\\]|\\\\.)*"?', "'(?:[^'\\\\]|\\\\.)*'?", "`[^`]*`?");
+  parts.push("\\b0[xX][0-9a-fA-F_]+\\b", "\\b\\d[\\d_]*(?:\\.\\d+)?\\b");
+  parts.push("\\b[A-Za-z_]\\w*\\b");
+  TOKEN_RES[lang] = new RegExp(parts.join("|"), "g");
+  return TOKEN_RES[lang];
+}
+function langOf(file) {
+  const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
+  return EXT_LANG[ext] || null;
+}
+// `st.block` carries an open /* ... */ across lines.
+function highlightLine(raw, lang, st) {
+  if (!lang) return escapeHtml(raw);
+  let out = "";
+  let rest = raw;
+  if (st.block) {
+    const end = rest.indexOf("*/");
+    if (end === -1) return `<span class="tk-c">${escapeHtml(rest)}</span>`;
+    out += `<span class="tk-c">${escapeHtml(rest.slice(0, end + 2))}</span>`;
+    st.block = false;
+    rest = rest.slice(end + 2);
+  }
+  const kw = KEYWORD_SETS[lang];
+  const re = tokenRegex(lang);
+  re.lastIndex = 0;
+  let last = 0;
+  let m;
+  while ((m = re.exec(rest)) !== null) {
+    out += escapeHtml(rest.slice(last, m.index));
+    const tok = m[0];
+    let cls = null;
+    const c0 = tok[0];
+    if (tok.startsWith("//") || (c0 === "#" && LINE_COMMENT[lang] === "#")) cls = "tk-c";
+    else if (tok.startsWith("/*")) {
+      cls = "tk-c";
+      if (!tok.endsWith("*/")) st.block = true;
+    } else if (c0 === '"' || c0 === "'" || c0 === "`") cls = "tk-s";
+    else if (c0 >= "0" && c0 <= "9") cls = "tk-n";
+    else if (kw.has(tok)) cls = "tk-k";
+    else if (c0 >= "A" && c0 <= "Z") cls = "tk-t";
+    out += cls ? `<span class="${cls}">${escapeHtml(tok)}</span>` : escapeHtml(tok);
+    last = m.index + tok.length;
+  }
+  out += escapeHtml(rest.slice(last));
+  return out;
+}
+
+function openFile(file, startLine, endLine) {
+  const content = FILES[file];
+  if (content === undefined) return;
+  document.getElementById("fm-title").textContent = file;
+  const lang = langOf(file);
+  const st = { block: false };
+  const lines = content.split("\n");
+  const body = lines
+    .map((line, i) => {
+      const n = i + 1;
+      const hl = n >= startLine && n <= endLine ? " hl" : "";
+      return `<div class="fm-line${hl}" data-line="${n}"><span class="fm-no">${n}</span><span class="fm-code">${highlightLine(line, lang, st)}</span></div>`;
+    })
+    .join("");
+  const modal = document.getElementById("filemodal");
+  const fmBody = document.getElementById("fm-body");
+  fmBody.innerHTML = body;
+  modal.style.display = "flex";
+  const target = fmBody.querySelector(`[data-line="${startLine}"]`);
+  if (target) target.scrollIntoView({ block: "center" });
+}
+
+document.getElementById("fm-close").addEventListener("click", () => {
+  document.getElementById("filemodal").style.display = "none";
+});
+document.getElementById("filemodal").addEventListener("click", (event) => {
+  if (event.target.id === "filemodal") event.target.style.display = "none";
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const modal = document.getElementById("filemodal");
+  if (modal.style.display === "flex") { modal.style.display = "none"; return; }
+  const chat = document.getElementById("chat-panel");
+  if (chat.classList.contains("open")) { toggleChat(false); return; }
+  if (isolatedCommunity !== null) { setIsolated(null); return; }
+  selected = null;
+  document.getElementById("panel").style.display = "none";
+  markTreeActive();
+  refresh();
+});
+
+document.getElementById("search").addEventListener("input", (event) => {
+  searchQuery = event.target.value.trim().toLowerCase();
+  refresh();
+});
+document.getElementById("search").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !searchQuery) return;
+  const hit = nodes.find((n) => nodeVisible(n) && n.name.toLowerCase().includes(searchQuery));
+  if (hit) { selected = hit; showPanel(hit); zoomToNode(hit); markTreeActive(); }
+});
+
+// --- Sidebar: explorer tree ---------------------------------------------------
+function focusNode(n) {
+  selected = n;
+  showPanel(n);
+  zoomToNode(n);
+  markTreeActive();
+  refresh();
+}
+
+function buildTree() {
+  // One entry per file/doc node; nested by directory.
+  const root = { dirs: new Map(), files: [] };
+  const entries = nodes.filter((n) => n.kind === "file" || n.kind === "doc");
+  entries.sort((a, b) => (a.file < b.file ? -1 : 1));
+  for (const n of entries) {
+    const parts = n.file.split("/");
+    let cur = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!cur.dirs.has(parts[i])) cur.dirs.set(parts[i], { dirs: new Map(), files: [] });
+      cur = cur.dirs.get(parts[i]);
+    }
+    cur.files.push({ name: parts[parts.length - 1], node: n });
+  }
+  const render = (dir, depth) => {
+    let html = "";
+    for (const [name, sub] of [...dir.dirs.entries()].sort()) {
+      html += `<details${depth < 2 ? " open" : ""}><summary>${escapeHtml(name)}/</summary>${render(sub, depth + 1)}</details>`;
+    }
+    for (const f of dir.files) {
+      const ic = f.node.kind === "doc" ? "&#9671;" : "&#9642;";
+      html += `<span class="leaf" data-node="${f.node.id}"><span class="ic">${ic}</span>${escapeHtml(f.name)}</span>`;
+    }
+    return html;
+  };
+  const tree = document.getElementById("tree");
+  tree.innerHTML = render(root, 0);
+  for (const el of tree.querySelectorAll(".leaf")) {
+    el.addEventListener("click", () => {
+      const n = byId.get(Number(el.dataset.node));
+      if (n) focusNode(n);
+    });
+  }
+}
+
+function markTreeActive() {
+  for (const el of document.querySelectorAll("#tree .leaf")) {
+    el.classList.toggle("active", selected !== null && Number(el.dataset.node) === selected.id);
+  }
+}
+
+// --- Sidebar: filters ----------------------------------------------------------
+function setIsolated(c) {
+  isolatedCommunity = c;
+  for (const el of document.querySelectorAll("#f-modules .mod")) {
+    el.classList.toggle("active", Number(el.dataset.c) === c);
+  }
+  refresh();
+}
+
+function buildFilters() {
+  // Node kinds present in this graph, files first.
+  const kindCounts = new Map();
+  for (const n of nodes) kindCounts.set(n.kind, (kindCounts.get(n.kind) || 0) + 1);
+  const kindOrder = ["file", "doc", ...[...kindCounts.keys()].filter((k) => k !== "file" && k !== "doc").sort()];
+  const fk = document.getElementById("f-kinds");
+  fk.insertAdjacentHTML(
+    "beforeend",
+    kindOrder
+      .filter((k) => kindCounts.has(k))
+      .map((k) => `<label class="frow"><input type="checkbox" checked data-kind="${k}">${k}<span class="n">${kindCounts.get(k)}</span></label>`)
+      .join("")
+  );
+  for (const box of fk.querySelectorAll("input")) {
+    box.addEventListener("change", () => {
+      box.checked ? hiddenKinds.delete(box.dataset.kind) : hiddenKinds.add(box.dataset.kind);
+      refresh();
+    });
+  }
+
+  const confCounts = new Map();
+  for (const e of links) confCounts.set(e.confidence, (confCounts.get(e.confidence) || 0) + 1);
+  const fc = document.getElementById("f-conf");
+  fc.insertAdjacentHTML(
+    "beforeend",
+    ["EXTRACTED", "INFERRED", "AMBIGUOUS"]
+      .filter((c) => confCounts.has(c))
+      .map((c) => `<label class="frow"><input type="checkbox" checked data-conf="${c}">${c.toLowerCase()}<span class="n">${confCounts.get(c)}</span></label>`)
+      .join("")
+  );
+  for (const box of fc.querySelectorAll("input")) {
+    box.addEventListener("change", () => {
+      box.checked ? hiddenConf.delete(box.dataset.conf) : hiddenConf.add(box.dataset.conf);
+      refresh();
+    });
+  }
+
+  const fm = document.getElementById("f-modules");
+  fm.insertAdjacentHTML(
+    "beforeend",
+    communityMeta
+      .map(
+        (m) =>
+          `<div class="mod" data-c="${m.id}"><span class="dot" style="background:${communityColor(m.id)}"></span><span class="name">${escapeHtml(m.name)}</span><span class="n">${m.size}</span></div>`
+      )
+      .join("")
+  );
+  for (const el of fm.querySelectorAll(".mod")) {
+    el.addEventListener("click", () => {
+      const c = Number(el.dataset.c);
+      setIsolated(isolatedCommunity === c ? null : c);
+    });
+  }
+}
+
+// Tabs
+function selectTab(which) {
+  document.getElementById("tab-btn-explorer").classList.toggle("active", which === "explorer");
+  document.getElementById("tab-btn-filters").classList.toggle("active", which === "filters");
+  document.getElementById("tab-explorer").style.display = which === "explorer" ? "block" : "none";
+  document.getElementById("tab-filters").style.display = which === "filters" ? "block" : "none";
+}
+document.getElementById("tab-btn-explorer").addEventListener("click", () => selectTab("explorer"));
+document.getElementById("tab-btn-filters").addEventListener("click", () => selectTab("filters"));
+document.getElementById("sidebar-btn").addEventListener("click", () => {
+  document.body.classList.toggle("sidebar-closed");
+  if (renderer) renderer.resize();
+  fitView(300);
+});
+
+// --- AI chat -----------------------------------------------------------------
+// Multi-provider chat grounded on this graph (SPEC section 8, task 3).
+// The page is static and offline, so the browser calls the provider directly
+// with the user's own key — Anthropic via /v1/messages (with the documented
+// browser-access header), OpenAI via /v1/chat/completions, Ollama locally.
+// The key never touches any server of ours; it lives in localStorage only.
+function toggleChat(force) {
+  const chat = document.getElementById("chat-panel");
+  const open = force !== undefined ? force : !chat.classList.contains("open");
+  chat.classList.toggle("open", open);
+  document.getElementById("chat-btn").classList.toggle("active", open);
+  if (open) {
+    document.getElementById("panel").style.display = "none";
+    document.getElementById("chat-text").focus();
+  }
+}
+document.getElementById("chat-btn").addEventListener("click", () => toggleChat());
+
+// Provider registry — same roster GitNexus exposes. `compat` marks an
+// OpenAI-compatible /chat/completions endpoint; anthropic/gemini/azure have
+// their own wire formats. Colors follow the samvrai spectrum.
+const CHAT_PROVIDERS = {
+  anthropic:      { label: "Anthropic",  color: "#ff8a3b", model: "claude-opus-4-8", needsKey: true },
+  openai:         { label: "OpenAI",     color: "#3bff6e", model: "gpt-4o-mini", compat: "https://api.openai.com/v1", needsKey: true },
+  "azure-openai": { label: "Azure",      color: "#3bd8ff", model: "gpt-4o-mini", needsKey: true, needsUrl: true, urlLabel: "Azure endpoint", urlPlaceholder: "https://<resource>.openai.azure.com" },
+  gemini:         { label: "Gemini",     color: "#7a3bff", model: "gemini-2.0-flash", needsKey: true },
+  openrouter:     { label: "OpenRouter", color: "#ff3b3b", model: "openrouter/auto", compat: "https://openrouter.ai/api/v1", needsKey: true },
+  minimax:        { label: "MiniMax",    color: "#f06292", model: "MiniMax-M2", compat: "https://api.minimax.io/v1", needsKey: true },
+  glm:            { label: "GLM",        color: "#ffcf3b", model: "glm-4.6", compat: "https://api.z.ai/api/paas/v4", needsKey: true },
+  ollama:         { label: "Ollama",     color: "#f2f2ee", model: "llama3.1", needsUrl: true, urlLabel: "Ollama URL", urlPlaceholder: "http://localhost:11434", defaultUrl: "http://localhost:11434" },
+};
+let chatCfg = {
+  provider: "anthropic",
+  keys: {},
+  urls: { ollama: "http://localhost:11434" },
+  models: {},
+  ...JSON.parse(localStorage.getItem("aag-chat-config") || "{}"),
+};
+// migrate the earlier single-key shape
+if (chatCfg.key && !chatCfg.keys[chatCfg.provider]) chatCfg.keys[chatCfg.provider] = chatCfg.key;
+if (chatCfg.url && !chatCfg.urls.ollama) chatCfg.urls.ollama = chatCfg.url;
+chatCfg.keys = chatCfg.keys || {};
+chatCfg.urls = chatCfg.urls || {};
+for (const [p, def] of Object.entries(CHAT_PROVIDERS)) {
+  if (!chatCfg.models[p]) chatCfg.models[p] = def.model;
+}
+if (!CHAT_PROVIDERS[chatCfg.provider]) chatCfg.provider = "anthropic";
+function saveChatCfg() { localStorage.setItem("aag-chat-config", JSON.stringify(chatCfg)); }
+const chatKey = () => chatCfg.keys[chatCfg.provider] || "";
+const chatUrl = () => chatCfg.urls[chatCfg.provider] || CHAT_PROVIDERS[chatCfg.provider].defaultUrl || "";
+
+// Stable graph digest: goes first in the system prompt so Anthropic's prompt
+// cache (prefix match) can reuse it across questions.
+const CHAT_SYSTEM = (() => {
+  const files = nodes.filter((n) => n.kind === "file");
+  const fileLines = files
+    .map((f) => {
+      const syms = nodes.filter((n) => n.file === f.file && n.kind !== "file" && n.kind !== "doc").length;
+      return `- ${f.file} (${syms} symbols)`;
+    })
+    .join("\n");
+  const hubs = nodes
+    .slice()
+    .sort((a, b) => b.degree - a.degree)
+    .slice(0, 14)
+    .map((n) => `- ${n.name} (${n.kind}, ${n.file}:${n.startLine}, ${n.degree} connections)`)
+    .join("\n");
+  const mods = communityMeta.map((m) => `- ${m.name} (${m.size} nodes)`).join("\n");
+  return (
+    `You are the assistant embedded in aag ("above all graphs"), an offline code-graph explorer. ` +
+    `You are looking at the indexed repository "__REPO_NAME__" (${nodes.length} nodes, ${links.length} edges). ` +
+    `Answer questions about this codebase using the graph data and source snippets provided. ` +
+    `Cite locations as file:line. If the provided context is not enough, say what is missing instead of guessing.\n\n` +
+    `Files:\n${fileLines}\n\nMost connected symbols:\n${hubs}\n\nModules (detected communities):\n${mods}`
+  );
+})();
+
+// Per-question retrieval: match query words against node names/files, ship
+// the best nodes with their edges and a source slice as context.
+function chatRetrieve(question) {
+  const words = [...new Set(question.toLowerCase().match(/[a-z_][a-z0-9_]{2,}/g) || [])];
+  if (words.length === 0) return "";
+  const scored = [];
+  for (const n of nodes) {
+    const name = n.name.toLowerCase();
+    const file = n.file.toLowerCase();
+    let score = 0;
+    for (const w of words) {
+      if (name === w) score += 6;
+      else if (name.includes(w)) score += 3;
+      if (file.includes(w)) score += 1;
+    }
+    if (score > 0) scored.push([score + Math.min(n.degree, 10) * 0.1, n]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  const parts = [];
+  let budget = 9000;
+  for (const [, n] of scored.slice(0, 6)) {
+    const callers = links.filter((l) => l.target === n.id).slice(0, 8).map((l) => `${l.s.name} (${l.s.file}:${l.s.startLine})`);
+    const callees = links.filter((l) => l.source === n.id).slice(0, 8).map((l) => `${l.t.name} (${l.t.file}:${l.t.startLine})`);
+    let block = `### ${n.kind} ${n.name} — ${n.file}:${n.startLine}-${n.endLine}\n`;
+    if (callers.length) block += `Called by: ${callers.join(", ")}\n`;
+    if (callees.length) block += `Calls: ${callees.join(", ")}\n`;
+    const src = FILES[n.file];
+    if (src && n.kind !== "file" && n.kind !== "doc") {
+      const all = src.split("\n");
+      const from = Math.max(0, n.startLine - 1);
+      const to = Math.min(all.length, Math.min(n.endLine, n.startLine + 60));
+      block += "```\n" + all.slice(from, to).join("\n") + "\n```\n";
+    }
+    if (budget - block.length < 0) break;
+    budget -= block.length;
+    parts.push(block);
+  }
+  return parts.length ? `\n\n<graph_context>\n${parts.join("\n")}</graph_context>` : "";
+}
+
+const chatHistory = []; // [{role, content}] — full contents incl. retrieval blocks
+let chatAbort = null;
+
+function chatMdLite(text) {
+  // fences first, then inline code, on escaped text
+  const esc = escapeHtml(text);
+  let out = "";
+  const segs = esc.split(/```[a-zA-Z]*\n?/);
+  for (let i = 0; i < segs.length; i++) {
+    if (i % 2 === 1) out += `<pre><code>${segs[i]}</code></pre>`;
+    else out += segs[i].replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  }
+  return out;
+}
+
+function chatAddMsg(cls, who) {
+  const msgs = document.getElementById("chat-msgs");
+  const empty = msgs.querySelector(".empty");
+  if (empty) empty.remove();
+  const div = document.createElement("div");
+  div.className = `msg ${cls}`;
+  div.innerHTML = `<div class="who">${who}</div><div class="body"></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div.querySelector(".body");
+}
+
+// Shared line reader over a streaming fetch body.
+async function chatReadLines(resp, onLine) {
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const line of lines) onLine(line);
+  }
+  if (buf) onLine(buf);
+}
+
+// OpenAI-compatible SSE — serves OpenAI, OpenRouter, MiniMax, GLM and Azure
+// (Azure differs only in URL shape and auth header).
+async function openaiCompatStream(url, headers, model, onText, signal) {
+  const resp = await fetch(url, {
+    method: "POST",
+    signal,
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      messages: [{ role: "system", content: CHAT_SYSTEM }, ...chatHistory],
+    }),
+  });
+  if (!resp.ok) throw new Error(await chatApiError(resp));
+  await chatReadLines(resp, (line) => {
+    if (!line.startsWith("data: ") || line.includes("[DONE]")) return;
+    const data = JSON.parse(line.slice(6));
+    const text = data.choices?.[0]?.delta?.content;
+    if (text) onText(text);
+  });
+}
+
+async function chatStream(onText, signal) {
+  const p = chatCfg.provider;
+  const def = CHAT_PROVIDERS[p];
+  const model = chatCfg.models[p];
+  const key = chatKey();
+  if (p === "anthropic") {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal,
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 64000,
+        stream: true,
+        system: [{ type: "text", text: CHAT_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: chatHistory,
+      }),
+    });
+    if (!resp.ok) throw new Error(await chatApiError(resp));
+    await chatReadLines(resp, (line) => {
+      if (!line.startsWith("data: ")) return;
+      const data = JSON.parse(line.slice(6));
+      if (data.type === "content_block_delta" && data.delta.type === "text_delta") onText(data.delta.text);
+      if (data.type === "error") throw new Error(data.error.message);
+    });
+  } else if (p === "gemini") {
+    const contents = chatHistory.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`,
+      {
+        method: "POST",
+        signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: CHAT_SYSTEM }] }, contents }),
+      }
+    );
+    if (!resp.ok) throw new Error(await chatApiError(resp));
+    await chatReadLines(resp, (line) => {
+      if (!line.startsWith("data: ")) return;
+      const data = JSON.parse(line.slice(6));
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) if (part.text) onText(part.text);
+    });
+  } else if (p === "azure-openai") {
+    const base = chatUrl().replace(/\/$/, "");
+    if (!base) throw new Error("Set your Azure endpoint URL first (⚙).");
+    await openaiCompatStream(
+      `${base}/openai/deployments/${encodeURIComponent(model)}/chat/completions?api-version=2024-10-21`,
+      { "api-key": key },
+      model,
+      onText,
+      signal
+    );
+  } else if (def.compat) {
+    await openaiCompatStream(`${def.compat}/chat/completions`, { authorization: `Bearer ${key}` }, model, onText, signal);
+  } else {
+    // ollama
+    const base = chatUrl().replace(/\/$/, "");
+    let resp;
+    try {
+      resp = await fetch(`${base}/api/chat`, {
+        method: "POST",
+        signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model,
+          stream: true,
+          messages: [{ role: "system", content: CHAT_SYSTEM }, ...chatHistory],
+        }),
+      });
+    } catch (e) {
+      throw new Error(`Could not reach Ollama at ${base}. Is it running? For pages opened from file://, start it with OLLAMA_ORIGINS="*".`);
+    }
+    if (!resp.ok) throw new Error(await chatApiError(resp));
+    await chatReadLines(resp, (line) => {
+      if (!line.trim()) return;
+      const data = JSON.parse(line);
+      if (data.message?.content) onText(data.message.content);
+      if (data.error) throw new Error(data.error);
+    });
+  }
+}
+
+async function chatApiError(resp) {
+  try {
+    const j = await resp.json();
+    return j.error?.message || j.error || `HTTP ${resp.status}`;
+  } catch {
+    return `HTTP ${resp.status}`;
+  }
+}
+
+async function chatSend() {
+  const ta = document.getElementById("chat-text");
+  const btn = document.getElementById("chat-send");
+  const question = ta.value.trim();
+  if (!question || chatAbort) return;
+  if (CHAT_PROVIDERS[chatCfg.provider].needsKey && !chatKey()) {
+    toggleChatConfig(true);
+    chatAddMsg("assistant err", "aag").textContent = "Set an API key first (⚙ in the chat header).";
+    return;
+  }
+  ta.value = "";
+  chatAddMsg("user", "you").textContent = question;
+  chatHistory.push({ role: "user", content: question + chatRetrieve(question) });
+
+  const body = chatAddMsg("assistant", chatCfg.provider);
+  body.textContent = "…";
+  btn.textContent = "■";
+  btn.classList.add("stop");
+  chatAbort = new AbortController();
+  let full = "";
+  const msgs = document.getElementById("chat-msgs");
+  try {
+    await chatStream((text) => {
+      if (full === "") body.textContent = "";
+      full += text;
+      body.textContent = full;
+      msgs.scrollTop = msgs.scrollHeight;
+    }, chatAbort.signal);
+    body.innerHTML = chatMdLite(full);
+    chatHistory.push({ role: "assistant", content: full });
+  } catch (e) {
+    if (e.name === "AbortError") {
+      if (full) chatHistory.push({ role: "assistant", content: full });
+      body.innerHTML = chatMdLite(full) + `<div style="color:var(--text-dim)">— stopped —</div>`;
+    } else {
+      chatHistory.pop(); // failed turn: drop the user message so a retry is clean
+      body.parentElement.classList.add("err");
+      body.textContent = String(e.message || e);
+    }
+  } finally {
+    chatAbort = null;
+    btn.textContent = "→";
+    btn.classList.remove("stop");
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+document.getElementById("chat-send").addEventListener("click", () => {
+  if (chatAbort) chatAbort.abort();
+  else chatSend();
+});
+document.getElementById("chat-text").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    chatSend();
+  }
+});
+
+// Provider config UI
+function toggleChatConfig(force) {
+  const box = document.getElementById("chat-config");
+  const open = force !== undefined ? force : !box.classList.contains("open");
+  box.classList.toggle("open", open);
+  document.getElementById("chat-config-btn").classList.toggle("active", open);
+}
+document.getElementById("chat-config-btn").addEventListener("click", () => toggleChatConfig());
+
+function buildProviderPills() {
+  const box = document.getElementById("cc-providers");
+  box.innerHTML = Object.entries(CHAT_PROVIDERS)
+    .map(([id, def]) => `<button class="pv" data-p="${id}" style="--pv:${def.color}">${def.label}</button>`)
+    .join("");
+  for (const el of box.querySelectorAll(".pv")) {
+    el.addEventListener("click", () => {
+      chatCfg.provider = el.dataset.p;
+      saveChatCfg();
+      syncChatConfigUI();
+    });
+  }
+}
+
+function syncChatConfigUI() {
+  const def = CHAT_PROVIDERS[chatCfg.provider];
+  for (const el of document.querySelectorAll("#cc-providers .pv")) {
+    el.classList.toggle("active", el.dataset.p === chatCfg.provider);
+  }
+  document.getElementById("cc-model").value = chatCfg.models[chatCfg.provider];
+  document.getElementById("cc-key").value = chatKey();
+  document.getElementById("cc-key-row").style.display = def.needsKey ? "block" : "none";
+  document.getElementById("cc-url-row").style.display = def.needsUrl ? "block" : "none";
+  if (def.needsUrl) {
+    document.getElementById("cc-url-label").textContent = def.urlLabel;
+    const urlInput = document.getElementById("cc-url");
+    urlInput.placeholder = def.urlPlaceholder || "";
+    urlInput.value = chatCfg.urls[chatCfg.provider] || def.defaultUrl || "";
+  }
+}
+document.getElementById("cc-model").addEventListener("input", (event) => {
+  chatCfg.models[chatCfg.provider] = event.target.value.trim();
+  saveChatCfg();
+});
+document.getElementById("cc-key").addEventListener("input", (event) => {
+  chatCfg.keys[chatCfg.provider] = event.target.value.trim();
+  saveChatCfg();
+});
+document.getElementById("cc-url").addEventListener("input", (event) => {
+  chatCfg.urls[chatCfg.provider] = event.target.value.trim();
+  saveChatCfg();
+});
+buildProviderPills();
+syncChatConfigUI();
+if (CHAT_PROVIDERS[chatCfg.provider].needsKey && !chatKey()) toggleChatConfig(true);
+
+// --- Settings ---------------------------------------------------------------
+const sliders = {
+  repulsion: { input: "s-repulsion", out: "v-repulsion", fmt: (v) => v },
+  gravity: { input: "s-gravity", out: "v-gravity", fmt: (v) => v },
+  cluster: { input: "s-cluster", out: "v-cluster", fmt: (v) => v },
+  nodeScale: { input: "s-scale", out: "v-scale", fmt: (v) => `${v}x` },
+  labelDensity: { input: "s-labels", out: "v-labels", fmt: (v) => v },
+  edgeOpacity: { input: "s-edges", out: "v-edges", fmt: (v) => v },
+};
+function syncSlidersFromSettings() {
+  for (const [key, { input, out, fmt }] of Object.entries(sliders)) {
+    document.getElementById(input).value = settings[key];
+    document.getElementById(out).textContent = fmt(settings[key]);
+  }
+  document.getElementById("s-livesim").checked = settings.liveSim;
+}
+for (const [key, { input, out, fmt }] of Object.entries(sliders)) {
+  document.getElementById(input).addEventListener("input", (event) => {
+    settings[key] = Number(event.target.value);
+    document.getElementById(out).textContent = fmt(settings[key]);
+    saveSettings();
+    if (key === "nodeScale") syncSizes();
+    if (key === "labelDensity" && renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+    refresh();
+  });
+}
+document.getElementById("s-reset").addEventListener("click", () => {
+  settings = { ...DEFAULT_SETTINGS };
+  saveSettings();
+  syncSlidersFromSettings();
+  syncSizes();
+  if (renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+  refresh();
+});
+document.getElementById("s-livesim").addEventListener("change", (event) => {
+  settings.liveSim = event.target.checked;
+  saveSettings();
+  if (settings.liveSim) startSim(0.03);
+});
+document.getElementById("s-relayout").addEventListener("click", () => runLayout(true));
+document.getElementById("fit-btn").addEventListener("click", () => fitView(500));
+document.getElementById("settings-btn").addEventListener("click", () => {
+  const panel = document.getElementById("settings-panel");
+  const open = panel.style.display !== "block";
+  panel.style.display = open ? "block" : "none";
+  document.getElementById("settings-btn").classList.toggle("active", open);
+});
+syncSlidersFromSettings();
+
+// --- Layout driver ----------------------------------------------------------
+// Iterations scale down with graph size; work is chunked into batches so the
+// progress bar paints and the tab never freezes, even at 5k+ nodes.
+function runLayout(isRerun) {
+  stopSim();
+  const total = nodes.length > 5000 ? 160 : nodes.length > 1000 ? 260 : 400;
+  const noverlapIters = 60;
+  const progress = document.getElementById("progress");
+  const fill = document.getElementById("progress-fill");
+  if (!isRerun) progress.style.display = "flex";
+  let iter = 0;
+
+  function batch() {
+    const chunk = nodes.length > 5000 ? 4 : 12;
+    for (let i = 0; i < chunk && iter < total; i++, iter++) {
+      fa2Step(Math.pow(1 - iter / total, 1.6));
+    }
+    fill.style.width = `${Math.round((iter / total) * 90)}%`;
+    if (isRerun) { syncGraph(); refresh(); }
+    if (iter < total) { setTimeout(batch, 0); return; }
+    for (let i = 0; i < noverlapIters; i++) { if (noverlapStep() === 0) break; }
+    fill.style.width = "100%";
+    progress.style.display = "none";
+    syncGraph();
+    fitView(isRerun ? 500 : 0);
+    refresh();
+    if (!isRerun) applyFocusParam();
+    // Small settle kick; decays to sleep unless liveSim keeps a floor.
+    startSim(0.03);
+  }
+  setTimeout(batch, 0);
+}
+
+// Deep links: graph.html?focus=<file-or-symbol> (the wiki links back here).
+function applyFocusParam() {
+  const focus = new URLSearchParams(location.search).get("focus");
+  if (!focus) return;
+  const target =
+    nodes.find((n) => n.file === focus && n.kind === "file") ||
+    nodes.find((n) => n.name === focus) ||
+    nodes.find((n) => n.file === focus);
+  if (target) focusNode(target);
+}
+
+// --- Bootstrap ----------------------------------------------------------------
+{
+  const fileCount = nodes.filter((n) => n.kind === "file").length;
+  const repoName = "__REPO_NAME__";
+  document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> · ${fileCount} files`;
+  document.getElementById("c-nodes").textContent = nodes.length;
+  document.getElementById("c-edges").textContent = links.length;
+  document.getElementById("status-counts").textContent = `${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
+}
+window.addEventListener("resize", () => { if (renderer) renderer.resize(); });
+initRenderer();
+buildTree();
+buildFilters();
+selectTab("explorer");
+runLayout(false);
+</script>
+</body>
+</html>

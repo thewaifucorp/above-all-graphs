@@ -1,0 +1,118 @@
+# AboveAllGraphs (`aag`)
+
+**A code knowledge graph that installs itself, keeps itself fresh, and works with every coding agent.**
+
+Two commands. That's the entire workflow:
+
+```bash
+aag bigbang   # once per repo: index it + wire up every coding agent you have
+aag ui        # whenever you want to look: opens the browser, all your repos in one app
+```
+
+![aag ui](graph-initial.png)
+
+No API key, no native compile step, no config file, nothing to keep in sync by hand. One static Rust binary.
+
+## Why
+
+`aag` is a synthesis of three tools, keeping each one's strength and cutting each one's weakness:
+
+- **[GitNexus](https://github.com/abhigyanpatwari/GitNexus)** — real code graph (callers, impact, rename, cypher), but a heavy install (C++ toolchain, onnxruntime) and no incremental indexing.
+- **[Graphify](https://github.com/Graphify-Labs/graphify)** — storytelling layer over the graph (`graph.html`, `GRAPH_REPORT.md`), but CDN-dependent output and Python tooling.
+- **[CodeGraph](https://github.com/colbymchenry/codegraph)** — install-and-forget philosophy (hooks registered automatically), which `aag` adopts as a non-negotiable.
+
+Parsing via tree-sitter (deterministic, no LLM), storage in SQLite, everything local — nothing leaves your machine.
+
+## The UI
+
+`aag ui` starts a local server (127.0.0.1 only) and opens your browser:
+
+- **One bar of lib-level chrome**: workspace picker, stats, a `+ index` button to index a new repo without touching the terminal.
+- **The workspace fills the rest**: interactive WebGL graph (modules by color, drag, zoom-revealed labels, click a node to read the full source), per-module wiki, and a report of god nodes and surprising connections — each page carries its own navigation.
+- The registry is read live on every request: index a repo anywhere, it appears in the picker.
+
+Everything the UI serves is also a **static site** at `<repo>/.aag/` — open `index.html` directly with no server, send it to someone, host it anywhere. Fully offline: every asset is vendored into the binary, no CDN, ever.
+
+Built-in multi-provider AI chat (Anthropic, OpenAI, Azure, Gemini, OpenRouter, MiniMax, GLM, Ollama) grounded on the graph — your key goes straight from the browser to the provider.
+
+## Automatic agent integration
+
+`aag bigbang` detects every agent on the machine — config dir in the repo or your home — and registers everything each one needs:
+
+| Agent       | MCP config                | Hooks                                            | Guidance                  |
+|-------------|---------------------------|--------------------------------------------------|---------------------------|
+| Claude Code | `.mcp.json`               | pre-edit warning, post-edit sync, session digest | 7 skills (`.claude/skills/`) |
+| Cursor      | `.cursor/mcp.json`        | `afterFileEdit` sync (`.cursor/hooks.json`)      | `.cursor/rules/aag.mdc`   |
+| Gemini CLI  | `.gemini/settings.json`   | —                                                | `GEMINI.md` (fenced)      |
+| Kiro        | `.kiro/settings/mcp.json` | —                                                | `.kiro/steering/aag.md`   |
+| opencode    | `opencode.json`           | —                                                | `AGENTS.md` (fenced)      |
+| Codex       | `~/.codex/config.toml`    | —                                                | `AGENTS.md` (fenced)      |
+| Antigravity | (UI-managed)              | —                                                | `AGENTS.md` (fenced)      |
+
+Idempotent (re-running never duplicates), additive (your existing hooks/servers/rules survive untouched), reversible (`aag uninstall` removes exactly what was written). Agents without hook systems stay fresh anyway — the MCP server reconciles on connect and runs the native watcher.
+
+The Claude Code hooks are the deepest integration: **PreToolUse** warns the agent *before* it edits a file containing widely-used symbols ("`used` has 12 callers — check `aag impact` first"), **PostToolUse** resyncs the graph in the background after every edit, **SessionStart** injects a digest of the repo so the agent starts every session oriented.
+
+## MCP surface
+
+One strong default tool — `explore` — answers "how does X work", "how does X reach Y", area surveys: source verbatim grouped by file, call paths, and blast radius in one shot. Granular tools (`node`, `search`, `callers`, `callees`, `impact`, `rename`, `affected`, `cypher`, `detect_changes`, `wiki`) are unlisted by default; enable via `AAG_MCP_TOOLS=explore,impact,...`.
+
+## Always fresh
+
+Native filesystem watcher (FSEvents/inotify/ReadDirectoryChangesW) with debounce; reconciliation on every MCP connect absorbs edits made while nothing was running; agent hooks resync after every edit. There is no "reindex" command to remember.
+
+## CLI
+
+```
+aag bigbang [--force] [--no-viz] [--no-install] [--obsidian]   bootstrap everything, one shot
+aag ui [--port N] [--no-open]   THE interface: local server + browser, all workspaces
+aag explore <query>          how does X work / what calls X (MCP twin: explore)
+aag impact <symbol>          transitive blast radius before you change something
+aag rename <old> <new> [--write]   coordinated multi-file rename, preview-first
+aag affected --stdin         test files affected by a diff (pipe git diff --name-only)
+aag describe <doc> <text>    attach a vision-pass description to an image/PDF node
+aag sync [--file <path>]     refresh index + site in place (hooks call this)
+aag workspaces               list every repo this machine has indexed
+aag install [--force] / aag uninstall   agent integration, explicit
+aag mcp                      the MCP server (stdio JSON-RPC)
+```
+
+Every MCP tool has a CLI twin, so everything works in CI and pre-commit hooks too.
+
+## Multi-workspace
+
+Each repo keeps its own local graph — no central server, no unified enterprise index. A lightweight registry (`~/.config/aag/workspaces.json`) records every workspace `bigbang`/`sync` touches; `aag ui` browses them all from one page, `aag workspaces` lists them in the terminal, and any command reaches a specific one with `--path`. Stale entries prune themselves.
+
+## Trust model for edges
+
+Every edge carries a confidence tag:
+
+- `EXTRACTED` — explicit in source (an import statement).
+- `INFERRED` — resolved with real evidence: a module-qualified call (`sync::run`), a same-file definition, or a unique name.
+- `AMBIGUOUS` — several symbols share the name and nothing disambiguates; verify before acting.
+
+Transparency over false certainty — the graph tells you when it's guessing.
+
+## Multimodal
+
+Docs (`.md`/`.txt`) are indexed deterministically and linked to the symbols they mention (`explains` edges). Images/PDFs enter the graph as pending nodes; when running inside an agent, the *agent's own model* fills in the description (`aag describe`) — no separate API key, no cost outside the session you're already in.
+
+## Exports
+
+`graph.json`, GraphML (Gephi/yEd), Cypher (Neo4j/FalkorDB), optional Obsidian vault (`--obsidian`), plus the whole static site under `.aag/`.
+
+## Development
+
+```
+cargo test          # 109 tests
+cargo clippy        # pedantic, zero warnings
+cargo build --release
+```
+
+Stack: Rust, tree-sitter, rusqlite (bundled SQLite + FTS5), tiny_http, notify, clap, serde_json. Releases: tagging `v*` builds prebuilt binaries for linux/macos/windows (x64 + arm64) which the `npm/` wrapper downloads on install — end users never compile anything.
+
+This repo dogfoods itself: the `aag` hooks are active here, and the graph you see in the screenshot is this codebase.
+
+## License
+
+MIT
