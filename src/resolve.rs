@@ -24,8 +24,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use walkdir::WalkDir;
-
 use crate::error::Result;
 use crate::parse::parse_file;
 use crate::storage::{Confidence, Edge, EdgeKind, Graph, Node, NodeKind};
@@ -35,7 +33,11 @@ use crate::storage::{Confidence, Edge, EdgeKind, Graph, Node, NodeKind};
 /// has exactly one definition. `.playwright-mcp` holds browser-automation
 /// artifacts (screenshots, snapshots) and `.claude`/`.cursor` hold agent
 /// config (including the skill pack `aag install` writes) — all of which
-/// would otherwise pollute the graph as doc nodes.
+/// would otherwise pollute the graph as doc nodes. `.venv`/`venv`/
+/// `__pycache__`/`.tox` are a belt-and-suspenders net for repos whose
+/// `.gitignore` doesn't (or doesn't yet) exclude their own virtualenv —
+/// `walk_files` also honors `.gitignore` itself, so this list only matters
+/// when that file is missing or incomplete.
 pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git",
     ".aag",
@@ -44,6 +46,10 @@ pub(crate) const SKIP_DIRS: &[&str] = &[
     ".playwright-mcp",
     ".claude",
     ".cursor",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".tox",
 ];
 
 /// Text doc extensions, indexed immediately (no vision pass needed).
@@ -436,16 +442,27 @@ fn resolution_confidence(candidate_count: usize, unique: Confidence) -> Confiden
     }
 }
 
+/// Walks `root` for indexing, honoring the repo's `.gitignore`/`.ignore`
+/// (via the `ignore` crate — same rules ripgrep uses) plus the hardcoded
+/// `SKIP_DIRS` net for repos whose ignore files don't cover their own
+/// vendor/build directories. `hidden(false)` keeps walking into dotdirs
+/// not explicitly named in `SKIP_DIRS` (e.g. `.github`) — only gitignore
+/// rules and the explicit list prune anything.
 fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
-    WalkDir::new(root)
-        .into_iter()
-        .filter_entry(|entry| {
-            entry.file_type().is_file()
-                || !SKIP_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
-        })
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .filter_entry(|entry| match entry.file_type() {
+            Some(file_type) if file_type.is_dir() => {
+                !SKIP_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
+            }
+            _ => true,
+        });
+    builder
+        .build()
         .filter_map(std::result::Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .map(walkdir::DirEntry::into_path)
+        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+        .map(|entry| entry.path().to_path_buf())
         .collect()
 }
 
