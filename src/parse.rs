@@ -47,7 +47,7 @@ pub trait LanguageParser {
 /// Returns [`Error::Parse`] if the matched parser fails.
 pub fn parse_file(file_path: &str, source: &str) -> Result<Option<ParsedFile>> {
     let extension = file_path.rsplit('.').next().unwrap_or_default();
-    let parsers: [&dyn LanguageParser; 1] = [&RustParser];
+    let parsers: [&dyn LanguageParser; 2] = [&RustParser, &JavaScriptParser];
 
     for parser in parsers {
         if parser.extensions().contains(&extension) {
@@ -55,6 +55,34 @@ pub fn parse_file(file_path: &str, source: &str) -> Result<Option<ParsedFile>> {
         }
     }
     Ok(None)
+}
+
+/// Tree-sitter-backed parser for JavaScript modules.
+pub struct JavaScriptParser;
+
+impl LanguageParser for JavaScriptParser {
+    fn extensions(&self) -> &'static [&'static str] {
+        &["js", "mjs", "cjs", "jsx"]
+    }
+
+    fn parse(&self, file_path: &str, source: &str) -> Result<ParsedFile> {
+        let mut parser = TsParser::new();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .map_err(|source| Error::Parse {
+                file: file_path.to_string(),
+                reason: source.to_string(),
+            })?;
+
+        let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
+            file: file_path.to_string(),
+            reason: "tree-sitter returned no tree".to_string(),
+        })?;
+
+        let mut out = ParsedFile::default();
+        walk_javascript(tree.root_node(), source, file_path, None, false, &mut out);
+        Ok(out)
+    }
 }
 
 /// Tree-sitter-backed parser for Rust.
@@ -113,6 +141,93 @@ fn line_range(node: TsNode<'_>) -> (u32, u32) {
 fn children(node: TsNode<'_>) -> impl Iterator<Item = TsNode<'_>> {
     let count = u32::try_from(node.child_count()).unwrap_or(u32::MAX);
     (0..count).filter_map(move |i| node.child(i))
+}
+
+fn javascript_callee_name(func_node: TsNode<'_>, source: &str) -> Option<String> {
+    match func_node.kind() {
+        "identifier" => Some(text(func_node, source).to_string()),
+        "member_expression" => func_node
+            .child_by_field_name("property")
+            .map(|node| text(node, source).to_string()),
+        _ => None,
+    }
+}
+
+fn javascript_name<'a>(node: TsNode<'_>, source: &'a str) -> Option<&'a str> {
+    node.child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("property"))
+        .map(|name| text(name, source))
+        .filter(|name| !name.is_empty())
+}
+
+/// Recursive-descent walk for the JavaScript grammar.
+fn walk_javascript<'a>(
+    node: TsNode<'_>,
+    source: &'a str,
+    file_path: &str,
+    current_owner: Option<&'a str>,
+    in_class: bool,
+    out: &mut ParsedFile,
+) {
+    match node.kind() {
+        "class_declaration" => {
+            if let Some(name) = javascript_name(node, source) {
+                let (start_line, end_line) = line_range(node);
+                out.nodes.push(Node {
+                    id: None,
+                    kind: NodeKind::Struct,
+                    name: name.to_string(),
+                    file_path: file_path.to_string(),
+                    start_line,
+                    end_line,
+                    description: None,
+                });
+            }
+            for child in children(node) {
+                walk_javascript(child, source, file_path, current_owner, true, out);
+            }
+            return;
+        }
+        "function_declaration" | "generator_function_declaration" | "method_definition" => {
+            let Some(name) = javascript_name(node, source) else {
+                return;
+            };
+            let (start_line, end_line) = line_range(node);
+            out.nodes.push(Node {
+                id: None,
+                kind: if in_class {
+                    NodeKind::Method
+                } else {
+                    NodeKind::Function
+                },
+                name: name.to_string(),
+                file_path: file_path.to_string(),
+                start_line,
+                end_line,
+                description: None,
+            });
+            if let Some(body) = node.child_by_field_name("body") {
+                walk_javascript(body, source, file_path, Some(name), in_class, out);
+            }
+            return;
+        }
+        "import_statement" => {
+            out.imports.push(text(node, source).to_string());
+        }
+        "call_expression" => {
+            if let Some((caller, callee)) = node
+                .child_by_field_name("function")
+                .and_then(|function| current_owner.zip(javascript_callee_name(function, source)))
+            {
+                out.calls.push((caller.to_string(), callee));
+            }
+        }
+        _ => {}
+    }
+
+    for child in children(node) {
+        walk_javascript(child, source, file_path, current_owner, in_class, out);
+    }
 }
 
 /// Recursive-descent walk building a [`ParsedFile`] from a tree-sitter tree.
@@ -268,5 +383,41 @@ mod tests {
     #[test]
     fn unknown_extension_returns_none() {
         assert_eq!(parse_file("README.md", "# hi").unwrap(), None);
+    }
+
+    #[test]
+    fn extracts_javascript_module_symbols_and_calls() {
+        let source = "import { helper } from './helper.mjs'; export function render() { helper(); } class Studio { save() { render(); } }";
+        let parsed = parse_file("src/app.mjs", source).unwrap().unwrap();
+
+        assert!(
+            parsed
+                .nodes
+                .iter()
+                .any(|node| node.name == "render" && node.kind == NodeKind::Function)
+        );
+        assert!(
+            parsed
+                .nodes
+                .iter()
+                .any(|node| node.name == "Studio" && node.kind == NodeKind::Struct)
+        );
+        assert!(
+            parsed
+                .nodes
+                .iter()
+                .any(|node| node.name == "save" && node.kind == NodeKind::Method)
+        );
+        assert_eq!(
+            parsed.calls,
+            vec![
+                ("render".to_string(), "helper".to_string()),
+                ("save".to_string(), "render".to_string())
+            ]
+        );
+        assert_eq!(
+            parsed.imports,
+            vec!["import { helper } from './helper.mjs';".to_string()]
+        );
     }
 }

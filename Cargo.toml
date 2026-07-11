@@ -21,6 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tree-sitter = "0.26"
+tree-sitter-javascript = "0.25"
 tree-sitter-rust = "0.24"
 walkdir = "2"
 serde_json = "1"

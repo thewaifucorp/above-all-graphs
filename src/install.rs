@@ -77,6 +77,10 @@ const FENCE_END: &str = "<!-- aag:end -->";
 const TOML_FENCE_START: &str = "# aag:start";
 const TOML_FENCE_END: &str = "# aag:end";
 
+/// Markers fencing the entries `install` appends to `.gitignore`.
+const GITIGNORE_FENCE_START: &str = "# aag:ignore:start";
+const GITIGNORE_FENCE_END: &str = "# aag:ignore:end";
+
 /// What one `install` run did — used for logging and tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct InstallSummary {
@@ -111,6 +115,11 @@ pub fn run(root: &Path, force: bool) -> Result<InstallSummary> {
 pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<InstallSummary> {
     let mut summary = InstallSummary::default();
     let mut wants_agents_md = false;
+
+    // The graph and agent integration are local machine state. Keep those
+    // artifacts out of a project's commits, but deliberately leave the
+    // root `.mcp.json` visible: teams often version its server definition.
+    upsert_gitignore(&root.join(".gitignore"))?;
 
     if detected(root, home, ".claude") {
         summary.agents.push("claude-code");
@@ -229,6 +238,7 @@ pub fn uninstall_with_home(root: &Path, home: Option<&Path>) -> Result<()> {
     remove_file_if_present(&root.join(".kiro").join("steering").join("aag.md"))?;
     remove_fenced_md(&root.join("AGENTS.md"))?;
     remove_fenced_md(&root.join("GEMINI.md"))?;
+    remove_gitignore_block(&root.join(".gitignore"))?;
 
     tracing::info!("uninstalled aag agent integration");
     Ok(())
@@ -526,6 +536,43 @@ fn unregister_codex(path: &Path) -> Result<()> {
     write_text(path, &cleaned)
 }
 
+/// Ensures the AAG-generated local artifacts are ignored without hiding the
+/// root `.mcp.json`, which is intentionally suitable for version control.
+fn upsert_gitignore(path: &Path) -> Result<bool> {
+    let existing = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(Error::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if existing.contains(GITIGNORE_FENCE_START) {
+        return Ok(false);
+    }
+    let section = format!(
+        "\n{GITIGNORE_FENCE_START}\n# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.\n.aag/\n.claude/settings.json\n.claude/skills/aag-*/\n.cursor/mcp.json\n.cursor/hooks.json\n.cursor/rules/aag.mdc\n.gemini/settings.json\n.kiro/settings/mcp.json\n.kiro/steering/aag.md\nopencode.json\n{GITIGNORE_FENCE_END}\n"
+    );
+    write_text(path, &(existing + &section))?;
+    Ok(true)
+}
+
+/// Removes only the fenced `.gitignore` block written by [`upsert_gitignore`].
+fn remove_gitignore_block(path: &Path) -> Result<()> {
+    let Ok(existing) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let Some(cleaned) = strip_fenced(&existing, GITIGNORE_FENCE_START, GITIGNORE_FENCE_END) else {
+        return Ok(());
+    };
+    if cleaned.trim().is_empty() {
+        return remove_file_if_present(path);
+    }
+    write_text(path, &cleaned)
+}
+
 /// Ensures `path` (a markdown context file: `AGENTS.md` / `GEMINI.md`)
 /// carries the fenced aag section. Appends when the file exists; creates
 /// the file only when `create` (an agent that reads it was detected).
@@ -714,6 +761,29 @@ mod tests {
         assert_eq!(summary, InstallSummary::default());
         assert!(!root.join(".mcp.json").exists());
         assert!(!root.join("AGENTS.md").exists());
+        assert!(root.join(".gitignore").is_file());
+    }
+
+    #[test]
+    fn install_ignores_local_aag_artifacts_but_not_root_mcp_config() {
+        let (root, home) = scratch();
+        fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+
+        install(&root, &home, false);
+        install(&root, &home, false);
+
+        let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(gitignore.contains("dist/"));
+        assert!(gitignore.contains(".aag/"));
+        assert!(gitignore.contains(".cursor/hooks.json"));
+        assert!(!gitignore.lines().any(|line| line == ".mcp.json"));
+        assert_eq!(gitignore.matches(GITIGNORE_FENCE_START).count(), 1);
+
+        uninstall_with_home(&root, Some(&home)).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "dist/\n"
+        );
     }
 
     #[test]
