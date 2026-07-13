@@ -29,6 +29,17 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The cross-process index lock (`.aag.lock`) could not be opened or
+    /// acquired — see `crate::lock`.
+    #[error("failed to lock `{path}`: {source}")]
+    Lock {
+        /// Path of the lock file.
+        path: PathBuf,
+        /// Underlying I/O failure.
+        #[source]
+        source: std::io::Error,
+    },
+
     /// A command was invoked that has no implementation yet.
     #[error("`{command}` is not implemented yet")]
     NotImplemented {

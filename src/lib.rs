@@ -16,6 +16,7 @@ pub mod hook;
 pub mod hub;
 pub mod impact;
 pub mod install;
+pub mod lock;
 pub mod mcp;
 pub mod parse;
 pub mod refactor;

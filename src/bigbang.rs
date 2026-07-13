@@ -63,6 +63,12 @@ pub fn run(root: &Path, options: &Options) -> Result<()> {
         return Ok(());
     }
 
+    // Excludes the `aag mcp` watcher's reconcile/reindex and `aag sync`
+    // (see `crate::lock`) for the rest of this run — otherwise a debounced
+    // watcher reindex racing this rebuild can delete `.aag/` out from
+    // under its in-flight `SQLite` transaction.
+    let _lock = crate::lock::acquire(root)?;
+
     if already_indexed {
         tracing::info!(path = %aag_dir.display(), "removing existing index for rebuild");
         fs::remove_dir_all(&aag_dir).map_err(|source| Error::RemoveDir {

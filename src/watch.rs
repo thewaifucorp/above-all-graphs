@@ -44,6 +44,8 @@ pub fn reconcile(root: &Path) -> Result<()> {
         path: aag_dir.clone(),
         source,
     })?;
+    // See `crate::lock` — excludes `bigbang --force` and `aag sync`.
+    let _lock = crate::lock::acquire(root)?;
     let graph = Graph::open(&aag_dir.join("graph.db"))?;
     let summary = resolve::index_repo(&graph, root)?;
     tracing::info!(
@@ -97,6 +99,14 @@ fn is_relevant(root: &Path, event: &DebouncedEvent) -> bool {
 }
 
 fn reindex(root: &Path, changed_paths: usize) {
+    // See `crate::lock` — excludes `bigbang --force` and `aag sync`.
+    let _lock = match crate::lock::acquire(root) {
+        Ok(guard) => guard,
+        Err(error) => {
+            tracing::warn!(%error, "reindex: could not acquire lock");
+            return;
+        }
+    };
     let graph = match Graph::open(&root.join(".aag").join("graph.db")) {
         Ok(graph) => graph,
         Err(error) => {

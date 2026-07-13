@@ -59,6 +59,9 @@ pub fn run(root: &Path, file: Option<&Path>, no_viz: bool) -> Result<()> {
         return Err(Error::IndexMissing { path: root.clone() });
     }
 
+    // See `crate::lock` — excludes `bigbang --force` and the `aag mcp`
+    // watcher's reconcile/reindex.
+    let _lock = crate::lock::acquire(root)?;
     let graph = Graph::open(&aag_dir.join("graph.db"))?;
     let summary = resolve::index_repo(&graph, root)?;
     tracing::info!(
