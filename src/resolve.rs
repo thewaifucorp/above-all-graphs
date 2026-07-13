@@ -120,67 +120,71 @@ pub(crate) fn mentioned_names(
 /// can't be read as UTF-8 (e.g. an unrecognized binary format) are skipped
 /// with a warning rather than aborting the whole pass.
 pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
-    graph.clear()?;
+    // One transaction for the whole clear+insert+resolve pass — one fsync
+    // on commit instead of one per statement. See `Graph::transaction`.
+    graph.transaction(|| {
+        graph.clear()?;
 
-    let mut summary = IndexSummary::default();
-    let mut by_name: HashMap<String, Vec<(i64, String)>> = HashMap::new();
-    let mut by_file_symbol: HashMap<(String, String), i64> = HashMap::new();
-    let mut pending_imports: Vec<(i64, String)> = Vec::new();
-    let mut pending_calls: Vec<(String, String, String)> = Vec::new();
-    let mut pending_doc_mentions: Vec<(i64, String)> = Vec::new();
+        let mut summary = IndexSummary::default();
+        let mut by_name: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+        let mut by_file_symbol: HashMap<(String, String), i64> = HashMap::new();
+        let mut pending_imports: Vec<(i64, String)> = Vec::new();
+        let mut pending_calls: Vec<(String, String, String)> = Vec::new();
+        let mut pending_doc_mentions: Vec<(i64, String)> = Vec::new();
 
-    for path in walk_files(root) {
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        for path in walk_files(root) {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
 
-        if let Some(kind) = doc_kind(&relative) {
-            index_doc_file(
+            if let Some(kind) = doc_kind(&relative) {
+                index_doc_file(
+                    graph,
+                    &relative,
+                    &path,
+                    kind,
+                    &mut by_name,
+                    &mut pending_doc_mentions,
+                    &mut summary,
+                )?;
+                continue;
+            }
+
+            let Ok(source) = fs::read_to_string(&path) else {
+                tracing::warn!(path = %path.display(), "skipping unreadable file (likely binary)");
+                continue;
+            };
+            let Some(parsed) = parse_file(&relative, &source)? else {
+                continue;
+            };
+
+            index_code_file(
                 graph,
                 &relative,
-                &path,
-                kind,
+                &source,
+                parsed,
                 &mut by_name,
-                &mut pending_doc_mentions,
+                &mut by_file_symbol,
+                &mut pending_imports,
+                &mut pending_calls,
                 &mut summary,
             )?;
-            continue;
         }
 
-        let Ok(source) = fs::read_to_string(&path) else {
-            tracing::warn!(path = %path.display(), "skipping unreadable file (likely binary)");
-            continue;
-        };
-        let Some(parsed) = parse_file(&relative, &source)? else {
-            continue;
-        };
-
-        index_code_file(
+        resolve_doc_mentions(graph, pending_doc_mentions, &by_name, &mut summary)?;
+        resolve_imports(graph, pending_imports, &by_name, &mut summary)?;
+        resolve_calls(
             graph,
-            &relative,
-            &source,
-            parsed,
-            &mut by_name,
-            &mut by_file_symbol,
-            &mut pending_imports,
-            &mut pending_calls,
+            pending_calls,
+            &by_name,
+            &by_file_symbol,
             &mut summary,
         )?;
-    }
 
-    resolve_doc_mentions(graph, pending_doc_mentions, &by_name, &mut summary)?;
-    resolve_imports(graph, pending_imports, &by_name, &mut summary)?;
-    resolve_calls(
-        graph,
-        pending_calls,
-        &by_name,
-        &by_file_symbol,
-        &mut summary,
-    )?;
-
-    Ok(summary)
+        Ok(summary)
+    })
 }
 
 fn index_doc_file(

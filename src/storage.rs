@@ -266,6 +266,42 @@ impl Graph {
             })
     }
 
+    /// Runs `f` inside one `SQLite` transaction: every write it performs
+    /// commits as a single fsync instead of one per statement (`rusqlite`
+    /// autocommits each unwrapped `execute`/`execute_batch` on its own).
+    /// `resolve::index_repo` wraps its whole clear+insert+resolve pass in
+    /// this — unbatched, indexing even a few dozen tiny files took over a
+    /// second, dominated entirely by rollback-journal fsyncs. Rolls back
+    /// on error.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever error `f` returns, or [`Error::Storage`] if
+    /// `BEGIN`/`COMMIT` itself fails.
+    pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.conn
+            .execute_batch("BEGIN")
+            .map_err(|source| Error::Storage {
+                context: "begin transaction",
+                source,
+            })?;
+        match f() {
+            Ok(value) => {
+                self.conn
+                    .execute_batch("COMMIT")
+                    .map_err(|source| Error::Storage {
+                        context: "commit transaction",
+                        source,
+                    })?;
+                Ok(value)
+            }
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
+    }
+
     /// Wipes all nodes and edges, ready for a full reindex. Used by
     /// `resolve::index_repo` so re-running it (e.g. from the watcher) never
     /// accumulates stale nodes from a previous pass.
