@@ -68,7 +68,14 @@ fn search(graph: &Graph, query: &str) -> Result<Vec<Node>> {
     if let Some(exact) = graph.find_by_name(query)? {
         return Ok(vec![exact]);
     }
-    graph.search(&format!("{query}*"), 20)
+    graph.search(&fts_prefix_query(query), 20)
+}
+
+/// Wraps `query` as a quoted FTS5 phrase with a trailing prefix `*`, so
+/// arbitrary user input (dots, quotes, `AND`/`NOT`, column filters, ...)
+/// can never be parsed as FTS5 query syntax and trip a syntax error.
+fn fts_prefix_query(query: &str) -> String {
+    format!("\"{}\"*", query.replace('"', "\"\""))
 }
 
 fn render_match(root: &Path, graph: &Graph, node: &Node) -> String {
@@ -128,4 +135,38 @@ fn source_snippet(root: &Path, node: &Node) -> std::io::Result<String> {
         .map(|(_, line)| line)
         .collect();
     Ok(snippet.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::format;
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn indexed_root() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("aag-explore-test-{}-{n}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("bigbang.rs"), "fn helper() {}").unwrap();
+        crate::bigbang::run(&dir, &crate::bigbang::Options::default()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn dotted_query_does_not_break_fts_syntax() {
+        let root = indexed_root();
+        let out = format(&root, "bigbang.rs").unwrap();
+        assert!(out.contains("fn helper"));
+    }
+
+    #[test]
+    fn multi_word_query_with_dot_does_not_break_fts_syntax() {
+        let root = indexed_root();
+        let out = format(&root, "what does bigbang.rs do").unwrap();
+        assert!(out.contains("no matches for") || out.contains("fn helper"));
+    }
 }
