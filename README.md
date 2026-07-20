@@ -7,6 +7,7 @@
 **A code knowledge graph that installs itself, keeps itself fresh, and works with every coding agent.**
 
 [![CI](https://github.com/thewaifucorp/above-all-graphs/actions/workflows/ci.yml/badge.svg)](https://github.com/thewaifucorp/above-all-graphs/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@waifucorp/aag.svg)](https://www.npmjs.com/package/@waifucorp/aag)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![rust](https://img.shields.io/badge/rust-stable-dea584.svg)](https://www.rust-lang.org)
 
@@ -30,6 +31,10 @@ No API key, no native compile step, no config file, nothing to keep in sync by h
 - **Deterministic** — parsing via tree-sitter, storage in SQLite, no LLM in the indexing path. Everything local; nothing leaves your machine.
 - **100% offline UI** — interactive WebGL graph, per-module wiki, god-node report. Every asset vendored into the binary; the whole site also works as static files with no server.
 - **Multi-workspace** — every repo you index appears in one hub. Local graphs, no central server.
+- **Polyglot contracts** — 20 languages plus OpenAPI/Swagger, SQL DDL, and Terraform/HCL feed one provenance-aware graph.
+- **File-level incremental** — edits reparse only the changed file while persisted references keep cross-file edges correct.
+- **MCP everywhere** — stdio by default, or authenticated loopback HTTP for remote-capable clients.
+- **Repository groups** — organize independent graphs under names such as `platform/backend` and query the hierarchy together.
 
 ## Install
 
@@ -44,6 +49,14 @@ Building from source instead:
 ```bash
 git clone https://github.com/thewaifucorp/above-all-graphs
 cd above-all-graphs && cargo build --release   # binary at target/release/aag
+```
+
+Local semantic embeddings are an optional source-build feature because ONNX
+substantially increases build and binary size:
+
+```bash
+cargo build --release --features semantic
+aag embeddings --path .
 ```
 
 ## Why
@@ -145,7 +158,7 @@ Docs (`.md`/`.txt`) are indexed deterministically and linked to the symbols they
 ## Development
 
 ```
-cargo test          # 109 tests
+cargo test          # 138 tests
 cargo clippy        # pedantic, zero warnings
 cargo build --release
 ```
