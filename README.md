@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" width="120" alt="aag logo — an A drawn as a three-node graph">
+<img src="assets/logo-v2.svg" width="120" alt="Above All Graphs logo — a graph rising into an A-shaped apex">
 
 # AboveAllGraphs
 

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Above All Graphs</title>
+  <desc id="desc">A luminous graph rising into an A-shaped apex</desc>
+  <g fill="none" stroke="#8B7CFF" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 92 112 410"/>
+    <path d="M256 92 400 410"/>
+  </g>
+  <path d="M174 274H338" fill="none" stroke="#22D3EE" stroke-width="22" stroke-linecap="round"/>
+
+  <g fill="#0B0E18" stroke="#8B7CFF" stroke-width="13">
+    <circle cx="174" cy="274" r="24"/>
+    <circle cx="338" cy="274" r="24"/>
+  </g>
+  <g fill="#0B0E18" stroke="#22D3EE" stroke-width="13">
+    <circle cx="112" cy="410" r="29"/>
+    <circle cx="400" cy="410" r="29"/>
+  </g>
+
+  <circle cx="256" cy="92" r="39" fill="#A99CFF"/>
+  <circle cx="244" cy="80" r="11" fill="#FFFFFF" fill-opacity="0.72"/>
+
+  <path d="M201 422h110" stroke="#22D3EE" stroke-opacity="0.34" stroke-width="10" stroke-linecap="round"/>
+</svg>
