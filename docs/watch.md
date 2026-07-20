@@ -42,14 +42,12 @@ during a reindex would immediately retrigger the next one, a feedback
 loop. `.git` is skipped for the same reason it's skipped everywhere else
 in this codebase.
 
-`reindex` opens the graph and runs `resolve::index_repo` again — a full
-whole-repo pass, not a per-file patch. The comment at the top of the
-file explains why: `crate::resolve`'s cross-file name resolution
-recomputes from the whole repo's symbol table regardless, so patching
-just the changed file's nodes/edges would still require that same
-whole-repo pass to stay correct. Errors opening the graph or reindexing
-are logged and swallowed, matching the house rule that hooks and
-background paths must never take the process down.
+`reindex` deduplicates the paths in a debounced batch and calls
+`resolve::index_file` for each. Only those files are read and parsed;
+cross-file relationships are re-resolved from `raw_references` already
+stored in SQLite. Errors opening the graph or updating a file are logged
+and swallowed, matching the house rule that hooks and background paths
+must never take the process down.
 
 ## Relation to sync.rs
 
@@ -58,10 +56,10 @@ different lifecycles. `watch.rs` is for the long-lived `aag mcp` process:
 a background thread with a real OS filesystem watcher and a debounce
 window, active for as long as the server runs. `sync.rs` is hook-driven:
 `hook.rs`'s `pre-edit`/`post-edit` hooks spawn a short-lived `aag sync`
-subprocess per edit, doing a full pass or a per-file relevance
+subprocess per edit, doing the same file-level update or a relevance
 short-circuit, for agents that aren't necessarily running `aag mcp` at
-all. They don't call each other directly, but both ultimately call into
-`resolve::index_repo` and both respect the same `SKIP_DIRS`.
+all. They don't call each other directly, but both use `resolve::index_file`
+after the initial reconciliation and both respect the same `SKIP_DIRS`.
 
 ## Tests
 

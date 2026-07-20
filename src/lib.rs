@@ -27,6 +27,7 @@ pub mod pr;
 pub mod protocol;
 pub mod refactor;
 pub mod resolve;
+pub mod semantic;
 pub mod storage;
 pub mod sync;
 pub mod watch;

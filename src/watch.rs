@@ -5,10 +5,8 @@
 //! manual reindex step in the normal flow — this is the only path that
 //! keeps the index fresh once `aag mcp` is running.
 //!
-//! Reindexing is a full `resolve::index_repo` pass rather than a per-file
-//! patch: the cross-file name resolution in `crate::resolve` recomputes
-//! from the whole repo's symbol table anyway, so patching just one file's
-//! nodes/edges would still need that same whole-repo pass to stay correct.
+//! Each changed file is reparsed independently; global relationships are
+//! rebuilt from persisted unresolved references without rereading other files.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -29,7 +27,7 @@ const DEBOUNCE: Duration = Duration::from_secs(2);
 /// Directories whose changes never trigger a reindex — `.aag` in
 /// particular, since writing `graph.db` during a reindex would otherwise
 /// immediately trigger the next one. Same list the indexer skips.
-use crate::resolve::SKIP_DIRS;
+use crate::resolve::{SKIP_DIRS, SKIP_FILES};
 
 /// Runs one reindex pass immediately (reconciliation on connect — absorbs
 /// edits made while no watcher was running: `git pull`, another editor, a
@@ -78,7 +76,7 @@ fn watch_loop(root: &Path) -> notify::Result<()> {
     for result in rx {
         match result {
             Ok(events) if events.iter().any(|event| is_relevant(root, event)) => {
-                reindex(root, events.len());
+                reindex(root, &events);
             }
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "watch error"),
@@ -89,6 +87,15 @@ fn watch_loop(root: &Path) -> notify::Result<()> {
 
 fn is_relevant(root: &Path, event: &DebouncedEvent) -> bool {
     let relative = event.path.strip_prefix(root).unwrap_or(&event.path);
+    if relative
+        .file_name()
+        .is_some_and(|name| SKIP_FILES.contains(&name.to_string_lossy().as_ref()))
+    {
+        return false;
+    }
+    if !resolve::is_indexable_path(relative) {
+        return false;
+    }
     !relative.components().any(|component| {
         matches!(
             component,
@@ -98,7 +105,7 @@ fn is_relevant(root: &Path, event: &DebouncedEvent) -> bool {
     })
 }
 
-fn reindex(root: &Path, changed_paths: usize) {
+fn reindex(root: &Path, events: &[DebouncedEvent]) {
     // See `crate::lock` — excludes `bigbang --force` and `aag sync`.
     let _lock = match crate::lock::acquire(root) {
         Ok(guard) => guard,
@@ -114,9 +121,22 @@ fn reindex(root: &Path, changed_paths: usize) {
             return;
         }
     };
-    match resolve::index_repo(&graph, root) {
+    let mut changed = events
+        .iter()
+        .filter(|event| is_relevant(root, event))
+        .map(|event| event.path.clone())
+        .collect::<Vec<_>>();
+    changed.sort();
+    changed.dedup();
+    tracing::debug!(paths = ?changed, "incremental watcher batch");
+    let result = changed
+        .iter()
+        .try_fold(resolve::IndexSummary::default(), |_, path| {
+            resolve::index_file(&graph, root, path)
+        });
+    match result {
         Ok(summary) => tracing::info!(
-            changed_paths,
+            changed_paths = changed.len(),
             files = summary.files,
             docs = summary.docs,
             nodes = summary.nodes,
@@ -154,5 +174,16 @@ mod tests {
     fn git_internal_change_is_not_relevant() {
         let root = Path::new("/repo");
         assert!(!is_relevant(root, &event("/repo/.git/index")));
+    }
+
+    #[test]
+    fn index_lock_change_is_not_relevant() {
+        assert!(!is_relevant(Path::new("/repo"), &event("/repo/.aag.lock")));
+    }
+
+    #[test]
+    fn directory_and_gitignore_access_are_not_relevant() {
+        assert!(!is_relevant(Path::new("/repo"), &event("/repo/src")));
+        assert!(!is_relevant(Path::new("/repo"), &event("/repo/.gitignore")));
     }
 }

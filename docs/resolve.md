@@ -31,5 +31,5 @@ Per `SPEC.md` section 5, `resolve.rs` also owns doc/image ingestion. `doc_kind` 
 ## Invariants worth knowing
 
 - Resolution is purely name-based ("no type checking"); a symbol name shared across unrelated files is legitimately ambiguous, not a bug.
-- `index_repo` always clears the graph first via `graph.clear()`, so partial/incremental updates are not this module's job — that concern lives with the watcher/sync layer that decides when to call it again.
+- `index_repo` performs the initial full build and persists unresolved references. `index_file` replaces one file atomically; `rebuild_resolved_edges` resolves the cached references against the current symbol table without reparsing unchanged files.
 - Self-edges are explicitly excluded in `resolve_doc_mentions` (a doc never `Explains` itself) but no such guard exists for calls/imports, since a symbol cannot import or call itself by construction of how `pending_calls`/`pending_imports` are built.

@@ -15,16 +15,16 @@ This page is the regression contract for the AAG surface that overlaps GitNexus 
 - OpenAPI/Swagger operations, parameters, bodies, responses, security, schemas, `$ref`, implementation matching, SQL DDL/foreign keys, and Terraform/HCL resources
 - PR listing, triage, and graph impact through the read-only GitHub CLI
 - multi-workspace query, status, contracts, and synchronization
+- named slash-hierarchical repository groups with inherited query, status, contracts, and synchronization
 - protocol compiler, structural validation, semantic validation, provenance, declared/observed separation, and automatic SQLite migration
-- local MCP, hooks, skills, watcher reconciliation, and integrations for Claude Code, Cursor, Codex, Gemini CLI, Kiro, opencode, and Antigravity
+- local embeddings through optional `fastembed`/ONNX plus lexical-semantic-structural reciprocal-rank fusion
+- true file-level incremental parsing with persisted unresolved references and global edge re-resolution
+- MCP over stdio and Streamable HTTP-style request/response, loopback origin validation, and optional bearer authentication
+- hooks, skills, watcher reconciliation, and integrations for Claude Code, Cursor, Codex, Gemini CLI, Kiro, opencode, and Antigravity
 
 ## Remaining parity gates
 
-- optional vector embeddings and semantic RRF in addition to current lexical/structural ranking
-- file-level incremental graph mutation instead of correct full reconciliation
-- Streamable HTTP MCP transport with API-key authentication
 - direct live PostgreSQL catalog ingestion
 - native text extraction from Office/media binaries instead of host-agent descriptions
-- named hierarchical repository groups instead of the current all-workspaces federation
 
 These gates must not be described as implemented until their tests and callable surfaces land.

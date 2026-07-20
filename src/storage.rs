@@ -320,6 +320,21 @@ pub struct Edge {
     pub confidence: Confidence,
 }
 
+/// An unresolved relationship extracted from one file and persisted so an
+/// incremental update can re-resolve cross-file edges without reparsing the
+/// rest of the repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawReference {
+    /// Repository-relative source file.
+    pub file_path: String,
+    /// Stable discriminator: `import`, `call`, `doc`, or `operation`.
+    pub kind: String,
+    /// Source symbol name (or file path for imports/docs).
+    pub owner: String,
+    /// Unresolved target name or document text.
+    pub target: String,
+}
+
 /// Handle to the on-disk graph database (`.aag/graph.db`).
 pub struct Graph {
     conn: Connection,
@@ -418,6 +433,27 @@ impl Graph {
                     INSERT INTO nodes_fts(nodes_fts, rowid, name, description) VALUES ('delete', old.id, old.name, old.description);
                     INSERT INTO nodes_fts(rowid, name, description) VALUES (new.id, new.name, new.description);
                 END;
+
+                CREATE TABLE IF NOT EXISTS raw_references (
+                    file_path TEXT NOT NULL,
+                    kind      TEXT NOT NULL,
+                    owner     TEXT NOT NULL,
+                    target    TEXT NOT NULL,
+                    PRIMARY KEY (file_path, kind, owner, target)
+                );
+                CREATE INDEX IF NOT EXISTS idx_raw_references_file
+                    ON raw_references(file_path);
+
+                CREATE TABLE IF NOT EXISTS node_embeddings (
+                    node_id     INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+                    model       TEXT NOT NULL,
+                    dimensions  INTEGER NOT NULL,
+                    vector      BLOB NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS index_metadata (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 ",
             )
             .map_err(|source| Error::Storage {
@@ -518,11 +554,216 @@ impl Graph {
     /// Returns [`Error::Storage`] if the delete fails.
     pub fn clear(&self) -> Result<()> {
         self.conn
-            .execute_batch("DELETE FROM edges; DELETE FROM nodes;")
+            .execute_batch(
+                "DELETE FROM edges; DELETE FROM node_embeddings; DELETE FROM nodes; DELETE FROM raw_references;",
+            )
             .map_err(|source| Error::Storage {
                 context: "clear graph before reindex",
                 source,
             })
+    }
+
+    /// Deletes every node and unresolved reference owned by one repository-relative file.
+    /// Incident edges and embeddings are removed explicitly for compatibility with older
+    /// databases that were created before foreign keys were enabled.
+    /// # Errors
+    /// Returns a storage error if any deletion fails.
+    pub fn remove_file(&self, file_path: &str) -> Result<()> {
+        self.conn
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|source| Error::Storage {
+                context: "enable foreign keys",
+                source,
+            })?;
+        self.conn
+            .execute(
+                "DELETE FROM edges WHERE src IN (SELECT id FROM nodes WHERE file_path = ?1)
+                    OR dst IN (SELECT id FROM nodes WHERE file_path = ?1)",
+                (file_path,),
+            )
+            .map_err(|source| Error::Storage {
+                context: "remove file edges",
+                source,
+            })?;
+        self.conn
+            .execute(
+                "DELETE FROM node_embeddings WHERE node_id IN (SELECT id FROM nodes WHERE file_path = ?1)",
+                (file_path,),
+            )
+            .map_err(|source| Error::Storage { context: "remove file embeddings", source })?;
+        self.conn
+            .execute("DELETE FROM nodes WHERE file_path = ?1", (file_path,))
+            .map_err(|source| Error::Storage {
+                context: "remove file nodes",
+                source,
+            })?;
+        self.conn
+            .execute(
+                "DELETE FROM raw_references WHERE file_path = ?1",
+                (file_path,),
+            )
+            .map_err(|source| Error::Storage {
+                context: "remove file references",
+                source,
+            })?;
+        Ok(())
+    }
+
+    /// Stores one unresolved reference for later global name resolution.
+    /// # Errors
+    /// Returns a storage error if the insert fails.
+    pub fn insert_raw_reference(&self, reference: &RawReference) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO raw_references (file_path, kind, owner, target)
+                 VALUES (?1, ?2, ?3, ?4)",
+                (
+                    &reference.file_path,
+                    &reference.kind,
+                    &reference.owner,
+                    &reference.target,
+                ),
+            )
+            .map_err(|source| Error::Storage {
+                context: "insert raw reference",
+                source,
+            })?;
+        Ok(())
+    }
+
+    /// Returns all persisted unresolved references.
+    /// # Errors
+    /// Returns a storage error if the query fails.
+    pub fn raw_references(&self) -> Result<Vec<RawReference>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, kind, owner, target FROM raw_references ORDER BY file_path, kind",
+        ).map_err(|source| Error::Storage { context: "prepare raw references query", source })?;
+        let rows = stmt
+            .query_map((), |row| {
+                Ok(RawReference {
+                    file_path: row.get(0)?,
+                    kind: row.get(1)?,
+                    owner: row.get(2)?,
+                    target: row.get(3)?,
+                })
+            })
+            .map_err(|source| Error::Storage {
+                context: "run raw references query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read raw reference",
+                source,
+            })?);
+        }
+        Ok(out)
+    }
+
+    /// Removes only globally resolved edges before rebuilding them from raw references.
+    /// # Errors
+    /// Returns a storage error if deletion fails.
+    pub fn clear_resolved_edges(&self) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM edges WHERE kind IN ('imports', 'calls', 'explains')
+               OR (kind = 'implements' AND perspective = 'declared')",
+                (),
+            )
+            .map_err(|source| Error::Storage {
+                context: "clear resolved edges",
+                source,
+            })?;
+        Ok(())
+    }
+
+    /// Marks that a full index has populated the incremental reference cache.
+    /// # Errors
+    /// Returns a storage error if the metadata write fails.
+    pub fn mark_incremental_ready(&self) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('raw_references', '1')",
+                (),
+            )
+            .map_err(|source| Error::Storage {
+                context: "mark incremental index ready",
+                source,
+            })?;
+        Ok(())
+    }
+
+    /// Whether this database has completed a full index with raw references.
+    /// # Errors
+    /// Returns a storage error if the metadata query fails.
+    pub fn incremental_ready(&self) -> Result<bool> {
+        self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM index_metadata WHERE key = 'raw_references' AND value = '1')",
+            (),
+            |row| row.get(0),
+        ).map_err(|source| Error::Storage { context: "read incremental index state", source })
+    }
+
+    /// Replaces the dense embedding associated with a node.
+    /// # Errors
+    /// Returns a storage error if the vector cannot be stored.
+    pub fn set_embedding(&self, node_id: i64, model: &str, vector: &[f32]) -> Result<()> {
+        let bytes = vector
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>();
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO node_embeddings (node_id, model, dimensions, vector)
+             VALUES (?1, ?2, ?3, ?4)",
+                (
+                    node_id,
+                    model,
+                    i64::try_from(vector.len()).unwrap_or(i64::MAX),
+                    bytes,
+                ),
+            )
+            .map_err(|source| Error::Storage {
+                context: "store node embedding",
+                source,
+            })?;
+        Ok(())
+    }
+
+    /// Returns dense embeddings generated by `model`.
+    /// # Errors
+    /// Returns a storage error if vectors cannot be read.
+    pub fn embeddings(&self, model: &str) -> Result<Vec<(i64, Vec<f32>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT node_id, vector FROM node_embeddings WHERE model = ?1")
+            .map_err(|source| Error::Storage {
+                context: "prepare embeddings query",
+                source,
+            })?;
+        let rows = stmt
+            .query_map((model,), |row| {
+                let id: i64 = row.get(0)?;
+                let bytes: Vec<u8> = row.get(1)?;
+                let vector = bytes
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect();
+                Ok((id, vector))
+            })
+            .map_err(|source| Error::Storage {
+                context: "run embeddings query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read embedding",
+                source,
+            })?);
+        }
+        Ok(out)
     }
 
     /// Inserts a node and returns its assigned id.

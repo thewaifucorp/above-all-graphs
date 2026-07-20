@@ -74,6 +74,13 @@ pub enum Command {
     /// own local graph; query one with `--path`).
     Workspaces,
 
+    /// Manage named hierarchical groups of indexed repositories.
+    Group {
+        /// Group operation.
+        #[command(subcommand)]
+        command: GroupCommand,
+    },
+
     /// Open the aag UI: a local server (127.0.0.1) browsing every indexed
     /// workspace as one app. Launches your browser automatically.
     #[command(alias = "hub")]
@@ -150,11 +157,30 @@ pub enum Command {
         path: PathBuf,
     },
 
-    /// Run the MCP server (newline-delimited JSON-RPC 2.0 over stdio).
+    /// Generate local semantic embeddings for hybrid graph search.
+    Embeddings {
+        /// Repository root whose graph will be embedded.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Run the MCP server over stdio or Streamable HTTP.
     Mcp {
         /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
+
+        /// Transport: `stdio` or `http`.
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+
+        /// HTTP port (0 asks the OS for a free port).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+
+        /// Optional bearer token required by the HTTP transport.
+        #[arg(long, env = "AAG_MCP_API_KEY", hide_env_values = true)]
+        api_key: Option<String>,
     },
 
     /// Record the host agent's vision-pass description of a doc/image, and
@@ -215,6 +241,57 @@ pub enum Command {
     Validate {
         /// YAML or JSON manifest to validate.
         manifest: PathBuf,
+    },
+}
+
+/// Operations for persistent repository groups.
+#[derive(Debug, Subcommand)]
+pub enum GroupCommand {
+    /// Create a group (`platform/backend` also establishes hierarchy by name).
+    Create {
+        /// Slash-separated group name.
+        name: String,
+    },
+    /// Add a registered workspace by unique name or absolute path.
+    Add {
+        /// Group name.
+        name: String,
+        /// Registered workspace name or absolute path.
+        repository: String,
+    },
+    /// Remove a workspace from a group without deleting its graph.
+    Remove {
+        /// Group name.
+        name: String,
+        /// Registered workspace name or absolute path.
+        repository: String,
+    },
+    /// List groups, or members of one group including child groups.
+    List {
+        /// Optional group; omitted lists group definitions.
+        name: Option<String>,
+    },
+    /// Query one group and all of its descendants.
+    Query {
+        /// Group name.
+        name: String,
+        /// Search question.
+        query: String,
+    },
+    /// Show index/manifest status for a group.
+    Status {
+        /// Group name.
+        name: String,
+    },
+    /// Collect API/database/infrastructure contracts for a group.
+    Contracts {
+        /// Group name.
+        name: String,
+    },
+    /// Synchronize every repository in a group.
+    Sync {
+        /// Group name.
+        name: String,
     },
 }
 

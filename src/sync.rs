@@ -2,11 +2,8 @@
 //! deleting `.aag/` first (unlike `bigbang --force`). This is what the
 //! `PostToolUse` hook runs after every agent edit, per `SPEC.md` section 8.
 //!
-//! Cross-file resolution recomputes from the whole repo's symbol table
-//! (see `crate::resolve::index_repo`), so a sync is always one full pass —
-//! the per-file win is the *short-circuit*: when `--file` points at a path
-//! the index doesn't care about (`.aag/`, `target/`, an unrecognized
-//! extension...), sync exits immediately without touching the graph.
+//! With `--file`, only that file is read and parsed. Cross-file edges are
+//! then re-resolved from raw references persisted during the initial index.
 
 use std::path::{Component, Path};
 
@@ -14,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::storage::Graph;
 use crate::{export, resolve};
 
-use crate::resolve::SKIP_DIRS;
+use crate::resolve::{SKIP_DIRS, SKIP_FILES};
 
 /// Whether a change to `file` (repo-relative or absolute) can affect the
 /// index at all. `None` means "no file hint given — always relevant".
@@ -22,6 +19,15 @@ use crate::resolve::SKIP_DIRS;
 pub fn is_relevant(root: &Path, file: Option<&Path>) -> bool {
     let Some(file) = file else { return true };
     let relative = file.strip_prefix(root).unwrap_or(file);
+    if relative
+        .file_name()
+        .is_some_and(|name| SKIP_FILES.contains(&name.to_string_lossy().as_ref()))
+    {
+        return false;
+    }
+    if !resolve::is_indexable_path(relative) {
+        return false;
+    }
     !relative.components().any(|component| {
         matches!(
             component,
@@ -63,7 +69,16 @@ pub fn run(root: &Path, file: Option<&Path>, no_viz: bool) -> Result<()> {
     // watcher's reconcile/reindex.
     let _lock = crate::lock::acquire(root)?;
     let graph = Graph::open(&aag_dir.join("graph.db"))?;
-    let summary = resolve::index_repo(&graph, root)?;
+    let summary = if let Some(file) = file.filter(|_| graph.incremental_ready().unwrap_or(false)) {
+        let absolute = if file.is_absolute() {
+            file.to_path_buf()
+        } else {
+            root.join(file)
+        };
+        resolve::index_file(&graph, root, &absolute)?
+    } else {
+        resolve::index_repo(&graph, root)?
+    };
     tracing::info!(
         files = summary.files,
         docs = summary.docs,
@@ -120,6 +135,14 @@ mod tests {
     }
 
     #[test]
+    fn index_lock_is_not_relevant() {
+        assert!(!is_relevant(
+            Path::new("/repo"),
+            Some(Path::new("/repo/.aag.lock"))
+        ));
+    }
+
+    #[test]
     fn relative_path_in_skip_dir_is_not_relevant() {
         assert!(!is_relevant(
             Path::new("/repo"),
@@ -159,5 +182,37 @@ mod tests {
         // No index exists — an irrelevant file must still return Ok without
         // hitting the IndexMissing check.
         run(&root, Some(Path::new(".aag/graph.db")), true).unwrap();
+    }
+
+    #[test]
+    fn file_sync_preserves_unchanged_node_ids_and_handles_deletion() {
+        let root = scratch_root();
+        fs::write(root.join("stable.rs"), "fn stable() {}").unwrap();
+        fs::write(root.join("changing.rs"), "fn old_name() { stable(); }").unwrap();
+        crate::bigbang::run(
+            &root,
+            &crate::bigbang::Options {
+                no_install: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let graph = Graph::open(&root.join(".aag/graph.db")).unwrap();
+        let stable_id = graph.find_by_name("stable").unwrap().unwrap().id;
+        drop(graph);
+
+        fs::write(root.join("changing.rs"), "fn new_name() { stable(); }").unwrap();
+        run(&root, Some(&root.join("changing.rs")), true).unwrap();
+        let graph = Graph::open(&root.join(".aag/graph.db")).unwrap();
+        assert_eq!(graph.find_by_name("stable").unwrap().unwrap().id, stable_id);
+        assert!(graph.find_by_name("old_name").unwrap().is_none());
+        assert!(graph.find_by_name("new_name").unwrap().is_some());
+        drop(graph);
+
+        fs::remove_file(root.join("changing.rs")).unwrap();
+        run(&root, Some(&root.join("changing.rs")), true).unwrap();
+        let graph = Graph::open(&root.join(".aag/graph.db")).unwrap();
+        assert!(graph.find_by_name("new_name").unwrap().is_none());
+        assert_eq!(graph.find_by_name("stable").unwrap().unwrap().id, stable_id);
     }
 }

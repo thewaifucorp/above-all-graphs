@@ -2,7 +2,7 @@
 wiki: src/mcp.rs
 ---
 
-`mcp.rs` implements the MCP server: newline-delimited JSON-RPC 2.0 over stdio. `run` is the entry point — it takes the indexed `root`, runs `crate::watch::reconcile` once to absorb any edits made while nothing was watching, spawns the background watcher via `crate::watch::spawn`, then loops reading lines from stdin, parsing each as JSON, and writing a response line to stdout when one is produced. Malformed lines and JSON-RPC notifications (requests with no `id`) are silently skipped rather than erroring — `run` documents that it never returns `Err` in practice.
+`mcp.rs` implements the same JSON-RPC handler over two transports. `run` serves newline-delimited stdio. `run_http` serves `POST /mcp` on `127.0.0.1`, returns 202 for notifications, rejects non-local browser origins, and optionally requires `Authorization: Bearer <token>` through `--api-key` or `AAG_MCP_API_KEY`. `GET /mcp` returns 405 because AAG currently uses request/response JSON rather than server-sent events. Both transports reconcile once and start the same incremental watcher.
 
 Dispatch happens in `handle`, which switches on the JSON-RPC `method` field: `initialize` returns protocol version and server info, `ping` returns an empty result, `tools/list` returns the tool schemas via `listed_tools`, and `tools/call` goes through `call_tool`. Unknown methods produce a JSON-RPC error object unless the request was a notification, in which case `handle` returns `None` and nothing is written.
 

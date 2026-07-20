@@ -60,6 +60,15 @@ pub fn parse_file(file_path: &str, source: &str) -> Result<Option<ParsedFile>> {
     parse_polyglot(file_path, source, language).map(Some)
 }
 
+/// Whether a path has one of the supported source-language extensions.
+#[must_use]
+pub fn supports_file(file_path: &str) -> bool {
+    matches!(
+        file_path.rsplit('.').next().unwrap_or_default(),
+        "rs" | "js" | "jsx"
+    ) || polyglot_language(file_path).is_some()
+}
+
 /// The 18 pack-backed languages plus native Rust and JavaScript frontends
 /// make the default top-20 language surface.
 fn polyglot_language(file_path: &str) -> Option<&'static str> {

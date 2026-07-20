@@ -1,7 +1,7 @@
 //! Binary entry point. Owns process wiring (tracing init, arg parsing,
 //! error-to-exit-code translation) — domain logic lives in the `aag` library.
 
-use aag::cli::{Cli, Command};
+use aag::cli::{Cli, Command, GroupCommand};
 use clap::Parser;
 
 fn main() -> anyhow::Result<()> {
@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
             aag::install::run(&path, force)?;
         }
         Command::Workspaces => aag::workspaces::list()?,
+        Command::Group { command } => handle_group(command)?,
         Command::Ui { port, no_open } => aag::hub::run(port, no_open)?,
         Command::Uninstall { path } => aag::install::uninstall(&path)?,
         Command::Hook { event } => {
@@ -56,19 +57,19 @@ fn main() -> anyhow::Result<()> {
         Command::Processes { query, path } => {
             println!("{}", aag::analysis::processes_format(&path, &query)?);
         }
-        Command::Status { path } => {
-            let graph = aag::storage::Graph::open_existing(&path)?;
-            let nodes = graph.all_nodes()?;
-            let edges = graph.all_edges()?;
-            println!(
-                "indexed {} nodes, {} edges, {} communities, {} processes",
-                nodes.len(),
-                edges.len(),
-                aag::analysis::communities(&nodes, &edges).len(),
-                aag::analysis::processes(&nodes, &edges).len()
-            );
+        Command::Status { path } => print_status(&path)?,
+        Command::Embeddings { path } => {
+            let count = aag::semantic::build(&path)?;
+            println!("embedded {count} nodes");
         }
-        Command::Mcp { path } => aag::mcp::run(&path)?,
+        Command::Mcp {
+            path,
+            transport,
+            port,
+            api_key,
+        } => {
+            run_mcp(&path, &transport, port, api_key.as_deref())?;
+        }
         Command::Describe {
             doc,
             description,
@@ -96,6 +97,49 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn run_mcp(
+    path: &std::path::Path,
+    transport: &str,
+    port: u16,
+    api_key: Option<&str>,
+) -> anyhow::Result<()> {
+    if transport == "http" {
+        aag::mcp::run_http(path, port, api_key)?;
+    } else {
+        aag::mcp::run(path)?;
+    }
+    Ok(())
+}
+
+fn print_status(path: &std::path::Path) -> anyhow::Result<()> {
+    let graph = aag::storage::Graph::open_existing(path)?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    println!(
+        "indexed {} nodes, {} edges, {} communities, {} processes",
+        nodes.len(),
+        edges.len(),
+        aag::analysis::communities(&nodes, &edges).len(),
+        aag::analysis::processes(&nodes, &edges).len()
+    );
+    Ok(())
+}
+
+fn handle_group(command: GroupCommand) -> anyhow::Result<()> {
+    let output = match command {
+        GroupCommand::Create { name } => aag::federation::create(&name)?,
+        GroupCommand::Add { name, repository } => aag::federation::add(&name, &repository)?,
+        GroupCommand::Remove { name, repository } => aag::federation::remove(&name, &repository)?,
+        GroupCommand::List { name } => aag::federation::list_group(name.as_deref())?,
+        GroupCommand::Query { name, query } => aag::federation::query_group(&name, &query)?,
+        GroupCommand::Status { name } => aag::federation::status_group(&name)?,
+        GroupCommand::Contracts { name } => aag::federation::contracts_group(&name)?,
+        GroupCommand::Sync { name } => aag::federation::sync_group(&name)?,
+    };
+    println!("{output}");
     Ok(())
 }
 

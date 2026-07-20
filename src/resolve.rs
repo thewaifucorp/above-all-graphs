@@ -28,6 +28,7 @@ use crate::error::Result;
 use crate::parse::parse_file;
 use crate::storage::{
     Confidence, Edge, EdgeKind, EvidenceKind, Graph, Node, NodeKind, Perspective, Provenance,
+    RawReference,
 };
 
 /// Directory names skipped entirely while walking a repo for indexing —
@@ -54,6 +55,9 @@ pub(crate) const SKIP_DIRS: &[&str] = &[
     "__pycache__",
     ".tox",
 ];
+
+/// Generated root-level files that must never trigger or enter indexing.
+pub(crate) const SKIP_FILES: &[&str] = &[".aag.lock"];
 
 /// Text doc extensions, indexed immediately (no vision pass needed).
 const TEXT_DOC_EXTENSIONS: &[&str] = &["md", "txt"];
@@ -100,6 +104,19 @@ fn doc_kind(relative_path: &str) -> Option<DocKind> {
     } else {
         None
     }
+}
+
+/// Whether changing this path can add, remove, or alter graph facts.
+#[must_use]
+pub fn is_indexable_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    if crate::parse::supports_file(&text) || doc_kind(&text).is_some() {
+        return true;
+    }
+    matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some("json" | "yaml" | "yml" | "sql" | "tf" | "hcl")
+    )
 }
 
 /// Symbol names mentioned in `text`, restricted to names `by_name` already
@@ -151,6 +168,7 @@ pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
                 .replace('\\', "/");
 
             if let Some(operations) = crate::openapi::index_contract(graph, &relative, &path)? {
+                persist_operations(graph, &relative, &operations)?;
                 summary.contracts += u32::try_from(operations.len()).unwrap_or(u32::MAX);
                 pending_operations.extend(operations);
                 continue;
@@ -204,9 +222,27 @@ pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
             &mut summary,
         )?;
         resolve_openapi_operations(graph, pending_operations, &by_name, &mut summary)?;
+        graph.mark_incremental_ready()?;
 
         Ok(summary)
     })
+}
+
+fn persist_operations(
+    graph: &Graph,
+    relative: &str,
+    operations: &[crate::openapi::Operation],
+) -> Result<()> {
+    for operation in operations {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "operation".into(),
+            owner: operation.node_name.clone(),
+            target: serde_json::to_string(&operation.candidate_names)
+                .unwrap_or_else(|_| "[]".into()),
+        })?;
+    }
+    Ok(())
 }
 
 fn resolve_openapi_operations(
@@ -271,6 +307,12 @@ fn index_doc_file(
         .or_default()
         .push((doc_id, relative.to_string()));
     if let Some(text) = description {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "doc".into(),
+            owner: relative.to_string(),
+            target: text.clone(),
+        })?;
         pending_doc_mentions.push((doc_id, text));
     }
     Ok(())
@@ -312,14 +354,181 @@ fn index_code_file(
         by_file_symbol.insert((relative.to_string(), name), id);
     }
 
-    pending_imports.extend(parsed.imports.into_iter().map(|raw| (file_id, raw)));
-    pending_calls.extend(
-        parsed
-            .calls
-            .into_iter()
-            .map(|(caller, callee)| (relative.to_string(), caller, callee)),
-    );
+    for raw in parsed.imports {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "import".into(),
+            owner: relative.to_string(),
+            target: raw.clone(),
+        })?;
+        pending_imports.push((file_id, raw));
+    }
+    for (caller, callee) in parsed.calls {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "call".into(),
+            owner: caller.clone(),
+            target: callee.clone(),
+        })?;
+        pending_calls.push((relative.to_string(), caller, callee));
+    }
     Ok(())
+}
+
+/// Reindexes exactly one changed file, then re-resolves cross-file edges from
+/// persisted raw references. Unchanged files are neither read nor parsed.
+///
+/// # Errors
+/// Returns an error when the changed file cannot be parsed or the graph cannot be updated.
+pub fn index_file(graph: &Graph, root: &Path, file: &Path) -> Result<IndexSummary> {
+    let relative = file
+        .strip_prefix(root)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/");
+    graph.transaction(|| {
+        graph.remove_file(&relative)?;
+        if file.is_file() {
+            let mut summary = IndexSummary::default();
+            let mut by_name = HashMap::new();
+            let mut by_file_symbol = HashMap::new();
+            let mut pending_imports = Vec::new();
+            let mut pending_calls = Vec::new();
+            let mut pending_docs = Vec::new();
+            if let Some(operations) = crate::openapi::index_contract(graph, &relative, file)? {
+                persist_operations(graph, &relative, &operations)?;
+            } else if crate::artifacts::index_artifact(graph, &relative, file)?.is_some() {
+            } else if let Some(kind) = doc_kind(&relative) {
+                index_doc_file(
+                    graph,
+                    &relative,
+                    file,
+                    kind,
+                    &mut by_name,
+                    &mut pending_docs,
+                    &mut summary,
+                )?;
+            } else if let Ok(source) = fs::read_to_string(file)
+                && let Some(parsed) = parse_file(&relative, &source)?
+            {
+                index_code_file(
+                    graph,
+                    &relative,
+                    &source,
+                    parsed,
+                    &mut by_name,
+                    &mut by_file_symbol,
+                    &mut pending_imports,
+                    &mut pending_calls,
+                    &mut summary,
+                )?;
+            }
+        }
+        rebuild_resolved_edges(graph)
+    })
+}
+
+/// Rebuilds name-resolved relations using stored parser output only.
+///
+/// # Errors
+/// Returns an error when persisted references cannot be read or edges cannot be written.
+pub fn rebuild_resolved_edges(graph: &Graph) -> Result<IndexSummary> {
+    graph.clear_resolved_edges()?;
+    let nodes = graph.all_nodes()?;
+    let mut by_name: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+    let mut by_file_symbol = HashMap::new();
+    let mut by_file_node = HashMap::new();
+    let mut by_file_name = HashMap::new();
+    for node in &nodes {
+        let Some(id) = node.id else { continue };
+        if node.kind == NodeKind::File {
+            by_file_node.insert(node.file_path.clone(), id);
+        } else {
+            by_name
+                .entry(node.name.clone())
+                .or_default()
+                .push((id, node.file_path.clone()));
+            by_file_name.insert((node.file_path.clone(), node.name.clone()), id);
+            if matches!(
+                node.kind,
+                NodeKind::Function | NodeKind::Method | NodeKind::Struct | NodeKind::Interface
+            ) {
+                by_file_symbol.insert((node.file_path.clone(), node.name.clone()), id);
+            }
+        }
+    }
+    let mut imports = Vec::new();
+    let mut calls = Vec::new();
+    let mut docs = Vec::new();
+    let mut operations = Vec::new();
+    for reference in graph.raw_references()? {
+        match reference.kind.as_str() {
+            "import" => {
+                if let Some(&id) = by_file_node.get(&reference.file_path) {
+                    imports.push((id, reference.target));
+                }
+            }
+            "call" => calls.push((reference.file_path, reference.owner, reference.target)),
+            "doc" => {
+                if let Some(&id) = by_file_name.get(&(reference.file_path, reference.owner)) {
+                    docs.push((id, reference.target));
+                }
+            }
+            "operation" => {
+                if let Some(&node_id) =
+                    by_file_name.get(&(reference.file_path, reference.owner.clone()))
+                {
+                    let candidate_names =
+                        serde_json::from_str(&reference.target).unwrap_or_default();
+                    operations.push(crate::openapi::Operation {
+                        node_id,
+                        node_name: reference.owner,
+                        candidate_names,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut summary = IndexSummary::default();
+    resolve_doc_mentions(graph, docs, &by_name, &mut summary)?;
+    resolve_imports(graph, imports, &by_name, &mut summary)?;
+    resolve_calls(graph, calls, &by_name, &by_file_symbol, &mut summary)?;
+    resolve_openapi_operations(graph, operations, &by_name, &mut summary)?;
+    summary.files = u32::try_from(
+        nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::File)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    summary.docs = u32::try_from(
+        nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Doc)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    summary.contracts = u32::try_from(
+        nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Endpoint)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    summary.artifacts = u32::try_from(
+        nodes
+            .iter()
+            .filter(|node| matches!(node.kind, NodeKind::DatabaseTable | NodeKind::InfraResource))
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    summary.nodes = u32::try_from(nodes.len())
+        .unwrap_or(u32::MAX)
+        .saturating_sub(summary.files)
+        .saturating_sub(summary.docs);
+    summary.edges = u32::try_from(graph.all_edges()?.len()).unwrap_or(u32::MAX);
+    Ok(summary)
 }
 
 /// A doc naming a symbol that exists in more than this many places is not
@@ -516,7 +725,7 @@ fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
             Some(file_type) if file_type.is_dir() => {
                 !SKIP_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
             }
-            _ => true,
+            _ => !SKIP_FILES.contains(&entry.file_name().to_string_lossy().as_ref()),
         });
     builder
         .build()

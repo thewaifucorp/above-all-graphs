@@ -15,6 +15,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Operation {
     pub(crate) node_id: i64,
+    pub(crate) node_name: String,
     pub(crate) candidate_names: Vec<String>,
 }
 
@@ -134,11 +135,12 @@ fn index_operations(
                 "path_parameters": item.get("parameters").cloned().unwrap_or_else(|| json!([])),
                 "operation": operation
             });
+            let node_name = format!("{} {route}", method.to_uppercase());
             let node_id = graph.insert_node_with_provenance(
                 &Node {
                     id: None,
                     kind: NodeKind::Endpoint,
-                    name: format!("{} {route}", method.to_uppercase()),
+                    name: node_name.clone(),
                     file_path: relative.to_string(),
                     start_line: 1,
                     end_line: 1,
@@ -153,6 +155,7 @@ fn index_operations(
             );
             operations.push(Operation {
                 node_id,
+                node_name,
                 candidate_names,
             });
         }

@@ -21,3 +21,5 @@ GitNexus solves multi-repo with a unified enterprise graph server-side. `aag` de
 - `GET /w/<root>/<page>` — a registered workspace's generated site
 
 The registry is read fresh on every request, so the picker always reflects the latest `bigbang`/`sync` — nothing to regenerate. The static per-repo `.aag/index.html` remains as the no-server fallback; the UI is the front door.
+
+Named groups live separately in `~/.config/aag/groups.json`. Names use slash hierarchy: querying `platform` includes direct members of `platform` and every descendant such as `platform/backend`. `aag group create/add/remove/list/query/status/contracts/sync` manages and operates on these groups without moving or merging each repository's local graph. The MCP `group_*` tools accept the same group names; `all` retains the original all-workspaces federation.

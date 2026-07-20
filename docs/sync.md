@@ -8,7 +8,9 @@ The refresh path hooks call after every edit: one `index_repo` pass plus regener
 
 ## Why it is a full pass with a short-circuit
 
-Cross-file resolution recomputes from the whole repo's symbol table (`resolve::index_repo` clears and rebuilds), so patching a single file's nodes would still need the whole-repo pass to stay correct. The per-file win is the short-circuit instead: when `--file` points at a path the index does not care about (`.aag/`, `target/`, `node_modules`, `.claude/`, `.cursor/`...), sync returns instantly without opening the graph. Since agent hooks fire on every single Write/Edit — including ones to generated artifacts — the short-circuit is what keeps the hook free in practice.
+After the first full index, parsers persist unresolved imports, calls, doc mentions, and OpenAPI implementation candidates in `raw_references`. `aag sync --file <path>` deletes and reparses only that file; unchanged nodes keep their IDs. It then rebuilds cross-file edges from the persisted references and the SQLite symbol table, without rereading or reparsing the rest of the repository. Deleted and renamed files use the same path.
+
+Older databases without the incremental-ready marker receive one full compatibility pass before file-level updates begin. Irrelevant paths (`.aag/`, `target/`, `node_modules`, agent configuration) still short-circuit without touching the graph.
 
 ## Skip list
 

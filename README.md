@@ -103,10 +103,13 @@ aag affected --stdin         test files affected by a diff (pipe git diff --name
 aag export [--output <path>]  compile graph.db to an AAG Protocol manifest
 aag validate <manifest>       structural + semantic protocol validation
 aag describe <doc> <text>    attach a vision-pass description to an image/PDF node
-aag sync [--file <path>]     refresh index + site in place (hooks call this)
+aag sync [--file <path>]     reparse one changed file + refresh edges/site
+aag embeddings               generate local semantic vectors (semantic build)
+aag group <command>          named hierarchical multi-repo operations
 aag workspaces               list every repo this machine has indexed
 aag install [--force] / aag uninstall   agent integration, explicit
-aag mcp                      the MCP server (stdio JSON-RPC)
+aag mcp                      MCP over stdio JSON-RPC
+aag mcp --transport http     MCP HTTP on loopback (optional --api-key)
 ```
 
 Every MCP tool has a CLI twin, so everything works in CI and pre-commit hooks too.
@@ -119,7 +122,7 @@ SQL DDL tables and foreign keys, Terraform/HCL resources, OpenAPI/Swagger contra
 
 ## Multi-workspace
 
-Each repo keeps its own local graph — no central server, no unified enterprise index. A lightweight registry (`~/.config/aag/workspaces.json`) records every workspace `bigbang`/`sync` touches; `aag ui` browses them all from one page, `aag workspaces` lists them in the terminal, and any command reaches a specific one with `--path`. Stale entries prune themselves.
+Each repo keeps its own local graph — no central server, no unified enterprise index. A lightweight registry (`~/.config/aag/workspaces.json`) records every workspace `bigbang`/`sync` touches; `aag ui` browses them all from one page, `aag workspaces` lists them in the terminal, and any command reaches a specific one with `--path`. Named groups such as `platform/backend` select related repositories while keeping their graphs independent. Stale entries prune themselves.
 
 ## Trust model for edges
 

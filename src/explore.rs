@@ -95,6 +95,19 @@ fn search(graph: &Graph, query: &str) -> Result<Vec<Node>> {
                 .or_insert((node, score));
         }
     }
+    // Reciprocal-rank fusion: semantic results can introduce candidates that
+    // lexical search misses, while exact/prefix matches retain more weight.
+    for (rank, (node, _similarity)) in crate::semantic::search(graph, query, 40)?
+        .into_iter()
+        .enumerate()
+    {
+        let Some(id) = node.id else { continue };
+        let score = u32::try_from(1200 / (60 + rank)).unwrap_or(0);
+        ranked
+            .entry(id)
+            .and_modify(|(_, total)| *total += score)
+            .or_insert((node, score));
+    }
     let mut degree = HashMap::<i64, u32>::new();
     for edge in graph.all_edges()? {
         *degree.entry(edge.src).or_default() += 1;

@@ -170,37 +170,37 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "group_list",
-        description: "List every repository in the local AAG federation.",
+        description: "List repositories in a named hierarchical group or the full federation.",
         arg: "group",
-        arg_description: "Pass `all`; named subgroups are reserved for future policy filters.",
+        arg_description: "Named group or `all`.",
         implemented: true,
     },
     ToolSpec {
         name: "group_query",
-        description: "Query all registered repository graphs.",
+        description: "Query a named repository group and all of its descendants.",
         arg: "query",
         arg_description: "Symbol or natural-language search term.",
         implemented: true,
     },
     ToolSpec {
         name: "group_status",
-        description: "Index and manifest status across registered repositories.",
+        description: "Index and manifest status across a named repository group.",
         arg: "group",
-        arg_description: "Pass `all`.",
+        arg_description: "Named group or `all`.",
         implemented: true,
     },
     ToolSpec {
         name: "group_contracts",
-        description: "OpenAPI, database, and infrastructure contracts across repositories.",
+        description: "OpenAPI, database, and infrastructure contracts across a named group.",
         arg: "group",
-        arg_description: "Pass `all`.",
+        arg_description: "Named group or `all`.",
         implemented: true,
     },
     ToolSpec {
         name: "group_sync",
-        description: "Synchronize every registered repository graph and manifest.",
+        description: "Synchronize every repository graph and manifest in a named group.",
         arg: "group",
-        arg_description: "Pass `all`.",
+        arg_description: "Named group or `all`.",
         implemented: true,
     },
     ToolSpec {
@@ -254,6 +254,97 @@ pub fn run(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Runs MCP Streamable HTTP on loopback. JSON-RPC requests are accepted at
+/// `POST /mcp`; `GET /mcp` returns 405 because this server does not emit SSE.
+/// When `api_key` is set, every request requires `Authorization: Bearer ...`.
+///
+/// # Errors
+/// Returns an error if the loopback listener cannot be created.
+pub fn run_http(root: &Path, port: u16, api_key: Option<&str>) -> Result<()> {
+    use tiny_http::{Header, Method, Response, Server, StatusCode};
+
+    let root = root.to_path_buf();
+    if let Err(error) = crate::watch::reconcile(&root) {
+        tracing::warn!(%error, "startup reconciliation failed");
+    }
+    crate::watch::spawn(root.clone());
+    let server = Server::http(("127.0.0.1", port)).map_err(|error| Error::Protocol {
+        context: "MCP HTTP bind failed",
+        detail: error.to_string(),
+    })?;
+    let json_header =
+        Header::from_bytes("Content-Type", "application/json").map_err(|()| Error::Protocol {
+            context: "MCP HTTP header creation failed",
+            detail: "invalid static content-type header".into(),
+        })?;
+    eprintln!(
+        "aag MCP HTTP listening on http://{}/mcp",
+        server.server_addr()
+    );
+
+    for mut request in server.incoming_requests() {
+        if request.url() != "/mcp" {
+            let _ = request.respond(Response::empty(StatusCode(404)));
+            continue;
+        }
+        if !origin_allowed(&request) {
+            let _ = request.respond(Response::empty(StatusCode(403)));
+            continue;
+        }
+        if !authorized(&request, api_key) {
+            let _ = request.respond(Response::empty(StatusCode(401)));
+            continue;
+        }
+        if request.method() != &Method::Post {
+            let _ = request.respond(Response::empty(StatusCode(405)));
+            continue;
+        }
+        let mut body = String::new();
+        if request.as_reader().read_to_string(&mut body).is_err() {
+            let _ = request.respond(Response::empty(StatusCode(400)));
+            continue;
+        }
+        let Ok(message) = serde_json::from_str::<Value>(&body) else {
+            let response =
+                json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}});
+            let _ = request.respond(
+                Response::from_string(response.to_string())
+                    .with_status_code(400)
+                    .with_header(json_header.clone()),
+            );
+            continue;
+        };
+        if let Some(response) = handle(&root, &message) {
+            let _ = request.respond(
+                Response::from_string(response.to_string()).with_header(json_header.clone()),
+            );
+        } else {
+            let _ = request.respond(Response::empty(StatusCode(202)));
+        }
+    }
+    Ok(())
+}
+
+fn origin_allowed(request: &tiny_http::Request) -> bool {
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv("Origin"))
+        .is_none_or(|header| {
+            let origin = header.value.as_str();
+            origin.starts_with("http://127.0.0.1") || origin.starts_with("http://localhost")
+        })
+}
+
+fn authorized(request: &tiny_http::Request, api_key: Option<&str>) -> bool {
+    let Some(api_key) = api_key else { return true };
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv("Authorization"))
+        .is_some_and(|header| header.value.as_str() == format!("Bearer {api_key}"))
+}
+
 fn handle(root: &Path, request: &Value) -> Option<Value> {
     let id = request.get("id").cloned();
     let method = request
@@ -264,7 +355,7 @@ fn handle(root: &Path, request: &Value) -> Option<Value> {
 
     let result = match method {
         "initialize" => Ok(json!({
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": "2025-11-25",
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "aag", "version": env!("CARGO_PKG_VERSION")},
         })),
@@ -302,6 +393,34 @@ fn listed_tools(enabled: &HashSet<String>) -> Vec<Value> {
 }
 
 fn tool_schema(spec: &ToolSpec) -> Value {
+    if matches!(
+        spec.name,
+        "group_list" | "group_status" | "group_contracts" | "group_sync"
+    ) {
+        return json!({
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {"group": {"type": "string", "description": "Named group or `all`."}},
+                "required": ["group"]
+            }
+        });
+    }
+    if spec.name == "group_query" {
+        return json!({
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group": {"type": "string", "description": "Named group or `all`."},
+                    "query": {"type": "string", "description": "Symbol or natural-language search term."}
+                },
+                "required": ["group", "query"]
+            }
+        });
+    }
     if spec.name == "describe_doc" {
         return json!({
             "name": spec.name,
@@ -354,6 +473,9 @@ fn call_tool(root: &Path, params: Option<&Value>) -> std::result::Result<Value, 
     if name == "rename" {
         return call_rename(root, params);
     }
+    if name.starts_with("group_") {
+        return call_group(params, name);
+    }
 
     let spec = TOOL_SPECS
         .iter()
@@ -401,13 +523,37 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "list_prs" => crate::pr::list(root, arg),
         "get_pr_impact" => crate::pr::impact(root, arg),
         "triage_prs" => crate::pr::triage(root, arg),
-        "group_list" => Ok(crate::federation::list()),
-        "group_query" => crate::federation::query(arg),
-        "group_status" => Ok(crate::federation::status()),
-        "group_contracts" => crate::federation::contracts(),
-        "group_sync" => crate::federation::sync(),
         _ => unreachable!("dispatch only called for implemented tools"),
     }
+}
+
+fn call_group(params: &Value, name: &str) -> std::result::Result<Value, String> {
+    let arguments = params
+        .get("arguments")
+        .ok_or_else(|| "missing arguments".to_string())?;
+    let group = arguments
+        .get("group")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "missing argument `group`".to_string())?;
+    let result = match name {
+        "group_list" => crate::federation::list_group((group != "all").then_some(group)),
+        "group_query" => {
+            let query = arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "missing argument `query`".to_string())?;
+            crate::federation::query_group(group, query)
+        }
+        "group_status" => crate::federation::status_group(group),
+        "group_contracts" => crate::federation::contracts_group(group),
+        "group_sync" => crate::federation::sync_group(group),
+        _ => unreachable!("group dispatcher called with non-group tool"),
+    };
+    let (text, is_error) = match result {
+        Ok(text) => (text, false),
+        Err(error) => (error.to_string(), true),
+    };
+    Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
 }
 
 fn neighbors_text(root: &Path, name: &str) -> Result<String> {

@@ -14,7 +14,7 @@ name = "aag"
 path = "src/lib.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
@@ -31,6 +31,11 @@ jsonschema = { version = "0.48", default-features = false }
 notify = "8"
 notify-debouncer-mini = "0.7"
 tiny_http = "0.12"
+fastembed = { version = "5.17.3", optional = true }
+
+[features]
+default = []
+semantic = ["dep:fastembed"]
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
