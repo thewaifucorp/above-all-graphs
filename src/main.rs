@@ -50,6 +50,24 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Explore { query, path } => aag::explore::run(&path, &query)?,
         Command::Impact { symbol, path } => aag::impact::run(&path, &symbol)?,
+        Command::Communities { query, path } => {
+            println!("{}", aag::analysis::communities_format(&path, &query)?);
+        }
+        Command::Processes { query, path } => {
+            println!("{}", aag::analysis::processes_format(&path, &query)?);
+        }
+        Command::Status { path } => {
+            let graph = aag::storage::Graph::open_existing(&path)?;
+            let nodes = graph.all_nodes()?;
+            let edges = graph.all_edges()?;
+            println!(
+                "indexed {} nodes, {} edges, {} communities, {} processes",
+                nodes.len(),
+                edges.len(),
+                aag::analysis::communities(&nodes, &edges).len(),
+                aag::analysis::processes(&nodes, &edges).len()
+            );
+        }
         Command::Mcp { path } => aag::mcp::run(&path)?,
         Command::Describe {
             doc,
@@ -67,6 +85,14 @@ fn main() -> anyhow::Result<()> {
         Command::Affected { path, .. } => {
             let stdin = std::io::stdin();
             aag::refactor::affected_run(&path, stdin.lock())?;
+        }
+        Command::Export { path, output } => {
+            let written = aag::protocol::run_export(&path, output.as_deref())?;
+            println!("exported {}", written.display());
+        }
+        Command::Validate { manifest } => {
+            aag::protocol::run_validate(&manifest)?;
+            println!("valid {}", manifest.display());
         }
     }
 

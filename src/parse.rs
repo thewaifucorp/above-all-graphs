@@ -54,7 +54,313 @@ pub fn parse_file(file_path: &str, source: &str) -> Result<Option<ParsedFile>> {
             return parser.parse(file_path, source).map(Some);
         }
     }
-    Ok(None)
+    let Some(language) = polyglot_language(file_path) else {
+        return Ok(None);
+    };
+    parse_polyglot(file_path, source, language).map(Some)
+}
+
+/// The 18 pack-backed languages plus native Rust and JavaScript frontends
+/// make the default top-20 language surface.
+fn polyglot_language(file_path: &str) -> Option<&'static str> {
+    let extension = file_path.rsplit('.').next()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "ts" => Some("typescript"),
+        "tsx" => Some("tsx"),
+        "py" | "pyw" => Some("python"),
+        "java" => Some("java"),
+        "c" | "h" => Some("c"),
+        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => Some("cpp"),
+        "cs" => Some("csharp"),
+        "go" => Some("go"),
+        "php" | "phtml" => Some("php"),
+        "rb" | "rake" => Some("ruby"),
+        "swift" => Some("swift"),
+        "kt" | "kts" => Some("kotlin"),
+        "dart" => Some("dart"),
+        "scala" | "sc" => Some("scala"),
+        "sh" | "bash" | "zsh" => Some("bash"),
+        "lua" => Some("lua"),
+        "r" => Some("r"),
+        "ex" | "exs" => Some("elixir"),
+        "m" | "mm" => Some("objc"),
+        _ => None,
+    }
+}
+
+#[allow(clippy::items_after_statements)]
+fn parse_polyglot(file_path: &str, source: &str, language: &str) -> Result<ParsedFile> {
+    use tree_sitter_language_pack::{ProcessConfig, StructureItem, StructureKind, SymbolKind};
+
+    let processed = tree_sitter_language_pack::process(source, &ProcessConfig::new(language).all())
+        .map_err(|error| Error::Parse {
+            file: file_path.to_string(),
+            reason: error.to_string(),
+        })?;
+    let mut out = ParsedFile::default();
+    let mut owners = Vec::new();
+
+    fn append_structure(
+        item: &StructureItem,
+        file_path: &str,
+        out: &mut ParsedFile,
+        owners: &mut Vec<(String, usize, usize)>,
+    ) {
+        if let Some(name) = &item.name {
+            let kind = match item.kind {
+                StructureKind::Function => NodeKind::Function,
+                StructureKind::Method => NodeKind::Method,
+                StructureKind::Interface | StructureKind::Trait => NodeKind::Interface,
+                StructureKind::Class
+                | StructureKind::Struct
+                | StructureKind::Enum
+                | StructureKind::Impl => NodeKind::Struct,
+                StructureKind::Module | StructureKind::Namespace | StructureKind::Other(_) => {
+                    NodeKind::Interface
+                }
+            };
+            out.nodes.push(Node {
+                id: None,
+                kind,
+                name: name.clone(),
+                file_path: file_path.to_string(),
+                start_line: u32::try_from(item.span.start_line + 1).unwrap_or(u32::MAX),
+                end_line: u32::try_from(item.span.end_line + 1).unwrap_or(u32::MAX),
+                description: item.signature.clone().or_else(|| item.doc_comment.clone()),
+            });
+            if matches!(kind, NodeKind::Function | NodeKind::Method) {
+                owners.push((name.clone(), item.span.start_byte, item.span.end_byte));
+            }
+        }
+        for child in &item.children {
+            append_structure(child, file_path, out, owners);
+        }
+    }
+    for item in &processed.structure {
+        append_structure(item, file_path, &mut out, &mut owners);
+    }
+    for symbol in &processed.symbols {
+        if out.nodes.iter().any(|node| node.name == symbol.name) {
+            continue;
+        }
+        let kind = match symbol.kind {
+            SymbolKind::Function => NodeKind::Function,
+            SymbolKind::Class | SymbolKind::Type | SymbolKind::Enum => NodeKind::Struct,
+            SymbolKind::Interface | SymbolKind::Module | SymbolKind::Other(_) => {
+                NodeKind::Interface
+            }
+            SymbolKind::Variable | SymbolKind::Constant => continue,
+        };
+        out.nodes.push(Node {
+            id: None,
+            kind,
+            name: symbol.name.clone(),
+            file_path: file_path.to_string(),
+            start_line: u32::try_from(symbol.span.start_line + 1).unwrap_or(u32::MAX),
+            end_line: u32::try_from(symbol.span.end_line + 1).unwrap_or(u32::MAX),
+            description: symbol
+                .type_annotation
+                .clone()
+                .or_else(|| symbol.doc.clone()),
+        });
+        if kind == NodeKind::Function {
+            owners.push((
+                symbol.name.clone(),
+                symbol.span.start_byte,
+                symbol.span.end_byte,
+            ));
+        }
+    }
+    append_ast_declarations(language, source, file_path, &mut out, &mut owners)?;
+    out.imports = processed
+        .imports
+        .into_iter()
+        .flat_map(|import| {
+            if import.items.is_empty() {
+                vec![import.source]
+            } else {
+                import
+                    .items
+                    .into_iter()
+                    .map(|item| format!("{}::{item}", import.source))
+                    .collect()
+            }
+        })
+        .collect();
+    out.calls = polyglot_calls(language, source, &owners, file_path)?;
+    Ok(out)
+}
+
+fn append_ast_declarations(
+    language: &str,
+    source: &str,
+    file_path: &str,
+    out: &mut ParsedFile,
+    owners: &mut Vec<(String, usize, usize)>,
+) -> Result<()> {
+    let mut parser =
+        tree_sitter_language_pack::get_parser(language).map_err(|error| Error::Parse {
+            file: file_path.to_string(),
+            reason: error.to_string(),
+        })?;
+    let tree = parser.parse(source).ok_or_else(|| Error::Parse {
+        file: file_path.to_string(),
+        reason: "tree-sitter returned no tree".to_string(),
+    })?;
+    collect_ast_declarations(&tree.root_node(), source, file_path, out, owners);
+    Ok(())
+}
+
+fn collect_ast_declarations(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    file_path: &str,
+    out: &mut ParsedFile,
+    owners: &mut Vec<(String, usize, usize)>,
+) {
+    let syntax = node.kind();
+    let kind = if matches!(
+        syntax.as_str(),
+        "function_definition"
+            | "function_declaration"
+            | "method_declaration"
+            | "method_definition"
+            | "function_item"
+            | "constructor_declaration"
+            | "function_signature"
+    ) {
+        Some(
+            if syntax.contains("method") || syntax.contains("constructor") {
+                NodeKind::Method
+            } else {
+                NodeKind::Function
+            },
+        )
+    } else if matches!(
+        syntax.as_str(),
+        "class_declaration"
+            | "class_definition"
+            | "struct_specifier"
+            | "struct_declaration"
+            | "object_declaration"
+            | "enum_declaration"
+    ) {
+        Some(NodeKind::Struct)
+    } else if matches!(
+        syntax.as_str(),
+        "interface_declaration" | "trait_declaration"
+    ) {
+        Some(NodeKind::Interface)
+    } else {
+        None
+    };
+    let assigned_name = node.parent().and_then(|parent| {
+        ["left", "lhs", "name"]
+            .into_iter()
+            .find_map(|field| parent.child_by_field_name(field))
+    });
+    if let Some(kind) = kind
+        && let Some(name_node) = assigned_name.or_else(|| {
+            ["name", "declarator"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .or_else(|| Some(node.clone()))
+        })
+        && let Some(name) = declaration_identifier(&name_node, source)
+        && !out.nodes.iter().any(|existing| existing.name == name)
+    {
+        out.nodes.push(Node {
+            id: None,
+            kind,
+            name: name.to_string(),
+            file_path: file_path.to_string(),
+            start_line: u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX),
+            end_line: u32::try_from(node.end_position().row + 1).unwrap_or(u32::MAX),
+            description: None,
+        });
+        if matches!(kind, NodeKind::Function | NodeKind::Method) {
+            owners.push((name.to_string(), node.start_byte(), node.end_byte()));
+        }
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_ast_declarations(&child, source, file_path, out, owners);
+        }
+    }
+}
+
+fn declaration_identifier<'a>(
+    node: &tree_sitter_language_pack::Node,
+    source: &'a str,
+) -> Option<&'a str> {
+    if matches!(
+        node.kind().as_str(),
+        "identifier" | "type_identifier" | "field_identifier" | "simple_identifier"
+    ) {
+        return source.get(node.byte_range().start..node.byte_range().end);
+    }
+    (0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX))
+        .filter_map(|index| node.named_child(index))
+        .find_map(|child| declaration_identifier(&child, source))
+}
+
+fn polyglot_calls(
+    language: &str,
+    source: &str,
+    owners: &[(String, usize, usize)],
+    file_path: &str,
+) -> Result<Vec<(String, String)>> {
+    let mut parser =
+        tree_sitter_language_pack::get_parser(language).map_err(|error| Error::Parse {
+            file: file_path.to_string(),
+            reason: error.to_string(),
+        })?;
+    let tree = parser.parse(source).ok_or_else(|| Error::Parse {
+        file: file_path.to_string(),
+        reason: "tree-sitter returned no tree".to_string(),
+    })?;
+    let mut calls = Vec::new();
+    collect_polyglot_calls(&tree.root_node(), source, owners, &mut calls);
+    calls.sort_unstable();
+    calls.dedup();
+    Ok(calls)
+}
+
+fn collect_polyglot_calls(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    owners: &[(String, usize, usize)],
+    out: &mut Vec<(String, String)>,
+) {
+    let kind = node.kind();
+    if matches!(
+        kind.as_str(),
+        "call_expression" | "invocation_expression" | "function_call" | "call" | "command"
+    ) && let Some(owner) = owners
+        .iter()
+        .filter(|(_, start, end)| *start <= node.start_byte() && node.end_byte() <= *end)
+        .min_by_key(|(_, start, end)| end - start)
+        && let Some(target) = ["function", "name", "target", "callee", "method"]
+            .into_iter()
+            .find_map(|field| node.child_by_field_name(field))
+        && let Some(name) = source
+            .get(target.byte_range().start..target.byte_range().end)
+            .and_then(last_callable_identifier)
+    {
+        out.push((owner.0.clone(), name.to_string()));
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_polyglot_calls(&child, source, owners, out);
+        }
+    }
+}
+
+fn last_callable_identifier(value: &str) -> Option<&str> {
+    value
+        .trim()
+        .rsplit(|character: char| !character.is_alphanumeric() && character != '_')
+        .find(|part| !part.is_empty())
 }
 
 /// Tree-sitter-backed parser for JavaScript modules.
@@ -419,5 +725,66 @@ mod tests {
             parsed.imports,
             vec!["import { helper } from './helper.mjs';".to_string()]
         );
+    }
+
+    #[test]
+    fn parses_top_twenty_languages() {
+        let fixtures = [
+            ("main.rs", "fn greet() { helper(); }", "greet"),
+            ("main.js", "function greet() { helper(); }", "greet"),
+            ("main.ts", "function greet(): void { helper(); }", "greet"),
+            ("main.py", "def greet():\n    helper()\n", "greet"),
+            (
+                "Main.java",
+                "class Main { void greet() { helper(); } }",
+                "greet",
+            ),
+            ("main.c", "void greet(void) { helper(); }", "greet"),
+            ("main.cpp", "void greet() { helper(); }", "greet"),
+            (
+                "Main.cs",
+                "class Main { void Greet() { Helper(); } }",
+                "Greet",
+            ),
+            (
+                "main.go",
+                "package main\nfunc greet() { helper() }",
+                "greet",
+            ),
+            ("main.php", "<?php function greet() { helper(); }", "greet"),
+            ("main.rb", "def greet\n  helper\nend\n", "greet"),
+            ("main.swift", "func greet() { helper() }", "greet"),
+            ("Main.kt", "fun greet() { helper() }", "greet"),
+            ("main.dart", "void greet() { helper(); }", "greet"),
+            ("Main.scala", "def greet(): Unit = helper()", "greet"),
+            ("main.sh", "greet() { helper; }", "greet"),
+            ("main.lua", "function greet() helper() end", "greet"),
+            ("main.r", "greet <- function() { helper() }", "greet"),
+            (
+                "main.ex",
+                "defmodule Main do\n  def greet, do: helper()\nend",
+                "greet",
+            ),
+            ("main.m", "void greet(void) { helper(); }", "greet"),
+        ];
+
+        for (path, source, expected) in fixtures {
+            let parsed = parse_file(path, source)
+                .unwrap_or_else(|error| panic!("{path}: {error}"))
+                .unwrap_or_else(|| panic!("{path}: language not detected"));
+            assert!(
+                parsed.nodes.iter().any(|node| node.name == expected),
+                "{path}: expected {expected}, got {:?}; syntax {}",
+                parsed
+                    .nodes
+                    .iter()
+                    .map(|node| &node.name)
+                    .collect::<Vec<_>>(),
+                polyglot_language(path)
+                    .and_then(|language| tree_sitter_language_pack::get_parser(language).ok())
+                    .and_then(|mut parser| parser.parse(source))
+                    .map_or_else(|| "native".into(), |tree| tree.root_node().to_sexp())
+            );
+        }
     }
 }

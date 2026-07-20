@@ -26,12 +26,14 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::parse::parse_file;
-use crate::storage::{Confidence, Edge, EdgeKind, Graph, Node, NodeKind};
+use crate::storage::{
+    Confidence, Edge, EdgeKind, EvidenceKind, Graph, Node, NodeKind, Perspective, Provenance,
+};
 
 /// Directory names skipped entirely while walking a repo for indexing —
 /// shared by the watcher and `aag sync` so "what can affect the index"
 /// has exactly one definition. `.playwright-mcp` holds browser-automation
-/// artifacts (screenshots, snapshots) and `.claude`/`.cursor` hold agent
+/// artifacts (screenshots, snapshots) and `.claude`/`.cursor`/`.agents` hold agent
 /// config (including the skill pack `aag install` writes) — all of which
 /// would otherwise pollute the graph as doc nodes. `.venv`/`venv`/
 /// `__pycache__`/`.tox` are a belt-and-suspenders net for repos whose
@@ -46,6 +48,7 @@ pub(crate) const SKIP_DIRS: &[&str] = &[
     ".playwright-mcp",
     ".claude",
     ".cursor",
+    ".agents",
     ".venv",
     "venv",
     "__pycache__",
@@ -57,7 +60,10 @@ const TEXT_DOC_EXTENSIONS: &[&str] = &["md", "txt"];
 
 /// Binary/image doc extensions — inserted unprocessed, described later by
 /// the host agent via `crate::docs::describe`.
-const BINARY_DOC_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "gif", "webp", "svg"];
+const BINARY_DOC_EXTENSIONS: &[&str] = &[
+    "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "docx", "pptx", "xlsx", "odt", "ods", "odp",
+    "mp4", "mov", "avi", "mkv", "webm",
+];
 
 /// Counts from one `index_repo` pass — used for logging and tests.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +74,10 @@ pub struct IndexSummary {
     pub nodes: u32,
     /// Doc nodes inserted (text docs indexed immediately, binary docs pending description).
     pub docs: u32,
+    /// Operations declared by OpenAPI/Swagger contracts.
+    pub contracts: u32,
+    /// Database and infrastructure declarations.
+    pub artifacts: u32,
     /// Edges resolved and inserted (imports + calls + explains).
     pub edges: u32,
 }
@@ -131,6 +141,7 @@ pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
         let mut pending_imports: Vec<(i64, String)> = Vec::new();
         let mut pending_calls: Vec<(String, String, String)> = Vec::new();
         let mut pending_doc_mentions: Vec<(i64, String)> = Vec::new();
+        let mut pending_operations = Vec::new();
 
         for path in walk_files(root) {
             let relative = path
@@ -138,6 +149,16 @@ pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
+
+            if let Some(operations) = crate::openapi::index_contract(graph, &relative, &path)? {
+                summary.contracts += u32::try_from(operations.len()).unwrap_or(u32::MAX);
+                pending_operations.extend(operations);
+                continue;
+            }
+            if let Some(count) = crate::artifacts::index_artifact(graph, &relative, &path)? {
+                summary.artifacts = summary.artifacts.saturating_add(count);
+                continue;
+            }
 
             if let Some(kind) = doc_kind(&relative) {
                 index_doc_file(
@@ -182,9 +203,44 @@ pub fn index_repo(graph: &Graph, root: &Path) -> Result<IndexSummary> {
             &by_file_symbol,
             &mut summary,
         )?;
+        resolve_openapi_operations(graph, pending_operations, &by_name, &mut summary)?;
 
         Ok(summary)
     })
+}
+
+fn resolve_openapi_operations(
+    graph: &Graph,
+    pending: Vec<crate::openapi::Operation>,
+    by_name: &HashMap<String, Vec<(i64, String)>>,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    for operation in pending {
+        let candidates = operation
+            .candidate_names
+            .iter()
+            .filter_map(|name| by_name.get(name))
+            .flatten()
+            .collect::<Vec<_>>();
+        let confidence = resolution_confidence(candidates.len(), Confidence::Inferred);
+        for &&(implementation, _) in &candidates {
+            graph.insert_edge_with_provenance(
+                &Edge {
+                    src: implementation,
+                    dst: operation.node_id,
+                    kind: EdgeKind::Implements,
+                    confidence,
+                },
+                &Provenance {
+                    perspective: Perspective::Declared,
+                    evidence_kind: EvidenceKind::OpenApi,
+                    evidence_source: None,
+                },
+            )?;
+            summary.edges += 1;
+        }
+    }
+    Ok(())
 }
 
 fn index_doc_file(
@@ -547,6 +603,43 @@ mod tests {
         assert_eq!(importers.len(), 1);
         assert_eq!(importers[0].1, EdgeKind::Imports);
         assert_eq!(importers[0].2, Confidence::Extracted);
+    }
+
+    #[test]
+    fn indexes_openapi_as_declared_and_links_operation_id() {
+        let root = scratch_root();
+        fs::write(root.join("api.rs"), "fn listPets() {}").unwrap();
+        fs::write(
+            root.join("openapi.yaml"),
+            "openapi: 3.1.0\ninfo: {title: Pets, version: 1.0.0}\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      parameters:\n        - {name: limit, in: query, schema: {type: integer}}\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {$ref: '#/components/schemas/Pet'}\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [name]\n      properties: {name: {type: string}}\n",
+        ).unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        let summary = index_repo(&graph, &root).unwrap();
+        assert_eq!(summary.contracts, 1);
+
+        let items = graph.all_nodes_with_provenance().unwrap();
+        let (contract, provenance) = items
+            .iter()
+            .find(|(node, _)| node.name == "GET /pets")
+            .unwrap();
+        assert_eq!(contract.kind, NodeKind::Endpoint);
+        assert_eq!(provenance.perspective, Perspective::Declared);
+        assert_eq!(provenance.evidence_kind, EvidenceKind::OpenApi);
+        let schema = items.iter().find(|(node, _)| node.name == "Pet").unwrap();
+        assert_eq!(schema.0.kind, NodeKind::Schema);
+        let implementers = graph.callers(contract.id.unwrap()).unwrap();
+        assert!(
+            implementers
+                .iter()
+                .any(|(node, kind, _)| node.name == "listPets" && *kind == EdgeKind::Implements)
+        );
+        let references = graph.callees(contract.id.unwrap()).unwrap();
+        assert!(
+            references
+                .iter()
+                .any(|(node, kind, _)| node.name == "Pet" && *kind == EdgeKind::References)
+        );
     }
 
     #[test]

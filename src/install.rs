@@ -15,7 +15,7 @@
 //! | Gemini CLI  | `.gemini/settings.json`     | —                           | `GEMINI.md` (fenced)        |
 //! | Kiro        | `.kiro/settings/mcp.json`   | —                           | `.kiro/steering/aag.md`     |
 //! | opencode    | `opencode.json`             | —                           | `AGENTS.md` (fenced)        |
-//! | Codex       | `~/.codex/config.toml`      | —                           | `AGENTS.md` (fenced)        |
+//! | Codex       | `~/.codex/config.toml`      | —                           | `.agents/skills/aag-*` + `AGENTS.md` |
 //! | Antigravity | (UI-managed)                | —                           | `AGENTS.md` (fenced)        |
 //!
 //! Agents without a hook system still stay fresh: the MCP server itself
@@ -36,7 +36,8 @@ use serde_json::{Map, Value, json};
 use crate::error::{Error, Result};
 
 /// The skill pack, embedded at compile time (`SPEC.md` section 8: no
-/// download, no network). One `.claude/skills/<name>/SKILL.md` each.
+/// download, no network). Installed into each detected agent's native skill
+/// directory (`.claude/skills` or Codex's `.agents/skills`).
 const SKILLS: &[(&str, &str)] = &[
     ("aag-guide", include_str!("../assets/skills/aag-guide.md")),
     (
@@ -123,7 +124,7 @@ pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<In
 
     if detected(root, home, ".claude") {
         summary.agents.push("claude-code");
-        summary.skills_written = install_skills(root, force)?;
+        summary.skills_written += install_skills_at(&root.join(".claude").join("skills"), force)?;
         summary.hooks_added += register_claude_hooks(root)?;
         summary.mcp_configs += u32::from(register_mcp(&root.join(".mcp.json"))?);
     }
@@ -169,6 +170,7 @@ pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<In
     {
         summary.agents.push("codex");
         summary.mcp_configs += u32::from(register_codex(&home.join(".codex").join("config.toml"))?);
+        summary.skills_written += install_skills_at(&root.join(".agents").join("skills"), force)?;
         wants_agents_md = true;
     }
 
@@ -213,12 +215,17 @@ pub fn uninstall(root: &Path) -> Result<()> {
 /// Returns a write error if a config file cannot be rewritten.
 pub fn uninstall_with_home(root: &Path, home: Option<&Path>) -> Result<()> {
     for (name, _) in SKILLS {
-        let dir = root.join(".claude").join("skills").join(name);
-        if dir.is_dir() {
-            fs::remove_dir_all(&dir).map_err(|source| Error::RemoveDir {
-                path: dir.clone(),
-                source,
-            })?;
+        for skill_root in [
+            root.join(".claude").join("skills"),
+            root.join(".agents").join("skills"),
+        ] {
+            let dir = skill_root.join(name);
+            if dir.is_dir() {
+                fs::remove_dir_all(&dir).map_err(|source| Error::RemoveDir {
+                    path: dir.clone(),
+                    source,
+                })?;
+            }
         }
     }
 
@@ -264,16 +271,12 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Writes each embedded skill to `.claude/skills/<name>/SKILL.md`, skipping
-/// any that already exist (user may have edited them) unless `force`.
-fn install_skills(root: &Path, force: bool) -> Result<u32> {
+/// Writes each embedded skill under `skill_root`, skipping any that already
+/// exist (the user may have edited them) unless `force`.
+fn install_skills_at(skill_root: &Path, force: bool) -> Result<u32> {
     let mut written = 0;
     for (name, content) in SKILLS {
-        let path = root
-            .join(".claude")
-            .join("skills")
-            .join(name)
-            .join("SKILL.md");
+        let path = skill_root.join(name).join("SKILL.md");
         written += u32::from(write_if_missing(&path, content, force)?);
     }
     Ok(written)
@@ -553,7 +556,7 @@ fn upsert_gitignore(path: &Path) -> Result<bool> {
         return Ok(false);
     }
     let section = format!(
-        "\n{GITIGNORE_FENCE_START}\n# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.\n.aag/\n.claude/settings.json\n.claude/skills/aag-*/\n.cursor/mcp.json\n.cursor/hooks.json\n.cursor/rules/aag.mdc\n.gemini/settings.json\n.kiro/settings/mcp.json\n.kiro/steering/aag.md\nopencode.json\n{GITIGNORE_FENCE_END}\n"
+        "\n{GITIGNORE_FENCE_START}\n# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.\n.aag/\n.aag.lock\n.claude/settings.json\n.claude/skills/aag-*/\n.agents/skills/aag-*/\n.cursor/mcp.json\n.cursor/hooks.json\n.cursor/rules/aag.mdc\n.gemini/settings.json\n.kiro/settings/mcp.json\n.kiro/steering/aag.md\nopencode.json\n{GITIGNORE_FENCE_END}\n"
     );
     write_text(path, &(existing + &section))?;
     Ok(true)
@@ -775,6 +778,8 @@ mod tests {
         let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(gitignore.contains("dist/"));
         assert!(gitignore.contains(".aag/"));
+        assert!(gitignore.contains(".aag.lock"));
+        assert!(gitignore.contains(".agents/skills/aag-*/"));
         assert!(gitignore.contains(".cursor/hooks.json"));
         assert!(!gitignore.lines().any(|line| line == ".mcp.json"));
         assert_eq!(gitignore.matches(GITIGNORE_FENCE_START).count(), 1);
@@ -855,6 +860,16 @@ mod tests {
         );
         let codex = fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
         assert_eq!(codex.matches("[mcp_servers.aag]").count(), 1);
+        for (name, _) in SKILLS {
+            assert!(
+                root.join(".agents")
+                    .join("skills")
+                    .join(name)
+                    .join("SKILL.md")
+                    .is_file(),
+                "missing Codex skill {name}"
+            );
+        }
         assert_eq!(
             fs::read_to_string(root.join("AGENTS.md"))
                 .unwrap()
@@ -954,11 +969,30 @@ mod tests {
         let content = fs::read_to_string(&toml).unwrap();
         assert!(content.starts_with("model = \"gpt-5\""));
         assert!(content.contains("[mcp_servers.aag]"));
+        assert_eq!(
+            fs::read_to_string(
+                root.join(".agents")
+                    .join("skills")
+                    .join("aag-exploring")
+                    .join("SKILL.md")
+            )
+            .unwrap()
+            .matches("name: aag-exploring")
+            .count(),
+            1
+        );
 
         uninstall_with_home(&root, Some(&home)).unwrap();
         let cleaned = fs::read_to_string(&toml).unwrap();
         assert!(!cleaned.contains("aag"), "cleaned was: {cleaned}");
         assert!(cleaned.contains("model = \"gpt-5\""));
+        assert!(
+            !root
+                .join(".agents")
+                .join("skills")
+                .join("aag-exploring")
+                .exists()
+        );
     }
 
     #[test]
@@ -1003,6 +1037,7 @@ mod tests {
 
         for (name, _) in SKILLS {
             assert!(!root.join(".claude").join("skills").join(name).exists());
+            assert!(!root.join(".agents").join("skills").join(name).exists());
         }
         let settings = read_json(&root.join(".claude").join("settings.json"));
         assert_eq!(

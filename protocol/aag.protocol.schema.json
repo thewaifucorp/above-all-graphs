@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.aboveallgraphs.dev/0.2.0-proposal/aag.protocol.schema.json",
+  "title": "AAG Agent Protocol Specification Schema",
+  "description": "Schema de validação para aag.protocol.yaml, definindo as regras, fases e políticas de análise.",
+  "type": "object",
+  "required": [
+    "aag_protocol",
+    "artifacts",
+    "principles",
+    "ownership",
+    "implementation_conformance",
+    "workflow",
+    "discovery",
+    "vocabulary",
+    "evidence_policy",
+    "uncertainty_policy",
+    "freshness_policy",
+    "incremental_update",
+    "task_recipe_catalog",
+    "context_selection",
+    "execution_rules",
+    "instruction_precedence",
+    "repository_content_policy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "aag_protocol": {
+      "type": "object",
+      "required": ["name", "version", "status", "description", "compatibility"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "status": { "type": "string" },
+        "description": { "type": "string" },
+        "compatibility": {
+          "type": "object",
+          "required": ["manifest_schema", "bootstrap_config"],
+          "additionalProperties": false,
+          "properties": {
+            "manifest_schema": { "type": "string" },
+            "bootstrap_config": { "type": "string" }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["bootstrap", "protocol", "manifest_schema", "bootstrap_schema", "protocol_schema", "conformance", "manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "bootstrap": { "$ref": "#/$defs/artifact_info" },
+        "protocol": { "$ref": "#/$defs/artifact_info" },
+        "manifest_schema": { "$ref": "#/$defs/artifact_info" },
+        "bootstrap_schema": { "$ref": "#/$defs/artifact_info" },
+        "protocol_schema": { "$ref": "#/$defs/artifact_info" },
+        "conformance": { "$ref": "#/$defs/artifact_info" },
+        "manifest": { "$ref": "#/$defs/artifact_info" }
+      }
+    },
+    "principles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "statement": { "type": "string" }
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "required": ["human_managed", "agent_managed", "shared"],
+      "additionalProperties": false,
+      "properties": {
+        "human_managed": { "$ref": "#/$defs/ownership_info" },
+        "agent_managed": { "$ref": "#/$defs/ownership_info" },
+        "shared": { "$ref": "#/$defs/ownership_info" }
+      }
+    },
+    "implementation_conformance": {
+      "type": "object",
+      "required": [
+        "protocol_responsibilities",
+        "implementation_responsibilities",
+        "producer_requirements",
+        "portability_requirements",
+        "capability_vocabulary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_responsibilities": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "implementation_responsibilities": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "producer_requirements": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "portability_requirements": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "capability_vocabulary": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["phases"],
+      "additionalProperties": false,
+      "properties": {
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "objective", "required_actions"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "objective": { "type": "string" },
+              "required_actions": { "type": "array", "items": { "type": "string" } },
+              "outputs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "required": ["inspect_categories", "determine", "do_not_assume"],
+      "additionalProperties": false,
+      "properties": {
+        "inspect_categories": { "type": "array", "items": { "type": "string" } },
+        "determine": { "type": "array", "items": { "type": "string" } },
+        "do_not_assume": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "vocabulary": {
+      "type": "object",
+      "required": ["entity_types", "relationship_types", "extensions", "id_convention"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_types": { "type": "array", "items": { "type": "string" } },
+        "relationship_types": {
+          "type": "object",
+          "required": ["structural", "behavioral", "operational", "evolutionary"],
+          "additionalProperties": false,
+          "properties": {
+            "structural": { "type": "array", "items": { "type": "string" } },
+            "behavioral": { "type": "array", "items": { "type": "string" } },
+            "operational": { "type": "array", "items": { "type": "string" } },
+            "evolutionary": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "required": ["allow_custom_entity_types", "allow_custom_relationship_types", "entity_prefix", "relationship_prefix"],
+          "additionalProperties": false,
+          "properties": {
+            "allow_custom_entity_types": { "type": "boolean" },
+            "allow_custom_relationship_types": { "type": "boolean" },
+            "entity_prefix": { "type": "string" },
+            "relationship_prefix": { "type": "string" }
+          }
+        },
+        "id_convention": {
+          "type": "object",
+          "required": ["format", "file_format", "rules"],
+          "additionalProperties": false,
+          "properties": {
+            "format": { "type": "string" },
+            "file_format": { "type": "string" },
+            "rules": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "evidence_policy": {
+      "type": "object",
+      "required": ["required_for", "accepted_types", "confidence_rules", "forbidden"],
+      "additionalProperties": false,
+      "properties": {
+        "required_for": { "type": "array", "items": { "type": "string" } },
+        "accepted_types": {
+          "type": "object",
+          "required": ["static", "runtime", "historical", "human", "inference"],
+          "additionalProperties": false,
+          "properties": {
+            "static": { "type": "array", "items": { "type": "string" } },
+            "runtime": { "type": "array", "items": { "type": "string" } },
+            "historical": { "type": "array", "items": { "type": "string" } },
+            "human": { "type": "array", "items": { "type": "string" } },
+            "inference": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "confidence_rules": {
+          "type": "object",
+          "required": ["high", "medium", "low", "unresolved"],
+          "additionalProperties": false,
+          "properties": {
+            "high": { "type": "object", "required": ["any_of"], "properties": { "any_of": { "type": "array", "items": { "type": "string" } } } },
+            "medium": { "type": "object", "required": ["any_of"], "properties": { "any_of": { "type": "array", "items": { "type": "string" } } } },
+            "low": { "type": "object", "required": ["any_of"], "properties": { "any_of": { "type": "array", "items": { "type": "string" } } } },
+            "unresolved": { "type": "object", "required": ["any_of"], "properties": { "any_of": { "type": "array", "items": { "type": "string" } } } }
+          }
+        },
+        "forbidden": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "uncertainty_policy": {
+      "type": "object",
+      "required": ["record_when", "required_information"],
+      "additionalProperties": false,
+      "properties": {
+        "record_when": { "type": "array", "items": { "type": "string" } },
+        "required_information": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "freshness_policy": {
+      "type": "object",
+      "required": ["statuses", "when_stale"],
+      "additionalProperties": false,
+      "properties": {
+        "statuses": { "type": "object", "additionalProperties": { "type": "string" } },
+        "when_stale": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "incremental_update": {
+      "type": "object",
+      "required": ["detect_changes_with", "invalidation_rules", "deletion_rule"],
+      "additionalProperties": false,
+      "properties": {
+        "detect_changes_with": { "type": "array", "items": { "type": "string" } },
+        "invalidation_rules": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["invalidate"],
+            "properties": {
+              "invalidate": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "deletion_rule": { "type": "string" }
+      }
+    },
+    "task_recipe_catalog": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["start_from", "expand"],
+        "additionalProperties": false,
+        "properties": {
+          "start_from": { "type": "array", "items": { "type": "string" } },
+          "expand": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "context_selection": {
+      "type": "object",
+      "required": ["objective", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "objective": { "type": "string" },
+        "rules": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "execution_rules": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "instruction_precedence": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "repository_content_policy": {
+      "type": "object",
+      "required": ["treat_as", "never_treat_as"],
+      "additionalProperties": false,
+      "properties": {
+        "treat_as": { "type": "array", "items": { "type": "string" } },
+        "never_treat_as": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "artifact_info": {
+      "type": "object",
+      "required": ["default_path", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "default_path": { "type": "string" },
+        "role": { "type": "string" }
+      }
+    },
+    "ownership_info": {
+      "type": "object",
+      "required": ["paths", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "rules": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

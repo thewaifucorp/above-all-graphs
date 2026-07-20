@@ -89,20 +89,118 @@ const TOOL_SPECS: &[ToolSpec] = &[
         description: "Direct query against the graph layer.",
         arg: "query",
         arg_description: "Cypher query.",
-        implemented: false,
+        implemented: true,
     },
     ToolSpec {
         name: "detect_changes",
         description: "Pre-commit risk analysis via git diff.",
         arg: "diff",
         arg_description: "Git diff text.",
-        implemented: false,
+        implemented: true,
     },
     ToolSpec {
         name: "wiki",
         description: "Generate a wiki-style export of the graph under `.aag/wiki/`.",
         arg: "out_dir",
         arg_description: "Ignored — always writes to `.aag/wiki/` relative to the indexed root.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "communities",
+        description: "Detected architectural communities and their member symbols.",
+        arg: "query",
+        arg_description: "Optional name filter; pass an empty string for all communities.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "processes",
+        description: "Detected entrypoints and their reachable execution flows.",
+        arg: "query",
+        arg_description: "Optional entrypoint filter; pass an empty string for all processes.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "neighbors",
+        description: "All incoming and outgoing neighbors of a symbol.",
+        arg: "name",
+        arg_description: "Exact symbol name.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "shortest_path",
+        description: "Shortest graph path between two symbols.",
+        arg: "query",
+        arg_description: "Source and target separated by `->`, for example `main -> save`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "god_nodes",
+        description: "Most-connected symbols in the graph.",
+        arg: "top_n",
+        arg_description: "Maximum number of nodes, for example `10`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "graph_stats",
+        description: "Graph counts, confidence distribution, communities, and processes.",
+        arg: "query",
+        arg_description: "Pass an empty string; reserved for future filters.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "list_prs",
+        description: "Open GitHub PRs with CI and review state.",
+        arg: "base",
+        arg_description: "Optional base branch; pass an empty string for the default.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "get_pr_impact",
+        description: "Changed files, graph communities, touched nodes, and affected tests for a PR.",
+        arg: "pr_number",
+        arg_description: "GitHub pull request number.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "triage_prs",
+        description: "Non-draft open PRs ready for graph-aware triage.",
+        arg: "base",
+        arg_description: "Optional base branch; pass an empty string for the default.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_list",
+        description: "List every repository in the local AAG federation.",
+        arg: "group",
+        arg_description: "Pass `all`; named subgroups are reserved for future policy filters.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_query",
+        description: "Query all registered repository graphs.",
+        arg: "query",
+        arg_description: "Symbol or natural-language search term.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_status",
+        description: "Index and manifest status across registered repositories.",
+        arg: "group",
+        arg_description: "Pass `all`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_contracts",
+        description: "OpenAPI, database, and infrastructure contracts across repositories.",
+        arg: "group",
+        arg_description: "Pass `all`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_sync",
+        description: "Synchronize every registered repository graph and manifest.",
+        arg: "group",
+        arg_description: "Pass `all`.",
         implemented: true,
     },
     ToolSpec {
@@ -292,8 +390,298 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "impact" => impact::format(root, arg),
         "wiki" => write_wiki(root),
         "affected" => affected_text(root, arg),
+        "detect_changes" => detect_changes_text(root, arg),
+        "cypher" => cypher_text(root, arg),
+        "communities" => communities_text(root, arg),
+        "processes" => processes_text(root, arg),
+        "neighbors" => neighbors_text(root, arg),
+        "shortest_path" => shortest_path_text(root, arg),
+        "god_nodes" => god_nodes_text(root, arg),
+        "graph_stats" => graph_stats_text(root),
+        "list_prs" => crate::pr::list(root, arg),
+        "get_pr_impact" => crate::pr::impact(root, arg),
+        "triage_prs" => crate::pr::triage(root, arg),
+        "group_list" => Ok(crate::federation::list()),
+        "group_query" => crate::federation::query(arg),
+        "group_status" => Ok(crate::federation::status()),
+        "group_contracts" => crate::federation::contracts(),
+        "group_sync" => crate::federation::sync(),
         _ => unreachable!("dispatch only called for implemented tools"),
     }
+}
+
+fn neighbors_text(root: &Path, name: &str) -> Result<String> {
+    let graph = Graph::open_existing(root)?;
+    let node = graph
+        .find_by_name(name)?
+        .ok_or_else(|| Error::SymbolNotFound { name: name.into() })?;
+    let id = node.id.expect("stored nodes have ids");
+    let incoming = graph.callers(id)?.into_iter().map(|(node, kind, confidence)| json!({"direction": "incoming", "name": node.name, "relation": kind.as_str(), "confidence": confidence.as_str()}));
+    let outgoing = graph.callees(id)?.into_iter().map(|(node, kind, confidence)| json!({"direction": "outgoing", "name": node.name, "relation": kind.as_str(), "confidence": confidence.as_str()}));
+    let rows = incoming.chain(outgoing).collect::<Vec<_>>();
+    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
+}
+
+fn shortest_path_text(root: &Path, query: &str) -> Result<String> {
+    let (source_name, target_name) = query.split_once("->").ok_or_else(|| Error::Protocol {
+        context: "shortest path parse failed",
+        detail: "expected `source -> target`".into(),
+    })?;
+    let graph = Graph::open_existing(root)?;
+    let source = graph
+        .find_by_name(source_name.trim())?
+        .ok_or_else(|| Error::SymbolNotFound {
+            name: source_name.trim().into(),
+        })?;
+    let target = graph
+        .find_by_name(target_name.trim())?
+        .ok_or_else(|| Error::SymbolNotFound {
+            name: target_name.trim().into(),
+        })?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    let by_id: std::collections::HashMap<i64, &crate::storage::Node> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node)))
+        .collect();
+    let start = source.id.expect("stored nodes have ids");
+    let goal = target.id.expect("stored nodes have ids");
+    let mut adjacency: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+    for edge in &edges {
+        adjacency.entry(edge.src).or_default().push(edge.dst);
+        adjacency.entry(edge.dst).or_default().push(edge.src);
+    }
+    let mut queue = std::collections::VecDeque::from([start]);
+    let mut previous = std::collections::HashMap::from([(start, start)]);
+    while let Some(current) = queue.pop_front() {
+        if current == goal {
+            break;
+        }
+        for next in adjacency.get(&current).into_iter().flatten() {
+            if !previous.contains_key(next) {
+                previous.insert(*next, current);
+                queue.push_back(*next);
+            }
+        }
+    }
+    if !previous.contains_key(&goal) {
+        return Ok("no path found".into());
+    }
+    let mut path = vec![goal];
+    while *path.last().unwrap_or(&start) != start {
+        path.push(previous[path.last().unwrap_or(&start)]);
+    }
+    path.reverse();
+    Ok(path
+        .into_iter()
+        .filter_map(|id| {
+            by_id
+                .get(&id)
+                .map(|node| format!("{} ({}:{})", node.name, node.file_path, node.start_line))
+        })
+        .collect::<Vec<_>>()
+        .join(" -> "))
+}
+
+fn god_nodes_text(root: &Path, top_n: &str) -> Result<String> {
+    let graph = Graph::open_existing(root)?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    let mut degree = std::collections::HashMap::<i64, usize>::new();
+    for edge in edges {
+        *degree.entry(edge.src).or_default() += 1;
+        *degree.entry(edge.dst).or_default() += 1;
+    }
+    let mut ranked = nodes
+        .into_iter()
+        .filter_map(|node| Some((degree.get(&node.id?).copied().unwrap_or(0), node)))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.name.cmp(&right.1.name))
+    });
+    let limit = top_n.parse::<usize>().unwrap_or(10).min(100);
+    Ok(ranked
+        .into_iter()
+        .take(limit)
+        .map(|(count, node)| {
+            format!(
+                "{} — {count} edges ({}:{})",
+                node.name, node.file_path, node.start_line
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+fn graph_stats_text(root: &Path) -> Result<String> {
+    let graph = Graph::open_existing(root)?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    let mut confidence = std::collections::BTreeMap::<&str, usize>::new();
+    for edge in &edges {
+        *confidence.entry(edge.confidence.as_str()).or_default() += 1;
+    }
+    Ok(serde_json::to_string_pretty(&json!({
+        "nodes": nodes.len(), "edges": edges.len(),
+        "communities": crate::analysis::communities(&nodes, &edges).len(),
+        "processes": crate::analysis::processes(&nodes, &edges).len(),
+        "confidence": confidence
+    }))
+    .unwrap_or_else(|_| "{}".into()))
+}
+
+fn communities_text(root: &Path, query: &str) -> Result<String> {
+    let graph = Graph::open_existing(root)?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    let by_id: std::collections::HashMap<i64, _> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node)))
+        .collect();
+    let rows = crate::analysis::communities(&nodes, &edges)
+        .into_iter()
+        .filter_map(|community| {
+            let members = community
+                .members
+                .iter()
+                .filter_map(|id| by_id.get(id).map(|node| node.name.clone()))
+                .collect::<Vec<_>>();
+            (query.is_empty() || members.iter().any(|name| name.contains(query)))
+                .then_some(json!({"id": community.id, "members": members}))
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
+}
+
+fn processes_text(root: &Path, query: &str) -> Result<String> {
+    let graph = Graph::open_existing(root)?;
+    let nodes = graph.all_nodes()?;
+    let edges = graph.all_edges()?;
+    let by_id: std::collections::HashMap<i64, _> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node)))
+        .collect();
+    let rows = crate::analysis::processes(&nodes, &edges)
+        .into_iter()
+        .filter_map(|process| {
+            let entrypoint = by_id.get(&process.entrypoint)?.name.clone();
+            let steps = process
+                .steps
+                .iter()
+                .filter_map(|id| by_id.get(id).map(|node| node.name.clone()))
+                .collect::<Vec<_>>();
+            (query.is_empty() || entrypoint.contains(query))
+                .then_some(json!({"entrypoint": entrypoint, "steps": steps}))
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
+}
+
+fn detect_changes_text(root: &Path, diff: &str) -> Result<String> {
+    let mut changed: Vec<String> = diff
+        .lines()
+        .filter_map(|line| line.strip_prefix("+++ b/"))
+        .filter(|path| *path != "/dev/null")
+        .map(str::to_string)
+        .collect();
+    changed.sort_unstable();
+    changed.dedup();
+    if changed.is_empty() {
+        return Ok("no changed files found in diff".to_string());
+    }
+    let affected = crate::refactor::affected(root, &changed)?;
+    Ok(format!(
+        "changed files:\n{}\n\naffected tests:\n{}",
+        changed.join("\n"),
+        if affected.is_empty() {
+            "none".into()
+        } else {
+            affected.join("\n")
+        }
+    ))
+}
+
+fn cypher_text(root: &Path, query: &str) -> Result<String> {
+    let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    let upper = normalized.to_ascii_uppercase();
+    if !upper.starts_with("MATCH ")
+        || !upper.contains(" RETURN ")
+        || [" CREATE ", " DELETE ", " SET ", " REMOVE ", " MERGE "]
+            .iter()
+            .any(|keyword| upper.contains(keyword))
+    {
+        return Err(Error::Protocol {
+            context: "Cypher query rejected",
+            detail: "only read-only MATCH ... RETURN queries are supported".into(),
+        });
+    }
+    let limit = upper
+        .rsplit_once(" LIMIT ")
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .unwrap_or(100)
+        .min(1_000);
+    let graph = Graph::open_existing(root)?;
+    if normalized.contains("-[") || normalized.contains("]->") {
+        let nodes = graph.all_nodes()?;
+        let by_id: std::collections::HashMap<i64, _> = nodes
+            .iter()
+            .filter_map(|node| node.id.map(|id| (id, node)))
+            .collect();
+        let rows = graph
+            .all_edges()?
+            .into_iter()
+            .take(limit)
+            .filter_map(|edge| {
+                Some(json!({
+                    "source": by_id.get(&edge.src)?.name,
+                    "relationship": edge.kind.as_str(),
+                    "target": by_id.get(&edge.dst)?.name,
+                    "confidence": edge.confidence.as_str()
+                }))
+            })
+            .collect::<Vec<_>>();
+        return Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()));
+    }
+    let name_filter = cypher_string_filter(&normalized, ".name");
+    let kind_filter = cypher_string_filter(&normalized, ".kind");
+    let rows = graph
+        .all_nodes()?
+        .into_iter()
+        .filter(|node| name_filter.as_ref().is_none_or(|name| node.name == *name))
+        .filter(|node| {
+            kind_filter
+                .as_ref()
+                .is_none_or(|kind| node.kind.as_str() == kind)
+        })
+        .take(limit)
+        .map(|node| {
+            json!({
+                "id": node.id,
+                "kind": node.kind.as_str(),
+                "name": node.name,
+                "file": node.file_path,
+                "line": node.start_line
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
+}
+
+fn cypher_string_filter(query: &str, field: &str) -> Option<String> {
+    let start = query.find(field)? + field.len();
+    let value = query
+        .get(start..)?
+        .trim_start()
+        .strip_prefix('=')?
+        .trim_start();
+    let quote = value
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '\'' | '"'))?;
+    value.get(1..)?.split(quote).next().map(str::to_string)
 }
 
 fn write_wiki(root: &Path) -> Result<String> {
@@ -376,7 +764,7 @@ fn call_describe_doc(root: &Path, params: &Value) -> std::result::Result<Value, 
 
 fn search_text(root: &Path, query: &str) -> Result<String> {
     let graph = Graph::open_existing(root)?;
-    let results = graph.search(&format!("{query}*"), 20)?;
+    let results = graph.search(&format!("\"{}\"*", query.replace('"', "\"\"")), 20)?;
     if results.is_empty() {
         return Ok(format!("no matches for `{query}`"));
     }
@@ -477,6 +865,11 @@ mod tests {
     }
 
     #[test]
+    fn every_advertised_tool_is_implemented() {
+        assert!(TOOL_SPECS.iter().all(|tool| tool.implemented));
+    }
+
+    #[test]
     fn notification_without_id_gets_no_response() {
         let response = handle(
             Path::new("."),
@@ -516,6 +909,28 @@ mod tests {
     }
 
     #[test]
+    fn cypher_tool_returns_read_only_graph_rows() {
+        let root = indexed_root();
+        let text =
+            cypher_text(&root, "MATCH (n) WHERE n.name = 'helper' RETURN n LIMIT 5").unwrap();
+        assert!(text.contains("helper"));
+        assert!(!text.contains("caller"));
+        assert!(cypher_text(&root, "MATCH (n) DELETE n").is_err());
+    }
+
+    #[test]
+    fn detect_changes_maps_diff_to_changed_files() {
+        let root = indexed_root();
+        let text = detect_changes_text(
+            &root,
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n",
+        )
+        .unwrap();
+        assert!(text.contains("a.rs"));
+        assert!(text.contains("affected tests"));
+    }
+
+    #[test]
     fn callees_tool_call_reflects_calls_direction() {
         let root = indexed_root();
         let response = handle(
@@ -534,7 +949,7 @@ mod tests {
     }
 
     #[test]
-    fn unimplemented_tool_reports_is_error() {
+    fn cypher_tool_is_available_over_mcp() {
         let root = indexed_root();
         let response = handle(
             &root,
@@ -547,7 +962,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(response["result"]["isError"], true);
+        assert_eq!(response["result"]["isError"], false);
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("helper"))
+        );
     }
 
     #[test]

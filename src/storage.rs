@@ -11,6 +11,146 @@ use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 
+/// Whether a graph fact was asserted by a contract/human source or observed
+/// from implementation/runtime evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Perspective {
+    /// Intended behavior from documentation, contracts, or maintainers.
+    Declared,
+    /// Implementation or runtime behavior demonstrated by evidence.
+    Observed,
+}
+
+impl Perspective {
+    /// Stable string form stored in `SQLite` and exported by the protocol compiler.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declared => "declared",
+            Self::Observed => "observed",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        if value == "declared" {
+            Self::Declared
+        } else {
+            Self::Observed
+        }
+    }
+}
+
+/// Machine-readable origin of a graph fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceKind {
+    /// Definition extracted from an AST.
+    AstDefinition,
+    /// Import extracted from an AST.
+    AstImport,
+    /// Call extracted or resolved from an AST.
+    AstCall,
+    /// Inheritance or implementation extracted from an AST.
+    AstInheritance,
+    /// Text or documentation reference.
+    TextReference,
+    /// `OpenAPI` or Swagger contract declaration.
+    OpenApi,
+    /// SQL DDL schema declaration.
+    SqlSchema,
+    /// Infrastructure-as-code declaration.
+    Infrastructure,
+    /// Relationship inferred when no stronger source is available.
+    InferredRelationship,
+}
+
+impl EvidenceKind {
+    /// Stable value aligned with the AAG Protocol evidence vocabulary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AstDefinition => "ast_definition",
+            Self::AstImport => "ast_import",
+            Self::AstCall => "ast_call",
+            Self::AstInheritance => "ast_inheritance",
+            Self::TextReference => "text_reference",
+            Self::OpenApi => "openapi_contract",
+            Self::SqlSchema => "sql_schema",
+            Self::Infrastructure => "infrastructure_definition",
+            Self::InferredRelationship => "inferred_relationship",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "ast_import" => Self::AstImport,
+            "ast_call" => Self::AstCall,
+            "ast_inheritance" => Self::AstInheritance,
+            "text_reference" => Self::TextReference,
+            "openapi_contract" => Self::OpenApi,
+            "sql_schema" => Self::SqlSchema,
+            "infrastructure_definition" => Self::Infrastructure,
+            "inferred_relationship" => Self::InferredRelationship,
+            _ => Self::AstDefinition,
+        }
+    }
+}
+
+/// Provenance attached to a node or edge independently of its graph shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// Declared intent or observed implementation.
+    pub perspective: Perspective,
+    /// Evidence mechanism supporting the fact.
+    pub evidence_kind: EvidenceKind,
+    /// Optional repository-relative evidence source override.
+    pub evidence_source: Option<String>,
+}
+
+impl Provenance {
+    /// Provenance for source code or text documents indexed by the default pipeline.
+    #[must_use]
+    pub fn for_node(node: &Node) -> Self {
+        if matches!(
+            node.kind,
+            NodeKind::Doc | NodeKind::Endpoint | NodeKind::Schema
+        ) {
+            Self {
+                perspective: Perspective::Declared,
+                evidence_kind: EvidenceKind::TextReference,
+                evidence_source: Some(node.file_path.clone()),
+            }
+        } else {
+            Self {
+                perspective: Perspective::Observed,
+                evidence_kind: EvidenceKind::AstDefinition,
+                evidence_source: Some(node.file_path.clone()),
+            }
+        }
+    }
+
+    /// Provenance for a resolved graph relationship.
+    #[must_use]
+    pub const fn for_edge(edge: &Edge) -> Self {
+        let (perspective, evidence_kind) = match (edge.kind, edge.confidence) {
+            (EdgeKind::Explains, _) => (Perspective::Declared, EvidenceKind::TextReference),
+            (EdgeKind::References, _) => (Perspective::Declared, EvidenceKind::OpenApi),
+            (_, Confidence::Ambiguous) => {
+                (Perspective::Observed, EvidenceKind::InferredRelationship)
+            }
+            (EdgeKind::Imports, _) => (Perspective::Observed, EvidenceKind::AstImport),
+            (EdgeKind::Calls, _) => (Perspective::Observed, EvidenceKind::AstCall),
+            (EdgeKind::Inherits | EdgeKind::Implements, _) => {
+                (Perspective::Observed, EvidenceKind::AstInheritance)
+            }
+        };
+        Self {
+            perspective,
+            evidence_kind,
+            evidence_source: None,
+        }
+    }
+}
+
 /// How confident the graph is that an edge reflects reality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confidence {
@@ -59,6 +199,14 @@ pub enum NodeKind {
     /// See `crate::resolve` (text docs, indexed immediately) and
     /// `crate::docs` (binary docs, described later by the host agent).
     Doc,
+    /// An HTTP operation declared by an API contract.
+    Endpoint,
+    /// A reusable data schema declared by an API contract.
+    Schema,
+    /// A database table declared by DDL.
+    DatabaseTable,
+    /// A Terraform or other infrastructure-as-code resource.
+    InfraResource,
 }
 
 impl NodeKind {
@@ -72,6 +220,10 @@ impl NodeKind {
             Self::Method => "method",
             Self::Interface => "interface",
             Self::Doc => "doc",
+            Self::Endpoint => "endpoint",
+            Self::Schema => "schema",
+            Self::DatabaseTable => "database_table",
+            Self::InfraResource => "infra_resource",
         }
     }
 
@@ -82,6 +234,10 @@ impl NodeKind {
             "struct" => Self::Struct,
             "method" => Self::Method,
             "doc" => Self::Doc,
+            "endpoint" => Self::Endpoint,
+            "schema" => Self::Schema,
+            "database_table" => Self::DatabaseTable,
+            "infra_resource" => Self::InfraResource,
             _ => Self::Interface,
         }
     }
@@ -121,6 +277,8 @@ pub enum EdgeKind {
     Implements,
     /// A doc explains a symbol (its text mentions the symbol by name).
     Explains,
+    /// A contract operation or schema references another contract schema.
+    References,
 }
 
 impl EdgeKind {
@@ -133,6 +291,7 @@ impl EdgeKind {
             Self::Inherits => "inherits",
             Self::Implements => "implements",
             Self::Explains => "explains",
+            Self::References => "references",
         }
     }
 
@@ -142,6 +301,7 @@ impl EdgeKind {
             "inherits" => Self::Inherits,
             "implements" => Self::Implements,
             "explains" => Self::Explains,
+            "references" => Self::References,
             _ => Self::Calls,
         }
     }
@@ -263,6 +423,53 @@ impl Graph {
             .map_err(|source| Error::Storage {
                 context: "apply schema migration",
                 source,
+            })?;
+        self.ensure_column("nodes", "perspective", "TEXT NOT NULL DEFAULT 'observed'")?;
+        self.ensure_column(
+            "nodes",
+            "evidence_kind",
+            "TEXT NOT NULL DEFAULT 'ast_definition'",
+        )?;
+        self.ensure_column("nodes", "evidence_source", "TEXT")?;
+        self.ensure_column("edges", "perspective", "TEXT NOT NULL DEFAULT 'observed'")?;
+        self.ensure_column(
+            "edges",
+            "evidence_kind",
+            "TEXT NOT NULL DEFAULT 'inferred_relationship'",
+        )?;
+        self.ensure_column("edges", "evidence_source", "TEXT")
+    }
+
+    fn ensure_column(&self, table: &'static str, column: &str, definition: &str) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(|source| Error::Storage {
+                context: "inspect schema migration",
+                source,
+            })?;
+        let rows = stmt
+            .query_map((), |row| row.get::<_, String>(1))
+            .map_err(|source| Error::Storage {
+                context: "read schema migration",
+                source,
+            })?;
+        for name in rows {
+            if name.map_err(|source| Error::Storage {
+                context: "read schema column",
+                source,
+            })? == column
+            {
+                return Ok(());
+            }
+        }
+        self.conn
+            .execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            ))
+            .map_err(|source| Error::Storage {
+                context: "add provenance column",
+                source,
             })
     }
 
@@ -324,10 +531,20 @@ impl Graph {
     ///
     /// Returns [`Error::Storage`] if the insert fails.
     pub fn insert_node(&self, node: &Node) -> Result<i64> {
+        self.insert_node_with_provenance(node, &Provenance::for_node(node))
+    }
+
+    /// Inserts a node with explicit evidence provenance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Storage`] if the insert fails.
+    pub fn insert_node_with_provenance(&self, node: &Node, provenance: &Provenance) -> Result<i64> {
         self.conn
             .execute(
-                "INSERT INTO nodes (kind, name, file_path, start_line, end_line, description)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO nodes (kind, name, file_path, start_line, end_line, description,
+                                    perspective, evidence_kind, evidence_source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 (
                     node.kind.as_str(),
                     &node.name,
@@ -335,6 +552,9 @@ impl Graph {
                     node.start_line,
                     node.end_line,
                     &node.description,
+                    provenance.perspective.as_str(),
+                    provenance.evidence_kind.as_str(),
+                    &provenance.evidence_source,
                 ),
             )
             .map_err(|source| Error::Storage {
@@ -370,15 +590,28 @@ impl Graph {
     ///
     /// Returns [`Error::Storage`] if the insert fails.
     pub fn insert_edge(&self, edge: &Edge) -> Result<()> {
+        self.insert_edge_with_provenance(edge, &Provenance::for_edge(edge))
+    }
+
+    /// Inserts an edge with explicit evidence provenance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Storage`] if the insert fails.
+    pub fn insert_edge_with_provenance(&self, edge: &Edge, provenance: &Provenance) -> Result<()> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO edges (src, dst, kind, confidence)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO edges
+                    (src, dst, kind, confidence, perspective, evidence_kind, evidence_source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 (
                     edge.src,
                     edge.dst,
                     edge.kind.as_str(),
                     edge.confidence.as_str(),
+                    provenance.perspective.as_str(),
+                    provenance.evidence_kind.as_str(),
+                    &provenance.evidence_source,
                 ),
             )
             .map_err(|source| Error::Storage {
@@ -529,6 +762,46 @@ impl Graph {
         Self::collect_nodes(rows)
     }
 
+    /// All nodes paired with their stored evidence provenance.
+    ///
+    /// # Errors
+    /// Returns [`Error::Storage`] if the query fails.
+    pub fn all_nodes_with_provenance(&self) -> Result<Vec<(Node, Provenance)>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, kind, name, file_path, start_line, end_line, description,
+                    perspective, evidence_kind, evidence_source FROM nodes",
+            )
+            .map_err(|source| Error::Storage {
+                context: "prepare provenance node query",
+                source,
+            })?;
+        let rows = stmt
+            .query_map((), |row| {
+                Ok((
+                    Self::row_to_node(row)?,
+                    Provenance {
+                        perspective: Perspective::from_str(&row.get::<_, String>(7)?),
+                        evidence_kind: EvidenceKind::from_str(&row.get::<_, String>(8)?),
+                        evidence_source: row.get(9)?,
+                    },
+                ))
+            })
+            .map_err(|source| Error::Storage {
+                context: "run provenance node query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read provenance node row",
+                source,
+            })?);
+        }
+        Ok(out)
+    }
+
     /// All edges in the graph. See [`Self::all_nodes`].
     ///
     /// # Errors
@@ -560,6 +833,44 @@ impl Graph {
         for row in rows {
             out.push(row.map_err(|source| Error::Storage {
                 context: "read edge row",
+                source,
+            })?);
+        }
+        Ok(out)
+    }
+
+    /// All edges paired with their stored evidence provenance.
+    ///
+    /// # Errors
+    /// Returns [`Error::Storage`] if the query fails.
+    pub fn all_edges_with_provenance(&self) -> Result<Vec<(Edge, Provenance)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT src, dst, kind, confidence, perspective, evidence_kind, evidence_source FROM edges",
+        ).map_err(|source| Error::Storage { context: "prepare provenance edge query", source })?;
+        let rows = stmt
+            .query_map((), |row| {
+                Ok((
+                    Edge {
+                        src: row.get(0)?,
+                        dst: row.get(1)?,
+                        kind: EdgeKind::from_str(&row.get::<_, String>(2)?),
+                        confidence: Confidence::from_str(&row.get::<_, String>(3)?),
+                    },
+                    Provenance {
+                        perspective: Perspective::from_str(&row.get::<_, String>(4)?),
+                        evidence_kind: EvidenceKind::from_str(&row.get::<_, String>(5)?),
+                        evidence_source: row.get(6)?,
+                    },
+                ))
+            })
+            .map_err(|source| Error::Storage {
+                context: "run provenance edge query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read provenance edge row",
                 source,
             })?);
         }
@@ -693,5 +1004,21 @@ mod tests {
         let callee_edges = graph.callees(src_id).unwrap();
         assert_eq!(callee_edges.len(), 1);
         assert_eq!(callee_edges[0].0.name, "callee");
+    }
+
+    #[test]
+    fn explicit_provenance_round_trips() {
+        let graph = Graph::open_in_memory().unwrap();
+        let provenance = Provenance {
+            perspective: Perspective::Declared,
+            evidence_kind: EvidenceKind::OpenApi,
+            evidence_source: Some("openapi.yaml".into()),
+        };
+        graph
+            .insert_node_with_provenance(&node(NodeKind::Doc, "GET /pets"), &provenance)
+            .unwrap();
+
+        let stored = graph.all_nodes_with_provenance().unwrap();
+        assert_eq!(stored[0].1, provenance);
     }
 }

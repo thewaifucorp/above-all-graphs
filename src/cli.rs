@@ -103,6 +103,7 @@ pub enum Command {
     },
 
     /// Answer a question about the codebase: symbols, call paths, blast radius.
+    #[command(alias = "query", alias = "explain", alias = "context")]
     Explore {
         /// Symbol name or search term.
         query: String,
@@ -118,6 +119,33 @@ pub enum Command {
         symbol: String,
 
         /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Show detected architectural communities.
+    Communities {
+        /// Optional symbol-name filter.
+        #[arg(default_value = "")]
+        query: String,
+        /// Repository root to query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Show detected entrypoints and execution processes.
+    Processes {
+        /// Optional entrypoint-name filter.
+        #[arg(default_value = "")]
+        query: String,
+        /// Repository root to query.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Show index status and graph counts for a repository.
+    Status {
+        /// Repository root to inspect.
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -170,6 +198,23 @@ pub enum Command {
         /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
+    },
+
+    /// Compile the indexed graph into an AAG Protocol Context Manifest.
+    Export {
+        /// Repository root to export. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Output path. Defaults to `.aag/context.yaml` under the repository.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Validate an AAG Protocol Context Manifest structurally and semantically.
+    Validate {
+        /// YAML or JSON manifest to validate.
+        manifest: PathBuf,
     },
 }
 

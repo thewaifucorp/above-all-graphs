@@ -77,7 +77,7 @@ Built-in multi-provider AI chat (Anthropic, OpenAI, Azure, Gemini, OpenRouter, M
 | Gemini CLI  | `.gemini/settings.json`   | —                                                | `GEMINI.md` (fenced)      |
 | Kiro        | `.kiro/settings/mcp.json` | —                                                | `.kiro/steering/aag.md`   |
 | opencode    | `opencode.json`           | —                                                | `AGENTS.md` (fenced)      |
-| Codex       | `~/.codex/config.toml`    | —                                                | `AGENTS.md` (fenced)      |
+| Codex       | `~/.codex/config.toml`    | —                                                | 7 skills (`.agents/skills/`) + `AGENTS.md` |
 | Antigravity | (UI-managed)              | —                                                | `AGENTS.md` (fenced)      |
 
 Idempotent (re-running never duplicates), additive (your existing hooks/servers/rules survive untouched), reversible (`aag uninstall` removes exactly what was written). Agents without hook systems stay fresh anyway — the MCP server reconciles on connect and runs the native watcher.
@@ -95,8 +95,13 @@ aag bigbang [--force] [--no-viz] [--no-install] [--obsidian]   bootstrap everyth
 aag ui [--port N] [--no-open]   THE interface: local server + browser, all workspaces
 aag explore <query>          how does X work / what calls X (MCP twin: explore)
 aag impact <symbol>          transitive blast radius before you change something
+aag communities [filter]    detected architectural clusters
+aag processes [filter]      detected entrypoints and execution flows
+aag status                  index counts, communities, and processes
 aag rename <old> <new> [--write]   coordinated multi-file rename, preview-first
 aag affected --stdin         test files affected by a diff (pipe git diff --name-only)
+aag export [--output <path>]  compile graph.db to an AAG Protocol manifest
+aag validate <manifest>       structural + semantic protocol validation
 aag describe <doc> <text>    attach a vision-pass description to an image/PDF node
 aag sync [--file <path>]     refresh index + site in place (hooks call this)
 aag workspaces               list every repo this machine has indexed
@@ -105,6 +110,12 @@ aag mcp                      the MCP server (stdio JSON-RPC)
 ```
 
 Every MCP tool has a CLI twin, so everything works in CI and pre-commit hooks too.
+
+OpenAPI 3.x and Swagger 2.x YAML/JSON files are indexed automatically. Operations are stored as declared facts; AST symbols are observed facts. An `operationId` matching a code symbol creates an implementation link, and protocol export reports each contract operation as `matched` or `unmatched` under `extensions.x-aag-declared-contracts`.
+
+The structural indexer covers 20 languages: Rust, JavaScript, TypeScript, Python, Java, C, C++, C#, Go, PHP, Ruby, Swift, Kotlin, Dart, Scala, Shell, Lua, R, Elixir, and Objective-C. Every frontend emits the same language-neutral graph model.
+
+SQL DDL tables and foreign keys, Terraform/HCL resources, OpenAPI/Swagger contracts, text documentation, PDFs, images, Office documents, and video files share that graph. Binary/media formats are indexed immediately and can receive a host-agent description with `aag describe`.
 
 ## Multi-workspace
 

@@ -23,8 +23,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tree-sitter = "0.26"
 tree-sitter-javascript = "0.25"
 tree-sitter-rust = "0.24"
+tree-sitter-language-pack = "1.13.2"
 ignore = "0.4"
 serde_json = "1"
+serde_yaml_ng = "0.10"
+jsonschema = { version = "0.48", default-features = false }
 notify = "8"
 notify-debouncer-mini = "0.7"
 tiny_http = "0.12"

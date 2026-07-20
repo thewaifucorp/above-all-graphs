@@ -4,6 +4,8 @@ wiki: src/parse.rs
 
 `src/parse.rs` is the tree-sitter based structural parsing layer. It turns one file's source text into a `ParsedFile`: the symbols the file declares plus *raw*, unresolved cross-references. "Raw" means the module never turns a call to `bar` into an edge pointing at a specific node id — that resolution, along with tagging edges `EXTRACTED`/`INFERRED`/`AMBIGUOUS`, is `crate::resolve`'s job. This split keeps each language's parser dumb and swappable without touching the storage layer.
 
+The default frontend covers Rust, JavaScript, TypeScript, Python, Java, C, C++, C#, Go, PHP, Ruby, Swift, Kotlin, Dart, Scala, Shell, Lua, R, Elixir, and Objective-C. Rust and JavaScript keep dedicated high-precision walkers. The other 18 use the shared Tree-sitter language pack plus an AST fallback, producing the same `ParsedFile` contract for structure, imports, and calls. Grammars download on first use and remain cached for offline runs.
+
 `ParsedFile` holds three fields:
 
 - `nodes` — `Vec<Node>` of symbols declared directly in the file (functions, structs, methods), not yet inserted, so each has no `id` yet.

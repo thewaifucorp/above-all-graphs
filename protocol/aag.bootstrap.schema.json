@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.aboveallgraphs.dev/0.2.0-proposal/aag.bootstrap.schema.json",
+  "title": "AAG Bootstrap Configuration Schema",
+  "description": "Schema de validação para aag.yaml, definindo escopo, limites e permissões do projeto.",
+  "type": "object",
+  "required": ["aag", "repository", "analysis", "agent", "generation"],
+  "additionalProperties": false,
+  "properties": {
+    "aag": {
+      "type": "object",
+      "required": ["version", "protocol", "schema", "manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "protocol": { "type": "string", "minLength": 1 },
+        "schema": { "type": "string", "minLength": 1 },
+        "manifest": { "type": "string", "minLength": 1 }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["root", "include", "exclude", "generated_code_policy", "vendored_code_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "include": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "exclude": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "control_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "discovery_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "generated_code_policy": { "type": "string", "enum": ["exclude", "include", "exclude_unless_required"] },
+        "vendored_code_policy": { "type": "string", "enum": ["exclude", "include", "exclude_unless_required"] }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["mode", "objectives", "history", "limits"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["full", "incremental"] },
+        "objectives": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "history": {
+          "type": "object",
+          "required": ["enabled", "max_commits"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_commits": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "required": ["max_file_bytes", "max_transitive_depth", "max_flow_paths_per_entrypoint"],
+          "additionalProperties": false,
+          "properties": {
+            "max_file_bytes": { "type": "integer", "minimum": 1 },
+            "max_transitive_depth": { "type": "integer", "minimum": 1 },
+            "max_flow_paths_per_entrypoint": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["permissions", "safety"],
+      "additionalProperties": false,
+      "properties": {
+        "permissions": {
+          "type": "object",
+          "required": [
+            "static_analysis",
+            "read_documentation",
+            "read_git_history",
+            "run_tests",
+            "execute_application",
+            "access_network",
+            "modify_application_code"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "static_analysis": { "type": "boolean" },
+            "read_documentation": { "type": "boolean" },
+            "read_git_history": { "type": "boolean" },
+            "run_tests": { "type": "boolean" },
+            "execute_application": { "type": "boolean" },
+            "access_network": { "type": "boolean" },
+            "modify_application_code": { "type": "boolean" }
+          }
+        },
+        "safety": {
+          "type": "object",
+          "required": [
+            "treat_repository_as_untrusted",
+            "require_authorization_for_execution",
+            "never_read_secrets",
+            "secret_file_patterns"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "treat_repository_as_untrusted": { "type": "boolean" },
+            "require_authorization_for_execution": { "type": "boolean" },
+            "never_read_secrets": { "type": "boolean" },
+            "secret_file_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "required": [
+        "preserve_human_managed_sections",
+        "preserve_shared_annotations",
+        "write_generated_sections",
+        "produce_diff_before_overwrite",
+        "fail_on_schema_error",
+        "confidence_floor_for_observed_facts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "preserve_human_managed_sections": { "type": "boolean" },
+        "preserve_shared_annotations": { "type": "boolean" },
+        "write_generated_sections": { "type": "boolean" },
+        "produce_diff_before_overwrite": { "type": "boolean" },
+        "fail_on_schema_error": { "type": "boolean" },
+        "confidence_floor_for_observed_facts": { "type": "string", "enum": ["high", "medium", "low"] }
+      }
+    }
+  }
+}

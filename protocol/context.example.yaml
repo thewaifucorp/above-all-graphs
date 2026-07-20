@@ -1,0 +1,439 @@
+# Exemplo mínimo, genérico e válido segundo aag.manifest.schema.json v0.2.0-proposal.
+# Ao adotar o protocolo, copie para .aag/context.yaml e substitua os dados de
+# demonstração por fatos do repositório. Não mantenha evidências fictícias.
+
+aag_manifest:
+  version: "0.2.0-proposal"
+  protocol_version: "0.2.0-proposal"
+  generated_at: "2026-07-20T18:00:00Z"
+  generator:
+    name: "example-repository-agent"
+    version: "1.0.0"
+    agent: "generic-static-analyzer"
+    implementation_url: "https://example.com/aag-producer"
+    capabilities:
+      - "static_analysis"
+      - "history_analysis"
+      - "semantic_validation"
+
+repository:
+  name: "example-project"
+  root: "."
+  repository_type: "service"
+  languages:
+    - "ExampleLang"
+  packages:
+    - id: "package.core"
+      path: "src"
+      purpose: "Implementa o fluxo principal do exemplo."
+  analyzed_revision: "example-revision-001"
+  dirty_worktree: false
+
+freshness:
+  status: "current"
+  analyzed_revision: "example-revision-001"
+  current_revision: "example-revision-001"
+  checked_at: "2026-07-20T18:00:00Z"
+  working_tree_changed: false
+  changed_files_since_analysis: []
+
+perspectives:
+  declared:
+    ownership: "human"
+    purpose: "Demonstrar o formato do AAG Context Manifest sem depender de framework."
+    declared_architecture: "Entradas delegam regras a serviços e persistência a adaptadores."
+    invariants:
+      - id: "invariant.audit-on-update"
+        statement: "Toda atualização aceita deve produzir um registro de auditoria."
+        status: "declared"
+        evidence:
+          type: "architecture_document"
+          origin: "human"
+          location:
+            kind: "source"
+            file: "docs/architecture.md"
+            section: "Auditoria"
+          revision: "example-revision-001"
+          detail: "Regra declarada pelos mantenedores."
+    constraints:
+      - id: "constraint.no-network-analysis"
+        statement: "A análise deve funcionar sem acesso à rede."
+        status: "accepted"
+        evidence:
+          type: "agent_instruction"
+          origin: "human"
+          location:
+            kind: "source"
+            file: "aag.yaml"
+            section: "agent.permissions"
+          revision: "example-revision-001"
+    glossary:
+      - term: "Record"
+        definition: "Entidade de domínio atualizada pelo fluxo demonstrado."
+
+  observed:
+    ownership: "agent"
+    inventory:
+      files_analyzed: 7
+      files_ignored: 2
+      entities: 5
+      relationships: 4
+      ignored_regions:
+        - "build/**"
+
+    entrypoints:
+      - id: "entrypoint.update-record"
+        kind: "http"
+        label: "PATCH /records/:id"
+        entity_id: "entity.UpdateRecordHandler.handle"
+        confidence: "high"
+        evidence:
+          - type: "ast_registration"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/routes.example"
+              symbol: "registerRoutes"
+              line_start: 12
+              line_end: 12
+            revision: "example-revision-001"
+
+    entities:
+      - id: "entity.UpdateRecordHandler.handle"
+        type: "method"
+        name: "UpdateRecordHandler.handle"
+        package_id: "package.core"
+        location:
+          kind: "source"
+          file: "src/update-record.example"
+          symbol: "UpdateRecordHandler.handle"
+          line_start: 10
+          line_end: 22
+        summary: "Recebe a entrada validada e delega a atualização."
+        tags:
+          - "entrypoint-target"
+        confidence: "high"
+        evidence:
+          - type: "ast_definition"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/update-record.example"
+              symbol: "UpdateRecordHandler.handle"
+              line_start: 10
+              line_end: 22
+            revision: "example-revision-001"
+
+      - id: "entity.RecordService.update"
+        type: "method"
+        name: "RecordService.update"
+        package_id: "package.core"
+        location:
+          kind: "source"
+          file: "src/record-service.example"
+          symbol: "RecordService.update"
+          line_start: 8
+          line_end: 19
+        summary: "Coordena persistência e auditoria."
+        confidence: "high"
+        evidence:
+          - type: "ast_definition"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-service.example"
+              symbol: "RecordService.update"
+              line_start: 8
+              line_end: 19
+            revision: "example-revision-001"
+
+      - id: "entity.RecordStore.save"
+        type: "method"
+        name: "RecordStore.save"
+        package_id: "package.core"
+        location:
+          kind: "source"
+          file: "src/record-store.example"
+          symbol: "RecordStore.save"
+          line_start: 5
+          line_end: 11
+        confidence: "high"
+        evidence:
+          - type: "ast_definition"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-store.example"
+              symbol: "RecordStore.save"
+              line_start: 5
+              line_end: 11
+            revision: "example-revision-001"
+
+      - id: "entity.AuditSink.append"
+        type: "method"
+        name: "AuditSink.append"
+        package_id: "package.core"
+        location:
+          kind: "source"
+          file: "src/audit-sink.example"
+          symbol: "AuditSink.append"
+          line_start: 4
+          line_end: 9
+        confidence: "high"
+        evidence:
+          - type: "ast_definition"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/audit-sink.example"
+              symbol: "AuditSink.append"
+              line_start: 4
+              line_end: 9
+            revision: "example-revision-001"
+
+      - id: "entity.UpdateRecordTest"
+        type: "test"
+        name: "UpdateRecordTest"
+        package_id: "package.core"
+        location:
+          kind: "source"
+          file: "tests/update-record.example"
+          symbol: "UpdateRecordTest"
+          line_start: 7
+          line_end: 25
+        confidence: "medium"
+        evidence:
+          - type: "test_reference"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "tests/update-record.example"
+              symbol: "UpdateRecordTest"
+              line_start: 7
+              line_end: 25
+            revision: "example-revision-001"
+            detail: "O teste foi associado estaticamente, mas não executado."
+
+    relationships:
+      - id: "relation.handler-calls-service"
+        source_id: "entity.UpdateRecordHandler.handle"
+        type: "calls"
+        target_id: "entity.RecordService.update"
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/update-record.example"
+              symbol: "UpdateRecordHandler.handle"
+              line_start: 18
+              line_end: 18
+            revision: "example-revision-001"
+
+      - id: "relation.service-calls-store"
+        source_id: "entity.RecordService.update"
+        type: "calls"
+        target_id: "entity.RecordStore.save"
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-service.example"
+              symbol: "RecordService.update"
+              line_start: 13
+              line_end: 13
+            revision: "example-revision-001"
+
+      - id: "relation.service-calls-audit"
+        source_id: "entity.RecordService.update"
+        type: "calls"
+        target_id: "entity.AuditSink.append"
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-service.example"
+              symbol: "RecordService.update"
+              line_start: 15
+              line_end: 15
+            revision: "example-revision-001"
+
+      - id: "relation.test-tests-handler"
+        source_id: "entity.UpdateRecordTest"
+        type: "tests"
+        target_id: "entity.UpdateRecordHandler.handle"
+        confidence: "medium"
+        evidence:
+          - type: "test_reference"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "tests/update-record.example"
+              symbol: "UpdateRecordTest"
+              line_start: 12
+              line_end: 12
+            revision: "example-revision-001"
+
+    flows:
+      - id: "flow.update-record"
+        entrypoint_id: "entrypoint.update-record"
+        summary: "Atualiza um registro e acrescenta uma entrada de auditoria."
+        steps:
+          - id: "step.handle"
+            entity_id: "entity.UpdateRecordHandler.handle"
+            next:
+              - "step.update"
+          - id: "step.update"
+            entity_id: "entity.RecordService.update"
+            via_relationship_id: "relation.handler-calls-service"
+            next:
+              - "step.save"
+              - "step.append"
+          - id: "step.save"
+            entity_id: "entity.RecordStore.save"
+            via_relationship_id: "relation.service-calls-store"
+          - id: "step.append"
+            entity_id: "entity.AuditSink.append"
+            via_relationship_id: "relation.service-calls-audit"
+        side_effect_ids:
+          - "effect.records-write"
+          - "effect.audit-write"
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-service.example"
+              symbol: "RecordService.update"
+              line_start: 13
+              line_end: 15
+            revision: "example-revision-001"
+
+    side_effects:
+      - id: "effect.records-write"
+        kind: "data_write"
+        source_entity_id: "entity.RecordStore.save"
+        target: "records"
+        summary: "Persiste o estado atualizado."
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-store.example"
+              symbol: "RecordStore.save"
+              line_start: 8
+              line_end: 8
+            revision: "example-revision-001"
+
+      - id: "effect.audit-write"
+        kind: "data_write"
+        source_entity_id: "entity.AuditSink.append"
+        target: "audit_log"
+        summary: "Registra a atualização para auditoria."
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/audit-sink.example"
+              symbol: "AuditSink.append"
+              line_start: 7
+              line_end: 7
+            revision: "example-revision-001"
+
+    architectural_findings:
+      - id: "finding.audit-invariant-observed"
+        classification: "observation"
+        declared_statement_id: "invariant.audit-on-update"
+        observed_statement: "O fluxo observado chama explicitamente o destino de auditoria após persistir o registro."
+        affected_entity_ids:
+          - "entity.RecordService.update"
+          - "entity.AuditSink.append"
+        confidence: "high"
+        evidence:
+          - type: "ast_call"
+            origin: "tool"
+            location:
+              kind: "source"
+              file: "src/record-service.example"
+              symbol: "RecordService.update"
+              line_start: 15
+              line_end: 15
+            revision: "example-revision-001"
+
+  historical:
+    ownership: "shared"
+    analyzed: true
+    revision_range: "example-revision-000..example-revision-001"
+    commit_count: 2
+    findings:
+      - id: "history.service-and-audit-cochange"
+        kind: "co_change"
+        statement: "O serviço e o destino de auditoria mudaram juntos nas duas revisões analisadas; isso indica correlação, não causalidade."
+        affected_entity_ids:
+          - "entity.RecordService.update"
+          - "entity.AuditSink.append"
+        confidence: "low"
+        evidence:
+          - type: "co_change_analysis"
+            origin: "tool"
+            location:
+              kind: "revision"
+              commit: "example-revision-001"
+              repository_path: ".git"
+            revision: "example-revision-001"
+            detail: "Amostra demonstrativa de duas revisões."
+
+uncertainties:
+  - id: "uncertainty.audit-implementation"
+    description: "O destino concreto da auditoria é selecionado por configuração em tempo de execução."
+    reason: "dependency_injection_target_is_ambiguous"
+    affected_entity_ids:
+      - "entity.AuditSink.append"
+    confidence: "unresolved"
+    recommended_verification:
+      - "Inspecionar a configuração ativa do ambiente autorizado."
+      - "Executar o fluxo instrumentado somente após autorização."
+    origin: "agent"
+    evidence:
+      - type: "ast_registration"
+        origin: "tool"
+        location:
+          kind: "source"
+          file: "src/container.example"
+          symbol: "registerAuditSink"
+          line_start: 6
+          line_end: 14
+        revision: "example-revision-001"
+        detail: "Mais de uma implementação pode ser registrada."
+
+task_recipes:
+  - id: "recipe.change-record-contract"
+    description: "Seleciona contexto para alterar o contrato público do registro."
+    start_from:
+      - "entrypoint correspondente"
+      - "tipo público alterado"
+    expand:
+      - "produtores e serializadores"
+      - "consumidores diretos e transitivos"
+      - "validação e autorização"
+      - "efeitos colaterais"
+      - "testes associados"
+    must_include:
+      - "evidências usadas na decisão"
+      - "incertezas não resolvidas"
+      - "relações omitidas por limite"
+    max_depth: 8
+
+extensions:
+  x-example-metadata:
+    note: "Extensões devem usar chaves iniciadas por x-."

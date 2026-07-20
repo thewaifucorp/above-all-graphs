@@ -72,6 +72,8 @@ pub fn register_at(registry: &Path, root: &Path, summary: &IndexSummary) -> Resu
             "files": summary.files,
             "symbols": summary.nodes,
             "docs": summary.docs,
+            "contracts": summary.contracts,
+            "artifacts": summary.artifacts,
             "edges": summary.edges,
             "indexed_at": SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -249,6 +251,8 @@ mod tests {
             files: 2,
             nodes: 5,
             docs: 1,
+            contracts: 0,
+            artifacts: 0,
             edges: 4,
         }
     }

@@ -40,13 +40,6 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// A command was invoked that has no implementation yet.
-    #[error("`{command}` is not implemented yet")]
-    NotImplemented {
-        /// Name of the unimplemented subcommand.
-        command: &'static str,
-    },
-
     /// A graph storage operation failed.
     #[error("failed to {context}: {source}")]
     Storage {
@@ -98,6 +91,15 @@ pub enum Error {
         /// Underlying I/O failure.
         #[source]
         source: std::io::Error,
+    },
+
+    /// An AAG Protocol manifest failed parsing, schema, or semantic validation.
+    #[error("protocol {context}: {detail}")]
+    Protocol {
+        /// Validation or serialization operation that failed.
+        context: &'static str,
+        /// Human-readable diagnostic.
+        detail: String,
     },
 
     /// `aag describe` was pointed at a node that exists but isn't a doc.

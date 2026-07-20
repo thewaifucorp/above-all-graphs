@@ -1,11 +1,13 @@
 /target
 /.aag
+.aag.lock
 .playwright-mcp/
 
 .cursor/
 .gemini/
 .kiro/
 .claude/
+.agents/skills/aag-*/
 .mcp.json
 opencode.json
 AGENTS.md
