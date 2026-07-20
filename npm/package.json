@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thewaifucorp/above-all-graphs.git"
+    "url": "git+https://github.com/thewaifucorp/above-all-graphs.git"
   },
   "keywords": ["mcp", "code-graph", "knowledge-graph", "tree-sitter", "ai-agents"],
   "bin": {
