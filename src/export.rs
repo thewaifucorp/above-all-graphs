@@ -13,9 +13,11 @@
 //! open straight in a browser; `GRAPH_REPORT.md` is also kept in raw
 //! markdown alongside `report.html` for tools/agents that want it as text.
 //!
-//! `graph.html` embeds a real vendored copy of D3 (`assets/d3.v7.min.js`,
-//! BSD-3-Clause, Mike Bostock) via `include_str!`, so the page renders
-//! offline with no server and no CDN fetch.
+//! `graph.html` embeds vendored copies of sigma.js (WebGL renderer) and
+//! graphology (its graph model) via `include_str!`, so the page renders
+//! offline with no server and no CDN fetch. D3 used to be vendored here too,
+//! purely for `d3.quadtree` in the whole-repository force layout; no view
+//! renders the whole repository any more, so both are gone.
 //!
 //! Community detection (clustering symbols into the wiki's per-community
 //! pages) is not implemented in v1 — `SPEC.md`'s own risk note flags that a
@@ -31,9 +33,8 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::storage::{Edge, Graph, Node, NodeKind};
+use crate::storage::{Edge, Graph, Node, NodeKind, Perspective, Provenance};
 
-const D3_JS: &str = include_str!("../assets/d3.v7.min.js");
 /// Vendored sigma.js (WebGL renderer) + graphology (its graph model) — the
 /// render layer scales to multi-thousand-node repos where canvas 2D chokes.
 /// d3 stays vendored too: the ForceAtlas2/noverlap physics use `d3.quadtree`.
@@ -57,8 +58,9 @@ pub fn write_default(root: &Path, aag_dir: &Path, graph: &Graph) -> Result<()> {
     let nodes = graph.all_nodes()?;
     let edges = graph.all_edges()?;
 
+    let provenance = graph.all_nodes_with_provenance()?;
     write_json(aag_dir, &nodes, &edges)?;
-    write_html(root, aag_dir, &nodes, &edges)?;
+    write_html(root, aag_dir, &nodes, &edges, &provenance)?;
     let report_md = report_markdown(root, &nodes, &edges);
     write_file(&aag_dir.join("GRAPH_REPORT.md"), &report_md)?;
     write_file(
@@ -67,7 +69,7 @@ pub fn write_default(root: &Path, aag_dir: &Path, graph: &Graph) -> Result<()> {
     )?;
     write_graphml(aag_dir, &nodes, &edges)?;
     write_cypher(aag_dir, &nodes, &edges)?;
-    let protocol_nodes = graph.all_nodes_with_provenance()?;
+    let protocol_nodes = provenance;
     let protocol_edges = graph.all_edges_with_provenance()?;
     crate::protocol::write_manifest_with_provenance(
         root,
@@ -311,6 +313,20 @@ fn community_label(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
         .unwrap_or_default()
 }
 
+/// The columnar node table, one parallel array per field.
+#[derive(Default)]
+struct NodeColumns<'n> {
+    ids: Vec<i64>,
+    kinds: Vec<usize>,
+    names: Vec<&'n str>,
+    files: Vec<usize>,
+    start_lines: Vec<u32>,
+    end_lines: Vec<u32>,
+    communities: Vec<Option<i64>>,
+    degrees: Vec<u32>,
+    perspectives: Vec<&'static str>,
+}
+
 /// One inter-community bundle: the two communities, the relation kind, and
 /// how many edges of each confidence it stands for.
 type Bundle = (i64, i64, usize, [u32; 3]);
@@ -509,7 +525,14 @@ fn summarize_communities(nodes: &[Node], edges: &[Edge]) -> (Vec<CommunitySummar
 /// parallel arrays it costs ~14. At 88 000 edges that is the difference
 /// between a 6 MB and a 1.5 MB payload, with no information lost — the
 /// dictionaries travel with it.
-fn graph_payload_json(nodes: &[Node], edges: &[Edge]) -> Value {
+fn graph_payload_json(nodes: &[Node], edges: &[Edge], provenance: &[(Node, Provenance)]) -> Value {
+    // Declared-versus-observed is the whole point of the Contracts view: an
+    // endpoint a spec promises and an endpoint a handler actually serves are
+    // different facts about the same path.
+    let perspective_by_id: HashMap<i64, &'static str> = provenance
+        .iter()
+        .filter_map(|(node, provenance)| node.id.map(|id| (id, provenance.perspective.as_str())))
+        .collect();
     let (communities, bundles) = summarize_communities(nodes, edges);
     let community_by_node: HashMap<i64, i64> = communities
         .iter()
@@ -529,16 +552,7 @@ fn graph_payload_json(nodes: &[Node], edges: &[Edge]) -> Value {
     let mut files: Vec<&str> = Vec::new();
     let mut kind_index: HashMap<&str, usize> = HashMap::new();
     let mut file_index: HashMap<&str, usize> = HashMap::new();
-    let mut node_columns = (
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
+    let mut node_columns = NodeColumns::default();
     for node in nodes {
         let Some(id) = node.id else { continue };
         let kind_slot = *kind_index.entry(node.kind.as_str()).or_insert_with(|| {
@@ -551,14 +565,24 @@ fn graph_payload_json(nodes: &[Node], edges: &[Edge]) -> Value {
                 files.push(node.file_path.as_str());
                 files.len() - 1
             });
-        node_columns.0.push(id);
-        node_columns.1.push(kind_slot);
-        node_columns.2.push(node.name.as_str());
-        node_columns.3.push(file_slot);
-        node_columns.4.push(node.start_line);
-        node_columns.5.push(node.end_line);
-        node_columns.6.push(community_by_node.get(&id).copied());
-        node_columns.7.push(degree.get(&id).copied().unwrap_or(0));
+        node_columns.ids.push(id);
+        node_columns.kinds.push(kind_slot);
+        node_columns.names.push(node.name.as_str());
+        node_columns.files.push(file_slot);
+        node_columns.start_lines.push(node.start_line);
+        node_columns.end_lines.push(node.end_line);
+        node_columns
+            .communities
+            .push(community_by_node.get(&id).copied());
+        node_columns
+            .degrees
+            .push(degree.get(&id).copied().unwrap_or(0));
+        node_columns.perspectives.push(
+            perspective_by_id
+                .get(&id)
+                .copied()
+                .unwrap_or(Perspective::Observed.as_str()),
+        );
     }
     let processes = crate::analysis::processes(nodes, edges);
     let entrypoints = crate::analysis::entrypoints(nodes, edges);
@@ -566,14 +590,15 @@ fn graph_payload_json(nodes: &[Node], edges: &[Edge]) -> Value {
         "format": "columnar-1",
         "dict": { "nodeKind": kinds, "file": files, "edgeKind": EDGE_KIND_ORDER, "confidence": CONFIDENCE_ORDER },
         "nodes": {
-            "id": node_columns.0,
-            "kind": node_columns.1,
-            "name": node_columns.2,
-            "file": node_columns.3,
-            "startLine": node_columns.4,
-            "endLine": node_columns.5,
-            "community": node_columns.6,
-            "degree": node_columns.7,
+            "id": node_columns.ids,
+            "kind": node_columns.kinds,
+            "name": node_columns.names,
+            "file": node_columns.files,
+            "startLine": node_columns.start_lines,
+            "endLine": node_columns.end_lines,
+            "community": node_columns.communities,
+            "degree": node_columns.degrees,
+            "perspective": node_columns.perspectives,
         },
         "edges": {
             "source": edges.iter().map(|e| e.src).collect::<Vec<_>>(),
@@ -610,8 +635,14 @@ fn write_json(aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Result<()> {
     write_file(&aag_dir.join("graph.json"), &pretty)
 }
 
-fn write_html(root: &Path, aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Result<()> {
-    let data = graph_payload_json(nodes, edges);
+fn write_html(
+    root: &Path,
+    aag_dir: &Path,
+    nodes: &[Node],
+    edges: &[Edge],
+    provenance: &[(Node, Provenance)],
+) -> Result<()> {
+    let data = graph_payload_json(nodes, edges, provenance);
     let files = source_map_json(root, nodes);
     let name = root
         .canonicalize()
@@ -619,7 +650,6 @@ fn write_html(root: &Path, aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Re
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "repository".to_string());
     let html = GRAPH_HTML_TEMPLATE
-        .replace("/*__D3_JS__*/", D3_JS)
         .replace("/*__GRAPHOLOGY_JS__*/", GRAPHOLOGY_JS)
         .replace("/*__SIGMA_JS__*/", SIGMA_JS)
         .replace(
@@ -1452,6 +1482,11 @@ mod tests {
         dir
     }
 
+    /// Node provenance for a test graph, as `write_default` would pass it.
+    fn provenance_of(graph: &Graph) -> Vec<(Node, Provenance)> {
+        graph.all_nodes_with_provenance().unwrap()
+    }
+
     fn seeded_graph() -> (Graph, Vec<Node>) {
         let graph = Graph::open_in_memory().unwrap();
         let file_a = graph
@@ -1532,7 +1567,7 @@ mod tests {
     fn columnar_payload_round_trips_every_node_and_edge() {
         let (graph, nodes) = seeded_graph();
         let edges = graph.all_edges().unwrap();
-        let payload = graph_payload_json(&nodes, &edges);
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
 
         assert_eq!(payload["format"], "columnar-1");
         let columns = &payload["nodes"];
@@ -1565,11 +1600,113 @@ mod tests {
         }
     }
 
+    /// A graph of the requested shape, wired so every node has edges.
+    fn synthetic_graph(node_count: i64, edges_per_node: i64) -> (Vec<Node>, Vec<Edge>) {
+        let nodes: Vec<Node> = (1..=node_count)
+            .map(|id| Node {
+                id: Some(id),
+                kind: if id % 7 == 0 {
+                    NodeKind::File
+                } else {
+                    NodeKind::Function
+                },
+                name: format!("symbol_number_{id}"),
+                file_path: format!("src/module_{}/file_{}.rs", id % 40, id % 400),
+                start_line: u32::try_from(id % 900).unwrap_or(1) + 1,
+                end_line: u32::try_from(id % 900).unwrap_or(1) + 9,
+                description: None,
+            })
+            .collect();
+        let mut edges = Vec::new();
+        for id in 1..=node_count {
+            for step in 1..=edges_per_node {
+                let target = ((id + step * 7) % node_count) + 1;
+                if target == id {
+                    continue;
+                }
+                edges.push(Edge {
+                    src: id,
+                    dst: target,
+                    kind: if step % 3 == 0 {
+                        EdgeKind::Imports
+                    } else {
+                        EdgeKind::Calls
+                    },
+                    confidence: if step % 2 == 0 {
+                        Confidence::Ambiguous
+                    } else {
+                        Confidence::Inferred
+                    },
+                });
+            }
+        }
+        (nodes, edges)
+    }
+
+    /// The payload budget from `docs/graph-experience.md`, enforced here rather
+    /// than measured by hand after a release. The edge list is what grows, so
+    /// this asserts cost *per edge*: a regression in the encoding shows up long
+    /// before any single repository crosses a size limit.
+    #[test]
+    fn columnar_payload_cost_per_edge_stays_within_budget() {
+        let (nodes, edges) = synthetic_graph(2_000, 10);
+        let payload = graph_payload_json(&nodes, &edges, &[]);
+        let encoded = payload["edges"].to_string().len();
+        let per_edge = f64::from(u32::try_from(encoded).unwrap_or(u32::MAX))
+            / f64::from(u32::try_from(edges.len()).unwrap_or(u32::MAX));
+        assert!(
+            per_edge < 22.0,
+            "the edge table costs {per_edge:.1} bytes per edge over {} edges; the \
+             object encoding this replaced cost about 60, and the medium-fixture \
+             page budget assumes the compact form",
+            edges.len()
+        );
+    }
+
+    /// The whole page, not just the payload: vendored libraries, template, and
+    /// the source budget together must stay inside the medium-fixture ceiling.
+    #[test]
+    fn generated_page_stays_within_the_medium_fixture_budget() {
+        const MEDIUM_BUDGET_BYTES: u64 = 6 * 1024 * 1024;
+        let root = scratch_dir();
+        let aag_dir = root.join(".aag");
+        fs::create_dir_all(&aag_dir).unwrap();
+        let (nodes, edges) = synthetic_graph(6_000, 15);
+
+        write_html(&root, &aag_dir, &nodes, &edges, &[]).unwrap();
+        let bytes = fs::metadata(aag_dir.join("graph.html")).unwrap().len();
+        assert!(
+            bytes <= MEDIUM_BUDGET_BYTES,
+            "graph.html is {bytes} bytes for {} nodes / {} edges, over the \
+             {MEDIUM_BUDGET_BYTES}-byte medium budget in docs/graph-experience.md",
+            nodes.len(),
+            edges.len()
+        );
+    }
+
+    #[test]
+    fn payload_ships_declared_versus_observed_per_node() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
+        let perspectives = payload["nodes"]["perspective"].as_array().unwrap();
+        assert_eq!(perspectives.len(), nodes.len());
+        assert!(
+            perspectives
+                .iter()
+                .all(|value| matches!(value.as_str(), Some("declared" | "observed"))),
+            "Contracts cannot separate a promised endpoint from a served one \
+             without this, so every node must carry it: {perspectives:?}"
+        );
+    }
+
     #[test]
     fn columnar_payload_is_smaller_than_the_object_form() {
         let (graph, nodes) = seeded_graph();
         let edges = graph.all_edges().unwrap();
-        let columnar = graph_payload_json(&nodes, &edges).to_string().len();
+        let columnar = graph_payload_json(&nodes, &edges, &provenance_of(&graph))
+            .to_string()
+            .len();
         let objects = graph_data_json(&nodes, &edges).to_string().len();
         assert!(
             columnar < objects * 2,
@@ -1581,7 +1718,7 @@ mod tests {
     fn community_summary_carries_what_a_collapsed_aggregate_must_explain() {
         let (graph, nodes) = seeded_graph();
         let edges = graph.all_edges().unwrap();
-        let payload = graph_payload_json(&nodes, &edges);
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
         let communities = payload["communities"].as_array().unwrap();
         assert!(!communities.is_empty(), "seeded graph has a community");
         for community in communities {
@@ -1705,7 +1842,7 @@ mod tests {
     fn payload_node_community_matches_a_shipped_community_id() {
         let (graph, nodes) = seeded_graph();
         let edges = graph.all_edges().unwrap();
-        let payload = graph_payload_json(&nodes, &edges);
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
         let ids: HashSet<i64> = payload["communities"]
             .as_array()
             .unwrap()
@@ -1841,7 +1978,7 @@ mod tests {
         .unwrap();
         let (_graph, nodes) = seeded_graph();
 
-        write_html(&root, &aag_dir, &nodes, &[]).unwrap();
+        write_html(&root, &aag_dir, &nodes, &[], &[]).unwrap();
         let html = fs::read_to_string(aag_dir.join("graph.html")).unwrap();
 
         assert!(
@@ -1996,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_html_embeds_d3_and_data() {
+    fn graph_html_embeds_its_renderer_and_data() {
         let (graph, _) = seeded_graph();
         let root = scratch_dir();
         let aag_dir = root.join(".aag");
@@ -2005,8 +2142,15 @@ mod tests {
         write_default(&root, &aag_dir, &graph).unwrap();
 
         let html = fs::read_to_string(aag_dir.join("graph.html")).unwrap();
-        assert!(html.contains("d3js.org"), "vendored D3 must be embedded");
+        assert!(
+            html.contains("Sigma") && html.contains("graphology"),
+            "the vendored renderer and graph model must be embedded"
+        );
         assert!(html.contains("\"caller\""), "graph data must be inlined");
+        assert!(
+            !html.contains("d3js.org"),
+            "D3 existed only for the retired whole-repository force layout"
+        );
         assert!(
             !html.contains("__GRAPH_DATA__"),
             "placeholder must be substituted"

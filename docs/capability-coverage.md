@@ -101,7 +101,21 @@ P2 gates expand reach after the core is measurable and dependable.
    a longer expression chain stays untyped and falls through to the weaker
    rungs. An import specifier no manifest and no convention explains is
    treated as external.
-- 3. Complete the graph experience redesign specified below. Preserve the
+- 3. **Closed.** The graph experience redesign specified below: five task modes
+   (Overview, Explore, Path, Impact, Contracts) on one scene engine, shareable
+   URL state with working history, a unified inspector, community aggregates
+   with expand-in-place, a command palette, semantic zoom, deterministic layout
+   caching, and keyboard/reduced-motion coverage. Measured against the
+   pre-redesign baseline on an external 5971-node repository: document 12.97 MB
+   to 5.17 MB, first paint 1373 ms to 400 ms, peak heap 271.8 MB to 125 MB,
+   initial scene 5971 nodes / 87 928 edges to 146 / 151. Payload and page-size
+   budgets are enforced by `cargo test`. Still open, and recorded as such in
+   [graph experience](graph-experience.md): visual regression baselines and
+   browser-side budget enforcement, the shape-and-dash visual grammar (which
+   needs custom WebGL programs), aggregation of Explore's dropped neighbours,
+   and alternative equal-length paths.
+   Original scope, for the record:
+   Complete the graph experience redesign specified below. Preserve the
    fast offline renderer, but replace the single hairball-oriented interaction
    model with task-specific overview, explore, path, impact, and contract
    views. The current graph is functional but not yet a competitive visual

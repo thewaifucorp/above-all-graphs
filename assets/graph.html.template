@@ -31,16 +31,17 @@
   #brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text-primary); }
   #brand .word { font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
   #brand .sub { color: var(--text-dim); font-size: 9px; margin-top: 1px; display: block; line-height: 1; white-space: nowrap; }
-  #repo-pill { background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-secondary); white-space: nowrap; }
+  #brand { flex: none; }
+  #repo-pill { flex: none; background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-secondary); white-space: nowrap; }
   #repo-pill b { color: var(--text-primary); font-weight: 600; }
   /* Anchored to the true screen center (not flex-centered): siblings come
      and go — brand hides when embedded — and the search bar must not
      drift with them. */
-  #search-wrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(420px, 36vw); }
+  #search-wrap { flex: 1 1 160px; min-width: 90px; max-width: 420px; margin: 0 4px; }
   #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 8px; width: 100%; font-size: 13px; outline: none; box-sizing: border-box; }
   #search:focus { border-color: var(--accent); }
   #search::placeholder { color: var(--text-dim); }
-  #header .counts { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #header .counts { display: none; }
   #header .counts b { color: var(--text-primary); font-weight: 600; }
   #header button, #header a.hbtn { background: none; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 8px; height: 28px; cursor: pointer; font-size: 12px; padding: 0 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: color 0.12s, border-color 0.12s; }
   #header button:hover, #header a.hbtn:hover { color: var(--text-primary); border-color: var(--border-bright); }
@@ -193,16 +194,61 @@
   #filemodal .fm-line.hl { background: var(--accent-dim); }
   #filemodal .fm-no { width: 48px; text-align: right; padding-right: 12px; color: var(--text-dim); user-select: none; flex-shrink: 0; }
   #filemodal .fm-code { white-space: pre; padding-right: 16px; color: #c4c9d4; }
-  #modes { display: flex; gap: 2px; margin-left: 10px; }
+  #modes { display: flex; gap: 2px; margin-left: 6px; flex: none; }
   #modes button {
     background: transparent; border: 1px solid var(--line, #262624); color: var(--text-dim, #9a978f);
     font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 3px;
   }
   #modes button[aria-selected="true"] { background: var(--accent, #ffc600); border-color: var(--accent, #ffc600); color: #0a0a0a; }
   #modes button:focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
-  #view-overview { position: absolute; inset: 44px 268px 22px 0; display: none; }
-  body.mode-overview #view-overview { display: block; }
-  body.mode-overview #view { display: none; }
+  body[data-mode="overview"] #view { right: 268px; }
+  #empty-state {
+    position: absolute; inset: 44px 0 22px 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim, #9a978f); font-size: 12px; text-align: center; padding: 0 18%; z-index: 4;
+    pointer-events: none;
+  }
+  #empty-state[hidden] { display: none; }
+  #mode-controls { display: flex; gap: 8px; margin-left: 6px; align-items: center; flex: none; }
+  #mode-controls[hidden] { display: none; }
+  #mode-controls label { display: flex; gap: 4px; align-items: center; font-size: 10px; color: var(--text-dim, #9a978f); letter-spacing: .04em; }
+  #mode-controls input {
+    background: var(--bg-2, #1a1a18); border: 1px solid var(--line, #262624); color: var(--text, #f2f2ee);
+    font: inherit; font-size: 11px; padding: 2px 5px; border-radius: 3px; width: 4.5em;
+  }
+  #mode-controls input[type="text"] { width: 10em; }
+  #palette {
+    position: fixed; left: 50%; top: 14vh; transform: translateX(-50%); width: min(620px, 92vw); z-index: 60;
+    background: var(--bg-1, #121212); border: 1px solid var(--line, #262624); border-radius: 5px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.6); overflow: hidden;
+  }
+  #palette[hidden] { display: none; }
+  #palette-input {
+    width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line, #262624);
+    color: var(--text, #f2f2ee); font: inherit; font-size: 13px; padding: 11px 13px; outline: none;
+  }
+  #palette-list { max-height: 46vh; overflow: auto; }
+  #palette .prow { display: flex; gap: 10px; padding: 6px 13px; cursor: pointer; font-size: 11px; align-items: baseline; }
+  #palette .prow .name { flex: none; }
+  #palette .prow .hint { color: var(--text-dim, #9a978f); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #palette .prow.on { background: var(--bg-2, #1a1a18); }
+  #palette .prow.on .name { color: var(--accent, #ffc600); }
+  #tree .leaf { display: flex; gap: 8px; padding: 2px 0; cursor: pointer; font-size: 11px; }
+  #tree .leaf .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  #tree .leaf .n { color: var(--text-dim, #9a978f); }
+  #tree .leaf:hover .name, #tree .leaf.active .name { color: var(--accent, #ffc600); }
+  .tab-body { display: none; }
+  .tab-body.on { display: block; }
+  :focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
+  /* `#header a.hbtn` is (1,1,1), so an id-only selector loses to it. */
+  @media (max-width: 1560px) {
+    #header #star-btn, #header #waifu-btn { display: none; }
+    #mode-controls input[type="text"] { width: 7em; }
+  }
+  @media (max-width: 1100px) {
+    #header #chat-btn { display: none; }
+    #modes button { padding: 4px 7px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   #legend {
     position: absolute; right: 12px; top: 56px; width: 240px; max-height: calc(100vh - 140px);
     overflow: auto; background: var(--bg-1, #121212); border: 1px solid var(--line, #262624);
@@ -252,6 +298,7 @@
   </a>
   <span id="repo-pill"></span>
   <div id="modes" role="tablist" aria-label="Graph mode"></div>
+  <div id="mode-controls" hidden></div>
   <div id="search-wrap"><input id="search" type="text" placeholder="Search nodes&hellip;"></div>
   <span class="counts"><b id="c-nodes"></b> nodes &middot; <b id="c-edges"></b> edges</span>
   <button id="sidebar-btn" title="Toggle sidebar">&#9707;</button>
@@ -265,22 +312,26 @@
 </div>
 
 <div id="sidebar">
-  <div class="tabs">
-    <button id="tab-btn-explorer" class="active">Explorer</button>
-    <button id="tab-btn-filters">Filters</button>
+  <div class="tabs" role="tablist">
+    <button id="tab-btn-explorer" class="active" role="tab" aria-selected="true">Files</button>
+    <button id="tab-btn-filters" role="tab" aria-selected="false">Filters</button>
   </div>
-  <div class="tab-body" id="tab-explorer"><div id="tree"></div></div>
+  <div class="tab-body on" id="tab-explorer"><div id="tree"></div></div>
   <div class="tab-body" id="tab-filters">
-    <div class="fgroup" id="f-kinds"><h4>Node kinds</h4></div>
-    <div class="fgroup" id="f-conf"><h4>Edge confidence</h4></div>
-    <div class="fgroup" id="f-modules"><h4>Modules</h4></div>
+    <div class="fgroup" id="f-kinds"></div>
+    <div class="fgroup" id="f-rels"></div>
+    <div class="fgroup" id="f-conf"></div>
   </div>
 </div>
 
 <div id="view"></div>
-<div id="view-overview"></div>
+<div id="empty-state" hidden></div>
 <div id="legend" hidden><h4>Modules</h4><div id="legend-list"></div></div>
 <div id="notice" role="status" aria-live="polite" hidden></div>
+<div id="palette" role="dialog" aria-label="Command palette" hidden>
+  <input id="palette-input" type="text" placeholder="Jump to a symbol, or run a command&hellip;" spellcheck="false" autocomplete="off">
+  <div id="palette-list"></div>
+</div>
 <div id="progress"><div>organizing graph&hellip;</div><div class="bar"><i id="progress-fill"></i></div></div>
 
 <div id="settings-panel" class="fpanel">
@@ -296,7 +347,7 @@
   <button id="s-reset">Reset to defaults</button>
 </div>
 
-<div id="panel" class="fpanel"></div>
+<div id="panel" class="fpanel" role="region" aria-label="Inspector" tabindex="-1"></div>
 
 <div id="chat-panel" class="fpanel">
   <div class="chat-head">
@@ -334,7 +385,6 @@
   <span class="right" id="status-counts"></span>
 </div>
 
-<script>/*__D3_JS__*/</script>
 <script>/*__GRAPHOLOGY_JS__*/</script>
 <script>/*__SIGMA_JS__*/</script>
 <script>
@@ -461,409 +511,780 @@ communityMeta.push({
   representatives: [],
 });
 
-// --- Layout: ForceAtlas2 (Barnes-Hut via d3.quadtree) + noverlap -----------
-// Per SPEC section 6: GitNexus and Graphify independently converged on
-// ForceAtlas2 — generic D3 many-body doesn't settle into legible clusters at
-// real-repo scale. Vendored implementation, no CDN. The initial layout runs
-// to convergence behind the progress bar; drag reheats a short-lived
-// simulation (see "Live simulation"). Perpetual motion is opt-in — it costs
-// CPU, and the default must never freeze a weak machine.
-const rand = mulberry32(42);
-const radiusOf = (d) =>
-  (d.kind === "file" || d.kind === "doc" ? 6 : 3.5) * settings.nodeScale +
-  Math.min(Math.sqrt(d.degree) * 1.8, 14) * settings.nodeScale;
+// --- Visual grammar ----------------------------------------------------------
+// One channel per dimension, and nothing carried by colour alone — see
+// `docs/graph-experience.md`. Sigma's default programs draw circles and plain
+// lines, so node kind is carried by a label glyph rather than a shape, and
+// relation kind by hue plus width. Dashes and shapes would need custom WebGL
+// programs; the glyph keeps the distinction available today without one.
+const KIND_GLYPH = {
+  file: "▢",
+  doc: "◇",
+  function: "●",
+  method: "○",
+  struct: "■",
+  interface: "△",
+  endpoint: "⬡",
+  schema: "▤",
+  database_table: "▥",
+  infra_resource: "▲",
+};
+const REL_STYLE = {
+  calls: { color: "#6f6f66", width: 1 },
+  imports: { color: "#4d6b7a", width: 1 },
+  inherits: { color: "#7d5f92", width: 1.6 },
+  implements: { color: "#5f8060", width: 1.6 },
+  explains: { color: "#7d6a4a", width: 0.8 },
+  references: { color: "#4a4a44", width: 0.8 },
+};
+const CONF_WEIGHT = { EXTRACTED: 1, INFERRED: 0.72, AMBIGUOUS: 0.42 };
+const SURFACE = [10, 10, 10];
 
-// Seed each community on a circle so clusters start — and stay — spatially
-// separated instead of relying on the forces to untangle a random init.
-const seeds = [];
-{
-  const R = 160 + 26 * Math.sqrt(nodes.length);
-  for (let c = 0; c < communityMeta.length; c++) {
-    const angle = (2 * Math.PI * c) / communityMeta.length;
-    seeds.push({ x: Math.cos(angle) * R, y: Math.sin(angle) * R });
-  }
-  for (const n of nodes) {
-    const s = seeds[n.community];
-    const spread = 30 + 14 * Math.sqrt(communityMeta[n.community].size);
-    const a = rand() * 2 * Math.PI;
-    const r = Math.sqrt(rand()) * spread;
-    n.x = s.x + Math.cos(a) * r;
-    n.y = s.y + Math.sin(a) * r;
-  }
+// Blends a colour toward the page background. Sigma's edge program takes no
+// per-edge alpha, so confidence has to be baked into the colour itself.
+function fade(hex, weight) {
+  const value = parseInt(hex.slice(1), 16);
+  const parts = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  const mixed = parts.map((channel, index) =>
+    Math.round(SURFACE[index] + (channel - SURFACE[index]) * weight)
+  );
+  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
-function accumulateMass(quad) {
-  if (quad.length) {
-    let m = 0, x = 0, y = 0;
-    for (let i = 0; i < 4; i++) {
-      const q = quad[i];
-      if (q && q.m) { m += q.m; x += q.x * q.m; y += q.y * q.m; }
-    }
-    quad.m = m; quad.x = x / m; quad.y = y / m;
-  } else {
-    let m = 0, q = quad;
-    do { m += q.data.mass; } while ((q = q.next));
-    quad.m = m; quad.x = quad.data.x; quad.y = quad.data.y;
-  }
+function edgeStyle(edge) {
+  const style = REL_STYLE[edge.kind] || REL_STYLE.calls;
+  const weight = CONF_WEIGHT[edge.confidence] ?? 0.5;
+  return { color: fade(style.color, weight), size: style.width * (0.6 + weight * 0.7) };
 }
 
-// `stepFloor` is the minimum per-tick displacement: 0.4 during the initial
-// layout so convergence never stalls, 0 during the live simulation so idle
-// motion stays subtle instead of jittering forever.
-function fa2Step(alpha, stepFloor = 0.4) {
-  const kr = settings.repulsion;
-  const kg = settings.gravity * 0.12;
-  const kc = settings.cluster * 0.1;
-  for (const n of nodes) { n.dx = 0; n.dy = 0; }
-
-  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
-  tree.visitAfter(accumulateMass);
-  const theta2 = 1.2 * 1.2;
-
-  for (const n of nodes) {
-    tree.visit((quad, x0, y0, x1, y1) => {
-      if (!quad.m) return true;
-      const w = x1 - x0;
-      let dx = n.x - quad.x, dy = n.y - quad.y;
-      const dist2 = dx * dx + dy * dy;
-      if ((w * w) / theta2 < dist2) {
-        // Far region: treat as one body. FA2 repulsion F ∝ mass·mass / d.
-        const f = (kr * n.mass * quad.m) / Math.max(dist2, 1);
-        n.dx += dx * f; n.dy += dy * f;
-        return true;
-      }
-      if (quad.length) return false;
-      let q = quad;
-      do {
-        if (q.data !== n) {
-          let ddx = n.x - q.data.x, ddy = n.y - q.data.y;
-          let dd2 = ddx * ddx + ddy * ddy;
-          if (dd2 < 0.01) { ddx = rand() - 0.5; ddy = rand() - 0.5; dd2 = ddx * ddx + ddy * ddy; }
-          const f = (kr * n.mass * q.data.mass) / dd2;
-          n.dx += ddx * f; n.dy += ddy * f;
-        }
-      } while ((q = q.next));
-      return true;
-    });
-  }
-
-  // Attraction: linear in distance, hub-dissuaded (divide by source mass) so
-  // god nodes don't collapse their whole neighborhood onto themselves.
-  for (const e of links) {
-    const dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
-    e.s.dx += dx / e.s.mass; e.s.dy += dy / e.s.mass;
-    e.t.dx -= dx / e.t.mass; e.t.dy -= dy / e.t.mass;
-  }
-
-  for (const n of nodes) {
-    // Gravity toward origin keeps disconnected components from drifting off.
-    // Normal FA2 gravity (unit direction × mass, NOT scaled by distance) —
-    // strong gravity crushes the community separation the seeds establish.
-    const d = Math.hypot(n.x, n.y) || 1;
-    const g = kg * n.mass;
-    n.dx -= (n.x / d) * g;
-    n.dy -= (n.y / d) * g;
-    // Community pull toward its seed — this is what keeps the colored
-    // clusters *organized* instead of interleaved.
-    const s = seeds[n.community];
-    n.dx += (s.x - n.x) * kc;
-    n.dy += (s.y - n.y) * kc;
-
-    const len = Math.hypot(n.dx, n.dy);
-    if (len > 0) {
-      const step = Math.min(len, 14 * alpha + stepFloor);
-      n.x += (n.dx / len) * step;
-      n.y += (n.dy / len) * step;
-    }
-  }
+function nodeLabel(node) {
+  return `${KIND_GLYPH[node.kind] || "●"} ${node.name}`;
 }
 
-// Noverlap pass: after the layout settles, iteratively push overlapping
-// nodes apart so every label anchor has breathing room (the dedicated pass
-// both GitNexus and Graphify run after ForceAtlas2).
-function noverlapStep() {
-  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
-  let moved = 0;
-  for (const n of nodes) {
-    const r = radiusOf(n) + 2;
-    tree.visit((quad, x0, y0, x1, y1) => {
-      if (quad.length) return x0 > n.x + r + 30 || x1 < n.x - r - 30 || y0 > n.y + r + 30 || y1 < n.y - r - 30;
-      let q = quad;
-      do {
-        const o = q.data;
-        if (o !== n && o.id > n.id) {
-          let dx = n.x - o.x, dy = n.y - o.y;
-          let dist = Math.hypot(dx, dy);
-          const min = r + radiusOf(o) + 2;
-          if (dist < min) {
-            if (dist < 0.01) { dx = rand() - 0.5; dy = rand() - 0.5; dist = Math.hypot(dx, dy); }
-            const push = (min - dist) / dist / 2;
-            n.x += dx * push; n.y += dy * push;
-            o.x -= dx * push; o.y -= dy * push;
-            moved++;
-          }
-        }
-      } while ((q = q.next));
-      return false;
-    });
-  }
-  return moved;
+function nodeSize(node) {
+  return (3 + Math.min(Math.sqrt(node.degree || 0) * 1.7, 13)) * settings.nodeScale;
 }
 
-// --- Sigma rendering ---------------------------------------------------------
-// WebGL render layer (sigma.js v2 + graphology, both vendored — no CDN).
-// Our own ForceAtlas2/noverlap physics keep computing positions on the plain
-// node objects; sigma just draws them. This is what lets the same page handle
-// multi-thousand-node repos where canvas 2D dropped frames.
-const container = document.getElementById("view");
-let selected = null;
-let hoveredNode = null;
-let isolatedCommunity = null;
-// Relation kinds filtered out; kept beside the other filter sets because the
-// reducers below read it before the state block runs.
-let hiddenRel = new Set();
-let searchQuery = "";
-const hiddenKinds = new Set();
-const hiddenConf = new Set();
-let renderer = null;
-let camera = null;
-
-// Sigma sizes are radii in px at zoom-neutral scale.
-const sizeOf = (n) =>
-  (n.kind === "file" || n.kind === "doc" ? 5 : 2.5) * settings.nodeScale +
-  Math.min(Math.sqrt(n.degree) * 1.2, 9) * settings.nodeScale;
-
-// WebGL edge colors carry no per-edge alpha, so the opacity slider maps to a
-// gray ramp against the #0a0a0a background instead.
-function edgeShade() {
-  const v = Math.round(18 + settings.edgeOpacity * 110);
-  return `rgb(${v},${v},${Math.max(0, v - 4)})`;
+// --- Adjacency ---------------------------------------------------------------
+// Built once. Every mode walks these instead of scanning the edge list.
+const outgoing = new Map();
+const incoming = new Map();
+for (const edge of links) {
+  if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
+  if (!incoming.has(edge.target)) incoming.set(edge.target, []);
+  outgoing.get(edge.source).push(edge);
+  incoming.get(edge.target).push(edge);
+}
+const neighborsOf = new Map();
+for (const edge of links) {
+  if (!neighborsOf.has(edge.source)) neighborsOf.set(edge.source, new Set());
+  if (!neighborsOf.has(edge.target)) neighborsOf.set(edge.target, new Set());
+  neighborsOf.get(edge.source).add(edge.target);
+  neighborsOf.get(edge.target).add(edge.source);
 }
 
-const graph = new graphology.Graph({ multi: true, type: "directed" });
-for (const n of nodes) {
-  graph.addNode(String(n.id), {
-    x: n.x, y: n.y,
-    size: sizeOf(n),
-    color: communityColor(n.community),
-    label: n.name,
-    _n: n,
-  });
+function edgeAllowed(edge) {
+  return !hiddenRel.has(edge.kind) && !hiddenConf.has(edge.confidence);
 }
-{
-  let ei = 0;
-  for (const e of links) {
-    graph.addEdgeWithKey(`e${ei++}`, String(e.source), String(e.target), { size: 1, _e: e });
-  }
-}
-
-function nodeVisible(n) {
-  if (hiddenKinds.has(n.kind)) return false;
-  if (isolatedCommunity !== null && n.community !== isolatedCommunity) return false;
-  if (searchQuery && !n.name.toLowerCase().includes(searchQuery) && !n.file.toLowerCase().includes(searchQuery)) return false;
+function nodeAllowed(node) {
+  if (hiddenKinds.has(node.kind)) return false;
+  if (State.community !== null && node.community !== State.community) return false;
   return true;
 }
 
-// Reducers: sigma consults these on every render — all our filter/hover/
-// isolation state lives here instead of a hand-rolled draw loop.
+const isTestPath = (file) => /(^|\/)(tests?|spec|__tests__)\//i.test(file) || /[._-](test|spec)\./i.test(file);
+
+// How much a neighbour is worth showing: an explicit relation beats a guessed
+// one, a contract or entrypoint beats a leaf, and a hub beats a singleton.
+function neighborScore(node, edge) {
+  let score = CONF_WEIGHT[edge.confidence] ?? 0.5;
+  score *= edge.kind === "explains" ? 0.5 : 1;
+  if (ENTRYPOINTS.has(node.id)) score += 0.6;
+  if (node.kind === "endpoint" || node.kind === "schema") score += 0.5;
+  if (isTestPath(node.file)) score -= 0.2;
+  return score + Math.min(Math.log1p(node.degree || 0) * 0.25, 1);
+}
+
+// --- Scene engine ------------------------------------------------------------
+// Every mode produces the same shape — nodes, edges, a layout kind — and one
+// renderer draws it. The whole-repository force layout is gone: no mode needs
+// every symbol on screen at once, and the budgets in
+// `docs/graph-experience.md` say it must not try.
+const MAX_SCENE_NODES = 420;
+
+let scene = null;
+let renderer = null;
+let sceneSpec = null;
+let selected = null;
+let hoveredNode = null;
+let sceneOmitted = 0;
+
+const IMPACT_GLYPH = { changed: "◆", direct: "◐", transitive: "○" };
+
+function nodeEntry(node, extra) {
+  const base = {
+    key: `n${node.id}`,
+    label: nodeLabel(node),
+    size: nodeSize(node),
+    color: communityColor(node.community),
+    _node: node,
+  };
+  const merged = Object.assign(base, extra || {});
+  // Impact state is a second dimension on the same node, so it gets its own
+  // channel — a glyph and a size step, never a hue the module already owns.
+  if (merged._impact) {
+    merged.label = `${IMPACT_GLYPH[merged._impact] || ""} ${merged.label}`;
+    if (merged._impact === "transitive") {
+      merged.size = Math.max(3, merged.size * 0.75);
+      merged.color = fade(merged.color, 0.6);
+    }
+    if (merged._test) merged.label = `${merged.label} · test`;
+  }
+  return merged;
+}
+
+// --- Overview ----------------------------------------------------------------
+function overviewSpec() {
+  const items = [];
+  const edges = [];
+  const shown = COMMUNITIES.filter((c) => State.community === null || c.id === State.community);
+  const anchorOf = new Map();
+
+  for (const community of shown) {
+    const meta = communityMeta[community.id] || {};
+    if (State.expanded.has(community.id)) {
+      for (const id of community.members) {
+        const node = byId.get(id);
+        if (node && nodeAllowed(node)) items.push(nodeEntry(node));
+      }
+      anchorOf.set(community.id, community.representatives.length ? `n${community.representatives[0]}` : null);
+    } else {
+      items.push({
+        key: `c${community.id}`,
+        label: `${meta.label || "#" + community.id} (${community.members.length})`,
+        size: 6 + Math.min(Math.sqrt(community.members.length) * 3.2, 26),
+        color: communityColor(community.id),
+        _aggregate: community,
+      });
+      anchorOf.set(community.id, `c${community.id}`);
+    }
+  }
+  const present = new Set(items.map((item) => item.key));
+
+  if (State.expanded.size) {
+    let index = 0;
+    for (const edge of links) {
+      if (edge.s.community !== edge.t.community) continue;
+      if (!State.expanded.has(edge.s.community) || !edgeAllowed(edge)) continue;
+      if (!present.has(`n${edge.source}`) || !present.has(`n${edge.target}`)) continue;
+      edges.push(Object.assign({ key: `i${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+    }
+  }
+
+  let index = 0;
+  for (const bundle of BUNDLES) {
+    if (hiddenRel.has(bundle.kind)) continue;
+    const from = anchorOf.get(bundle.a);
+    const to = anchorOf.get(bundle.b);
+    if (!from || !to || !present.has(from) || !present.has(to) || from === to) continue;
+    edges.push({
+      key: `b${index++}`,
+      from,
+      to,
+      size: Math.min(0.6 + Math.log1p(bundle.count) * 0.9, 6),
+      color: fade(
+        (REL_STYLE[bundle.kind] || REL_STYLE.calls).color,
+        bundle.ambiguous > bundle.extracted + bundle.inferred ? 0.45 : 0.9
+      ),
+      _bundle: bundle,
+    });
+  }
+  return { layout: "force", items, edges, omitted: 0, caption: `${shown.length} modules` };
+}
+
+// --- Explore -----------------------------------------------------------------
+// A ranked neighbourhood around one symbol, with upstream and downstream depth
+// controlled separately, and a hard cap that reports what it dropped.
+function exploreSpec() {
+  const root = resolveFocus(State.focus);
+  if (!root) return { layout: "force", items: [], edges: [], omitted: 0, empty: "Pick a symbol to explore." };
+
+  const depth = new Map([[root.id, 0]]);
+  const direction = new Map([[root.id, "root"]]);
+  const kept = new Set([root.id]);
+  let frontier = [root.id];
+  for (let hop = 1; hop <= Math.max(State.down, 0) && frontier.length; hop++) {
+    const next = [];
+    for (const id of frontier) {
+      const ranked = (outgoing.get(id) || [])
+        .filter(edgeAllowed)
+        .map((edge) => ({ edge, node: byId.get(edge.target) }))
+        .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge))
+        .slice(0, hop === 1 ? 40 : 12);
+      for (const candidate of ranked) {
+        kept.add(candidate.node.id);
+        depth.set(candidate.node.id, hop);
+        direction.set(candidate.node.id, "down");
+        next.push(candidate.node.id);
+      }
+    }
+    frontier = next;
+  }
+  frontier = [root.id];
+  for (let hop = 1; hop <= Math.max(State.up, 0) && frontier.length; hop++) {
+    const next = [];
+    for (const id of frontier) {
+      const ranked = (incoming.get(id) || [])
+        .filter(edgeAllowed)
+        .map((edge) => ({ edge, node: byId.get(edge.source) }))
+        .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge))
+        .slice(0, hop === 1 ? 40 : 12);
+      for (const candidate of ranked) {
+        kept.add(candidate.node.id);
+        depth.set(candidate.node.id, hop);
+        direction.set(candidate.node.id, "up");
+        next.push(candidate.node.id);
+      }
+    }
+    frontier = next;
+  }
+  for (const id of State.pins) if (byId.has(id)) kept.add(id);
+
+  let omitted = 0;
+  let ids = [...kept];
+  if (ids.length > MAX_SCENE_NODES) {
+    omitted = ids.length - MAX_SCENE_NODES;
+    ids = ids
+      .sort((left, right) => (depth.get(left) || 0) - (depth.get(right) || 0) || (byId.get(right).degree || 0) - (byId.get(left).degree || 0))
+      .slice(0, MAX_SCENE_NODES);
+  }
+  const set = new Set(ids);
+  const items = ids.map((id) => {
+    const node = byId.get(id);
+    return nodeEntry(node, {
+      size: id === root.id ? nodeSize(node) * 1.9 + 3 : nodeSize(node),
+      _depth: depth.get(id) || 0,
+      _direction: direction.get(id),
+      _pinned: State.pins.has(id),
+    });
+  });
+  const edges = [];
+  let index = 0;
+  for (const edge of links) {
+    if (!set.has(edge.source) || !set.has(edge.target) || !edgeAllowed(edge)) continue;
+    edges.push(Object.assign({ key: `e${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+  }
+  return {
+    layout: "force",
+    items,
+    edges,
+    omitted,
+    root,
+    caption: `${items.length} nodes · up ${State.up} / down ${State.down}`,
+  };
+}
+
+// --- Path --------------------------------------------------------------------
+// Directed shortest paths, drawn as layers rather than as a force graph: a
+// path has an order, and a force layout hides it.
+function shortestPaths(fromId, toId, limit) {
+  const previous = new Map([[fromId, null]]);
+  const queue = [fromId];
+  let found = false;
+  while (queue.length && !found) {
+    const id = queue.shift();
+    for (const edge of outgoing.get(id) || []) {
+      if (!edgeAllowed(edge) || previous.has(edge.target)) continue;
+      const node = byId.get(edge.target);
+      if (!node || !nodeAllowed(node)) continue;
+      previous.set(edge.target, edge);
+      if (edge.target === toId) {
+        found = true;
+        break;
+      }
+      queue.push(edge.target);
+    }
+  }
+  if (!previous.has(toId)) return [];
+  const chain = [];
+  let cursor = toId;
+  while (previous.get(cursor)) {
+    const edge = previous.get(cursor);
+    chain.unshift(edge);
+    cursor = edge.source;
+  }
+  return limit ? chain.slice(0, limit) : chain;
+}
+
+function pathSpec() {
+  const from = resolveFocus(State.from);
+  const to = resolveFocus(State.to);
+  if (!from || !to) {
+    return {
+      layout: "layered",
+      items: [],
+      edges: [],
+      omitted: 0,
+      empty: from || to ? "Pick the other endpoint to trace a path." : "Pick a source and a target.",
+    };
+  }
+  if (from.id === to.id) {
+    return { layout: "layered", items: [], edges: [], omitted: 0, empty: "Source and target are the same node." };
+  }
+  const chain = shortestPaths(from.id, to.id);
+  if (!chain.length) {
+    return {
+      layout: "layered",
+      items: [],
+      edges: [],
+      omitted: 0,
+      empty: `No directed path from ${from.name} to ${to.name} under the current filters.`,
+    };
+  }
+  const sequence = [from.id, ...chain.map((edge) => edge.target)];
+  const items = sequence.map((id, index) =>
+    nodeEntry(byId.get(id), { _layer: index, size: nodeSize(byId.get(id)) * (index === 0 || index === sequence.length - 1 ? 1.7 : 1.2) + 2 })
+  );
+  const edges = chain.map((edge, index) =>
+    Object.assign({ key: `p${index}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge, _hop: index + 1 }, edgeStyle(edge), {
+      size: Math.max(2, edgeStyle(edge).size * 2),
+    })
+  );
+  return { layout: "layered", items, edges, omitted: 0, caption: `${chain.length} hops`, chain };
+}
+
+// --- Impact ------------------------------------------------------------------
+// Dependents and dependencies separated, grouped by depth, with the things a
+// reader must act on — tests, entrypoints, contracts — ranked first.
+function impactSpec() {
+  const root = resolveFocus(State.focus);
+  if (!root) return { layout: "radial", items: [], edges: [], omitted: 0, empty: "Pick a symbol to see its blast radius." };
+
+  function walk(adjacency, pick, maxDepth) {
+    const seen = new Map();
+    let frontier = [root.id];
+    for (let hop = 1; hop <= maxDepth && frontier.length; hop++) {
+      const next = [];
+      for (const id of frontier) {
+        for (const edge of adjacency.get(id) || []) {
+          if (!edgeAllowed(edge)) continue;
+          const other = pick(edge);
+          const node = byId.get(other);
+          if (!node || !nodeAllowed(node) || other === root.id || seen.has(other)) continue;
+          seen.set(other, hop);
+          next.push(other);
+        }
+      }
+      frontier = next;
+    }
+    return seen;
+  }
+  const dependents = walk(incoming, (edge) => edge.source, Math.max(State.up, 1));
+  const dependencies = walk(outgoing, (edge) => edge.target, Math.max(State.down, 1));
+
+  const rank = (id) => {
+    const node = byId.get(id);
+    let score = 0;
+    if (isTestPath(node.file)) score -= 3;
+    if (ENTRYPOINTS.has(id)) score -= 2;
+    if (node.kind === "endpoint" || node.kind === "schema") score -= 2;
+    return score;
+  };
+  const collect = (map, side) =>
+    [...map.entries()]
+      .sort((left, right) => left[1] - right[1] || rank(left[0]) - rank(right[0]) || (byId.get(right[0]).degree || 0) - (byId.get(left[0]).degree || 0))
+      .map(([id, depth]) => ({ id, depth, side }));
+
+  const ordered = [...collect(dependents, "up"), ...collect(dependencies, "down")];
+  const budget = MAX_SCENE_NODES - 1;
+  const omitted = Math.max(0, ordered.length - budget);
+  const chosen = ordered.slice(0, budget);
+  const set = new Set([root.id, ...chosen.map((entry) => entry.id)]);
+
+  const items = [
+    nodeEntry(root, { _impact: "changed", _layer: 0, size: nodeSize(root) * 2 + 4 }),
+    ...chosen.map((entry) =>
+      nodeEntry(byId.get(entry.id), {
+        _impact: entry.depth === 1 ? "direct" : "transitive",
+        _side: entry.side,
+        _layer: entry.side === "up" ? -entry.depth : entry.depth,
+        _test: isTestPath(byId.get(entry.id).file),
+      })
+    ),
+  ];
+  const edges = [];
+  let index = 0;
+  for (const edge of links) {
+    if (!set.has(edge.source) || !set.has(edge.target) || !edgeAllowed(edge)) continue;
+    edges.push(Object.assign({ key: `x${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+  }
+  return {
+    layout: "layered",
+    items,
+    edges,
+    omitted,
+    root,
+    caption: `${dependents.size} dependents · ${dependencies.size} dependencies`,
+    tests: [...set].filter((id) => id !== root.id && isTestPath(byId.get(id).file)).length,
+  };
+}
+
+// --- Contracts ---------------------------------------------------------------
+// Declared contract nodes beside the implementations that serve them, with the
+// unmatched cases on both sides made visible rather than hidden.
+const CONTRACT_KINDS = new Set(["endpoint", "schema", "database_table", "infra_resource"]);
+
+function contractsSpec() {
+  const contracts = nodes.filter((node) => CONTRACT_KINDS.has(node.kind) && nodeAllowed(node));
+  if (!contracts.length) {
+    return { layout: "force", items: [], edges: [], omitted: 0, empty: "This repository declares no contracts, endpoints, tables, or infrastructure resources." };
+  }
+  const items = [];
+  const edges = [];
+  const present = new Set();
+  const add = (node, extra) => {
+    if (present.has(node.id)) return;
+    present.add(node.id);
+    items.push(nodeEntry(node, extra));
+  };
+  let unmatched = 0;
+  for (const contract of contracts) {
+    const implementers = (incoming.get(contract.id) || [])
+      .filter((edge) => edge.kind === "implements" && edgeAllowed(edge))
+      .map((edge) => ({ edge, node: byId.get(edge.source) }))
+      .filter((entry) => entry.node && nodeAllowed(entry.node));
+    if (!implementers.length) unmatched++;
+    add(contract, {
+      _contract: true,
+      _declared: contract.perspective === "declared",
+      _matched: implementers.length > 0,
+      size: nodeSize(contract) * 1.5 + 3,
+    });
+    for (const entry of implementers.slice(0, 6)) {
+      add(entry.node, { _implements: contract.id });
+      edges.push(
+        Object.assign({ key: `c${edges.length}`, from: `n${entry.node.id}`, to: `n${contract.id}`, _edge: entry.edge }, edgeStyle(entry.edge), { size: 2 })
+      );
+    }
+    for (const edge of (outgoing.get(contract.id) || []).filter((e) => e.kind === "references" && edgeAllowed(e))) {
+      const referenced = byId.get(edge.target);
+      if (!referenced || !nodeAllowed(referenced)) continue;
+      add(referenced, { _schema: true });
+      edges.push(Object.assign({ key: `c${edges.length}`, from: `n${contract.id}`, to: `n${referenced.id}`, _edge: edge }, edgeStyle(edge)));
+    }
+  }
+  let omitted = 0;
+  if (items.length > MAX_SCENE_NODES) {
+    omitted = items.length - MAX_SCENE_NODES;
+    items.length = MAX_SCENE_NODES;
+  }
+  const keys = new Set(items.map((item) => item.key));
+  const declared = contracts.filter((contract) => contract.perspective === "declared").length;
+  return {
+    layout: "force",
+    items,
+    edges: edges.filter((edge) => keys.has(edge.from) && keys.has(edge.to)),
+    omitted,
+    caption: `${contracts.length} contracts · ${declared} declared · ${unmatched} without an implementation`,
+  };
+}
+
+// --- Layout ------------------------------------------------------------------
+// Two primitives: a force layout for neighbourhood-shaped scenes, and a
+// layered one for scenes that have an order (a path, an impact fan-out).
+// Both are deterministic, so a reload lands on the same picture.
+function forceLayout(items, edges) {
+  const positions = new Map();
+  const radius = 110 + 20 * Math.sqrt(items.length);
+  const index = new Map(items.map((item, position) => [item.key, position]));
+  items.forEach((item, position) => {
+    const angle = (2 * Math.PI * position) / items.length;
+    positions.set(item.key, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, dx: 0, dy: 0, r: item.size });
+  });
+  const rounds = items.length > 250 ? 140 : 240;
+  const repulsion = 6000 + settings.repulsion * 900;
+  const pull = 0.004 + settings.cluster * 0.0009;
+  const gravity = 0.0008 + settings.gravity * 0.0002;
+  for (let round = 0; round < rounds; round++) {
+    const cooling = 1 - round / rounds;
+    for (const point of positions.values()) {
+      point.dx = 0;
+      point.dy = 0;
+    }
+    for (let i = 0; i < items.length; i++) {
+      const a = positions.get(items[i].key);
+      for (let j = i + 1; j < items.length; j++) {
+        const b = positions.get(items[j].key);
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        let squared = dx * dx + dy * dy;
+        if (squared < 1) {
+          dx = i - j || 1;
+          dy = 1;
+          squared = 2;
+        }
+        const distance = Math.sqrt(squared);
+        const force = (repulsion + 900 * (a.r + b.r)) / squared;
+        a.dx += (dx / distance) * force;
+        a.dy += (dy / distance) * force;
+        b.dx -= (dx / distance) * force;
+        b.dy -= (dy / distance) * force;
+      }
+    }
+    for (const edge of edges) {
+      const a = positions.get(edge.from);
+      const b = positions.get(edge.to);
+      if (!a || !b) continue;
+      a.dx += (b.x - a.x) * pull;
+      a.dy += (b.y - a.y) * pull;
+      b.dx += (a.x - b.x) * pull;
+      b.dy += (a.y - b.y) * pull;
+    }
+    for (const point of positions.values()) {
+      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 - point.x * gravity;
+      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 - point.y * gravity;
+    }
+  }
+  separate(positions, items, 3.1);
+  void index;
+  return positions;
+}
+
+// Two nodes drawn on top of each other read as one node, which is a wrong
+// answer rather than an ugly one.
+function separate(positions, items, scale) {
+  for (let round = 0; round < 40; round++) {
+    let moved = 0;
+    for (let i = 0; i < items.length; i++) {
+      const a = positions.get(items[i].key);
+      for (let j = i + 1; j < items.length; j++) {
+        const b = positions.get(items[j].key);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const wanted = (a.r + b.r) * scale;
+        if (distance >= wanted) continue;
+        const push = (wanted - distance) / 2;
+        a.x -= (dx / distance) * push;
+        a.y -= (dy / distance) * push;
+        b.x += (dx / distance) * push;
+        b.y += (dy / distance) * push;
+        moved++;
+      }
+    }
+    if (moved === 0) break;
+  }
+}
+
+function layeredLayout(items) {
+  const layers = new Map();
+  for (const item of items) {
+    const layer = item._layer ?? 0;
+    if (!layers.has(layer)) layers.set(layer, []);
+    layers.get(layer).push(item);
+  }
+  const ordered = [...layers.keys()].sort((a, b) => a - b);
+  const positions = new Map();
+  const columnGap = 260;
+  ordered.forEach((layer, column) => {
+    const column_items = layers.get(layer);
+    const rowGap = Math.max(46, 520 / Math.max(column_items.length, 1));
+    column_items.forEach((item, row) => {
+      positions.set(item.key, {
+        x: (column - (ordered.length - 1) / 2) * columnGap,
+        y: (row - (column_items.length - 1) / 2) * rowGap,
+        r: item.size,
+      });
+    });
+  });
+  separate(positions, items, 2.2);
+  return positions;
+}
+
+// --- Layout cache ------------------------------------------------------------
+// Keyed by what actually determines the picture. A changed node set
+// invalidates rather than partially reusing: half-stale positions are worse
+// than an honest relayout.
+function layoutKey(spec) {
+  const keys = spec.items.map((item) => item.key).sort().join(",");
+  let hash = 2166136261;
+  for (let i = 0; i < keys.length; i++) {
+    hash ^= keys.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `aag-layout:${spec.layout}:${spec.items.length}:${(hash >>> 0).toString(36)}:${settings.repulsion},${settings.gravity},${settings.cluster}`;
+}
+
+function cachedLayout(spec) {
+  const key = layoutKey(spec);
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || "null");
+    if (stored) return new Map(Object.entries(stored).map(([id, value]) => [id, { x: value[0], y: value[1], r: 6 }]));
+  } catch (error) {
+    void error;
+  }
+  const positions = spec.layout === "layered" ? layeredLayout(spec.items) : forceLayout(spec.items, spec.edges);
+  try {
+    const flat = {};
+    for (const [id, point] of positions) flat[id] = [Math.round(point.x * 100) / 100, Math.round(point.y * 100) / 100];
+    localStorage.setItem(key, JSON.stringify(flat));
+  } catch (error) {
+    void error; // a full quota is not a reason to fail a render
+  }
+  return positions;
+}
+
+// --- Rendering ---------------------------------------------------------------
+const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function nodeReducer(key, data) {
-  const n = data._n;
-  const res = { ...data };
-  if (hiddenKinds.has(n.kind)) { res.hidden = true; return res; }
+  const result = { ...data };
   if (hoveredNode) {
-    const nb = neighborsOf.get(hoveredNode.id);
-    if (n !== hoveredNode && !(nb && nb.has(n.id))) { res.color = "#1a1a18"; res.label = null; }
-  } else if ((isolatedCommunity !== null || searchQuery) && !nodeVisible(n)) {
-    res.color = "#161614";
-    res.label = null;
+    const near = neighborsOf.get(hoveredNode.id);
+    const self = data._node && data._node.id === hoveredNode.id;
+    if (!self && !(data._node && near && near.has(data._node.id))) {
+      // Dim, never hide: a reader must still see the shape they are inside.
+      result.color = fade(data.color, 0.28);
+      result.label = null;
+    }
   }
-  if (selected && n.id === selected.id) res.highlighted = true;
-  return res;
+  if (searchQuery && data.label && !data.label.toLowerCase().includes(searchQuery)) {
+    result.color = fade(data.color, 0.3);
+  }
+  if (selected && data._node && data._node.id === selected.id) {
+    result.highlighted = true;
+    result.size = data.size * 1.35 + 2;
+  }
+  if (data._pinned) result.type = "circle";
+  return result;
 }
+
 function edgeReducer(key, data) {
-  const e = data._e;
-  const res = { ...data };
-  if (hiddenConf.has(e.confidence) || hiddenRel.has(e.kind)) { res.hidden = true; return res; }
-  res.color = edgeShade();
+  const result = { ...data };
   if (hoveredNode) {
-    if (e.source === hoveredNode.id || e.target === hoveredNode.id) { res.color = EDGE_HL; res.size = 1.6; }
-    else res.hidden = true;
-  } else if ((isolatedCommunity !== null || searchQuery || hiddenKinds.size > 0) && !(nodeVisible(e.s) && nodeVisible(e.t))) {
-    res.hidden = true;
+    const incidentTo = data._edge && (data._edge.source === hoveredNode.id || data._edge.target === hoveredNode.id);
+    if (incidentTo) {
+      result.color = EDGE_HL;
+      result.size = Math.max(data.size, 1.8);
+    } else {
+      // Fade rather than hide, so the surrounding structure stays legible.
+      result.color = fade(data.color, 0.22);
+    }
   }
-  return res;
+  return result;
 }
 
-function refresh() { if (renderer) renderer.refresh(); }
-function syncGraph() {
-  for (const n of nodes) graph.mergeNodeAttributes(String(n.id), { x: n.x, y: n.y });
-}
-function syncSizes() {
-  for (const n of nodes) graph.setNodeAttribute(String(n.id), "size", sizeOf(n));
-}
-
-function labelThreshold() {
-  // slider 1..10 (default 4): higher density → lower rendered-size cutoff.
-  return Math.max(0.5, 13 - settings.labelDensity * 2);
+// Semantic zoom: which labels are worth drawing depends on how far out the
+// camera is, not on a fixed threshold.
+function labelFloorFor(ratio) {
+  if (ratio > 0.6) return 22;
+  if (ratio > 0.25) return 13;
+  return 4;
 }
 
-function initRenderer() {
-  renderer = new Sigma(graph, container, {
-    // The layout's settle simulation can still be ticking after a mode
-    // switch hid this container; that is not an error either.
+function applySemanticZoom() {
+  if (!renderer || !scene) return;
+  const ratio = renderer.getCamera().getState().ratio;
+  // Small scenes are never crowded, so the zoom band must not silently strip
+  // their labels: a nine-node impact fan-out with no labels answers nothing.
+  const floor = scene.order <= 60 ? 0 : labelFloorFor(ratio) * (0.6 + settings.labelDensity / 8);
+  if (renderer.getSetting("labelRenderedSizeThreshold") !== floor) {
+    renderer.setSetting("labelRenderedSizeThreshold", floor);
+  }
+}
+
+function renderScene(spec) {
+  sceneSpec = spec;
+  sceneOmitted = spec.omitted || 0;
+  scene = new graphology.Graph({ multi: true, type: "directed" });
+  for (const item of spec.items) {
+    if (scene.hasNode(item.key)) continue;
+    scene.addNode(item.key, item);
+  }
+  for (const edge of spec.edges) {
+    if (!scene.hasNode(edge.from) || !scene.hasNode(edge.to)) continue;
+    scene.addEdgeWithKey(edge.key, edge.from, edge.to, edge);
+  }
+  const positions = spec.items.length ? cachedLayout(spec) : new Map();
+  for (const key of scene.nodes()) {
+    const point = positions.get(key) || { x: 0, y: 0 };
+    scene.mergeNodeAttributes(key, { x: point.x, y: point.y });
+  }
+
+  if (renderer) renderer.kill();
+  renderer = new Sigma(scene, document.getElementById("view"), {
+    // A mode switch or a modal can hide this container; that is a normal
+    // state here, not a misconfiguration.
     allowInvalidContainer: true,
-    minCameraRatio: 0.03,
-    maxCameraRatio: 20,
-    labelFont: '"JetBrains Mono", ui-monospace, monospace',
-    labelSize: 10.5,
-    labelWeight: "500",
-    labelColor: { color: "#c9c9c3" },
-    labelRenderedSizeThreshold: labelThreshold(),
-    defaultEdgeColor: edgeShade(),
+    renderEdgeLabels: false,
+    defaultEdgeColor: EDGE_COLOR,
+    labelColor: { color: "#f2f2ee" },
+    labelSize: 11,
+    labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    labelGridCellSize: spec.layout === "layered" ? 90 : 150,
+    labelDensity: 0.7,
+    labelRenderedSizeThreshold: 13,
     nodeReducer,
     edgeReducer,
-    allowInvalidContainer: true,
-    // Sigma's default hover chip is a white rounded box — repaint it dark to
-    // match the theme (also used for `highlighted` selected nodes).
-    hoverRenderer: (context, data, hsettings) => {
-      if (!data.label) return;
-      const size = hsettings.labelSize;
-      context.font = `${hsettings.labelWeight} ${size}px ${hsettings.labelFont}`;
-      const w = context.measureText(data.label).width + 12;
-      const x = data.x + data.size + 5;
-      const y = data.y;
-      context.fillStyle = "#121212";
-      context.fillRect(x - 3, y - size / 2 - 5, w, size + 10);
-      context.strokeStyle = "#373531";
-      context.strokeRect(x - 3, y - size / 2 - 5, w, size + 10);
-      context.fillStyle = "#f2f2ee";
-      context.fillText(data.label, x + 3, y + size / 3);
-    },
+    minCameraRatio: 0.03,
+    maxCameraRatio: 14,
   });
-  camera = renderer.getCamera();
-
   renderer.on("enterNode", ({ node }) => {
-    hoveredNode = graph.getNodeAttribute(node, "_n");
-    container.style.cursor = "pointer";
-    refresh();
+    hoveredNode = scene.getNodeAttribute(node, "_node") || null;
+    renderer.refresh();
   });
   renderer.on("leaveNode", () => {
     hoveredNode = null;
-    container.style.cursor = "default";
-    refresh();
+    renderer.refresh();
   });
-  renderer.on("clickNode", ({ node }) => {
-    selected = graph.getNodeAttribute(node, "_n");
-    showPanel(selected);
-    markTreeActive();
-    refresh();
+  renderer.on("clickNode", ({ node }) => inspect(node));
+  renderer.on("doubleClickNode", ({ node }) => {
+    const target = scene.getNodeAttribute(node, "_node");
+    if (target) setState({ mode: "explore", focus: String(target.id) }, { push: true });
   });
   renderer.on("clickStage", () => {
     selected = null;
-    document.getElementById("panel").style.display = "none";
-    markTreeActive();
-    refresh();
+    document.getElementById("panel").classList.remove("open");
+    renderer.refresh();
   });
-
-  // Drag: the documented sigma v2 pattern — mouse captor owns the gesture,
-  // preventSigmaDefault keeps the camera from panning underneath.
-  renderer.on("downNode", (e) => {
-    dragging = graph.getNodeAttribute(e.node, "_n");
-    dragPos = [dragging.x, dragging.y];
-    startSim(0.2);
+  renderer.getCamera().on("updated", () => {
+    applySemanticZoom();
+    scheduleCameraWrite();
   });
-  renderer.getMouseCaptor().on("mousemovebody", (e) => {
-    if (!dragging) return;
-    const pos = renderer.viewportToGraph(e);
-    dragPos = [pos.x, pos.y];
-    dragging.x = pos.x;
-    dragging.y = pos.y;
-    graph.mergeNodeAttributes(String(dragging.id), { x: pos.x, y: pos.y });
-    e.preventSigmaDefault();
-    e.original.preventDefault();
-    e.original.stopPropagation();
-  });
-  renderer.getMouseCaptor().on("mouseup", () => {
-    dragging = null;
-    dragPos = null;
-  });
-  renderer.getMouseCaptor().on("mousedown", () => {
-    if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
-  });
+  fitScene();
+  applySemanticZoom();
+  renderSceneStatus(spec);
 }
 
-function zoomToNode(n, ratio = 0.25) {
-  const p = renderer && renderer.getNodeDisplayData(String(n.id));
-  if (p) camera.animate({ x: p.x, y: p.y, ratio }, { duration: 600 });
-}
-
-function fitView(duration = 500) {
+function fitScene() {
   if (!renderer) return;
-  // 2nd/98th percentile bbox: stray disconnected nodes shouldn't shrink the
-  // fit for everything actually connected.
-  const xs = nodes.map((d) => d.x).sort((a, b) => a - b);
-  const ys = nodes.map((d) => d.y).sort((a, b) => a - b);
-  const at = (arr, p) => arr[Math.floor((arr.length - 1) * p)];
-  renderer.setCustomBBox({ x: [at(xs, 0.02), at(xs, 0.98)], y: [at(ys, 0.02), at(ys, 0.98)] });
-  if (duration === 0) camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-  else camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration });
+  const state = State.cam || { x: 0.5, y: 0.5, ratio: sceneSpec && sceneSpec.layout === "layered" ? 1.3 : 1.22 };
+  renderer.getCamera().setState({ x: state.x, y: state.y, ratio: state.ratio, angle: 0 });
 }
 
-// --- Interaction ------------------------------------------------------------
-const neighborsOf = new Map();
-for (const e of links) {
-  (neighborsOf.get(e.source) || neighborsOf.set(e.source, new Set()).get(e.source)).add(e.target);
-  (neighborsOf.get(e.target) || neighborsOf.set(e.target, new Set()).get(e.target)).add(e.source);
+let cameraTimer = null;
+function scheduleCameraWrite() {
+  clearTimeout(cameraTimer);
+  cameraTimer = setTimeout(() => {
+    if (!renderer) return;
+    const { x, y, ratio } = renderer.getCamera().getState();
+    State.cam = { x, y, ratio };
+    writeUrl(false);
+  }, 400);
 }
 
-// --- Live simulation ---------------------------------------------------------
-// Drag (or the "Live simulation" toggle) reheats fa2Step at a small decaying
-// alpha. Default OFF: the perpetual ticker costs real CPU and the graph must
-// stay smooth on weak machines — motion is opt-in, drag always works.
-let simAlpha = 0;
-let simSleeping = true;
-let simQueued = false;
-let simTickCount = 0;
-let dragging = null;
-let dragPos = null;
-
-function simFloor() {
-  return settings.liveSim && nodes.length <= 2000 ? 0.012 : 0;
-}
-
-function startSim(alpha) {
-  simAlpha = Math.max(simAlpha, alpha);
-  if (simSleeping) { simSleeping = false; scheduleSim(); }
-}
-
-function scheduleSim() {
-  if (simQueued) return;
-  simQueued = true;
-  const run = () => { if (!simQueued) return; simQueued = false; simTick(); };
-  requestAnimationFrame(run);
-  setTimeout(run, 120);
-}
-
-function simTick() {
-  if (simSleeping) return;
-  fa2Step(simAlpha, 0);
-  if (dragging && simTickCount % 3 === 0 && nodes.length <= 2000) noverlapStep();
-  if (dragging && dragPos) { dragging.x = dragPos[0]; dragging.y = dragPos[1]; }
-  simAlpha = Math.max(simAlpha * 0.95, simFloor());
-  simTickCount++;
-  syncGraph();
-  refresh();
-  if (simAlpha <= 0.004 && !dragging) {
-    simSleeping = true;
-    return;
-  }
-  scheduleSim();
-}
-
-function stopSim() {
-  simSleeping = true;
-  simQueued = false;
-  simAlpha = 0;
+function renderSceneStatus(spec) {
+  const parts = [];
+  if (spec.caption) parts.push(spec.caption);
+  if (spec.omitted) parts.push(`${spec.omitted} more hidden by the scene cap`);
+  document.getElementById("status-counts").textContent =
+    `${parts.join(" · ")}${parts.length ? " · " : ""}${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
+  const empty = document.getElementById("empty-state");
+  empty.hidden = !spec.empty;
+  if (spec.empty) empty.textContent = spec.empty;
+  if (spec.omitted) notice(`Scene capped at ${MAX_SCENE_NODES} nodes — ${spec.omitted} more are hidden. Narrow the depth or filters to see them.`);
 }
 
 // --- Panels -----------------------------------------------------------------
@@ -872,41 +1293,6 @@ function escapeHtml(s) {
 }
 function wikiSlug(path) {
   return path.replace(/[/\\.]/g, "_");
-}
-
-function showPanel(d) {
-  const panel = document.getElementById("panel");
-  panel.style.display = "block";
-  const callers = links.filter((l) => l.target === d.id);
-  const callees = links.filter((l) => l.source === d.id);
-  const list = (edges, key) =>
-    edges
-      .map((e) => e[key])
-      .filter(Boolean)
-      .map((n) => `<li><code data-node="${n.id}">${escapeHtml(n.name)}</code> — ${escapeHtml(n.file)}:${n.startLine}</li>`)
-      .join("");
-  const hasSource = Object.hasOwn(FILES, d.file);
-  const meta = communityMeta[d.community];
-  panel.innerHTML = `
-    <h2>${escapeHtml(d.kind)} <code>${escapeHtml(d.name)}</code></h2>
-    <p>${escapeHtml(d.file)}:${d.startLine}-${d.endLine} &middot; ${d.degree} connection(s)</p>
-    <p class="comm-chip"><span class="dot" style="background:${communityColor(d.community)}"></span>${escapeHtml(meta.name)} (${meta.size})</p>
-    <div class="actions">
-      ${hasSource ? `<button id="view-file-btn">View full file</button>` : ""}
-      <a class="btn" href="wiki/${wikiSlug(d.file)}.html">Wiki page</a>
-    </div>
-    <h3>Called by / imported by</h3><ul>${list(callers, "s") || "<li>none</li>"}</ul>
-    <h3>Calls / imports</h3><ul>${list(callees, "t") || "<li>none</li>"}</ul>
-  `;
-  if (hasSource) {
-    document.getElementById("view-file-btn").addEventListener("click", () => openFile(d.file, d.startLine, d.endLine));
-  }
-  for (const el of panel.querySelectorAll("code[data-node]")) {
-    el.addEventListener("click", () => {
-      const n = byId.get(Number(el.dataset.node));
-      if (n) { selected = n; showPanel(n); zoomToNode(n); markTreeActive(); refresh(); }
-    });
-  }
 }
 
 // --- Syntax highlighting (file modal) -----------------------------------------
@@ -1016,157 +1402,33 @@ document.getElementById("fm-close").addEventListener("click", () => {
 document.getElementById("filemodal").addEventListener("click", (event) => {
   if (event.target.id === "filemodal") event.target.style.display = "none";
 });
+// Escape unwinds one layer at a time: modal, chat, then the graph itself
+// (handled with the rest of the keyboard map further down).
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   const modal = document.getElementById("filemodal");
-  if (modal.style.display === "flex") { modal.style.display = "none"; return; }
+  if (modal.style.display === "flex") {
+    modal.style.display = "none";
+    event.stopPropagation();
+    return;
+  }
   const chat = document.getElementById("chat-panel");
-  if (chat.classList.contains("open")) { toggleChat(false); return; }
-  if (isolatedCommunity !== null) { setIsolated(null); return; }
-  selected = null;
-  document.getElementById("panel").style.display = "none";
-  markTreeActive();
-  refresh();
+  if (chat.classList.contains("open")) {
+    toggleChat(false);
+    event.stopPropagation();
+  }
 });
 
 document.getElementById("search").addEventListener("input", (event) => {
   searchQuery = event.target.value.trim().toLowerCase();
-  refresh();
+  if (renderer) renderer.refresh();
 });
 document.getElementById("search").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !searchQuery) return;
-  const hit = nodes.find((n) => nodeVisible(n) && n.name.toLowerCase().includes(searchQuery));
-  if (hit) { selected = hit; showPanel(hit); zoomToNode(hit); markTreeActive(); }
-});
-
-// --- Sidebar: explorer tree ---------------------------------------------------
-function focusNode(n) {
-  selected = n;
-  showPanel(n);
-  zoomToNode(n);
-  markTreeActive();
-  refresh();
-}
-
-function buildTree() {
-  // One entry per file/doc node; nested by directory.
-  const root = { dirs: new Map(), files: [] };
-  const entries = nodes.filter((n) => n.kind === "file" || n.kind === "doc");
-  entries.sort((a, b) => (a.file < b.file ? -1 : 1));
-  for (const n of entries) {
-    const parts = n.file.split("/");
-    let cur = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!cur.dirs.has(parts[i])) cur.dirs.set(parts[i], { dirs: new Map(), files: [] });
-      cur = cur.dirs.get(parts[i]);
-    }
-    cur.files.push({ name: parts[parts.length - 1], node: n });
-  }
-  const render = (dir, depth) => {
-    let html = "";
-    for (const [name, sub] of [...dir.dirs.entries()].sort()) {
-      html += `<details${depth < 2 ? " open" : ""}><summary>${escapeHtml(name)}/</summary>${render(sub, depth + 1)}</details>`;
-    }
-    for (const f of dir.files) {
-      const ic = f.node.kind === "doc" ? "&#9671;" : "&#9642;";
-      html += `<span class="leaf" data-node="${f.node.id}"><span class="ic">${ic}</span>${escapeHtml(f.name)}</span>`;
-    }
-    return html;
-  };
-  const tree = document.getElementById("tree");
-  tree.innerHTML = render(root, 0);
-  for (const el of tree.querySelectorAll(".leaf")) {
-    el.addEventListener("click", () => {
-      const n = byId.get(Number(el.dataset.node));
-      if (n) focusNode(n);
-    });
-  }
-}
-
-function markTreeActive() {
-  for (const el of document.querySelectorAll("#tree .leaf")) {
-    el.classList.toggle("active", selected !== null && Number(el.dataset.node) === selected.id);
-  }
-}
-
-// --- Sidebar: filters ----------------------------------------------------------
-function setIsolated(c) {
-  isolatedCommunity = c;
-  for (const el of document.querySelectorAll("#f-modules .mod")) {
-    el.classList.toggle("active", Number(el.dataset.c) === c);
-  }
-  refresh();
-}
-
-function buildFilters() {
-  // Node kinds present in this graph, files first.
-  const kindCounts = new Map();
-  for (const n of nodes) kindCounts.set(n.kind, (kindCounts.get(n.kind) || 0) + 1);
-  const kindOrder = ["file", "doc", ...[...kindCounts.keys()].filter((k) => k !== "file" && k !== "doc").sort()];
-  const fk = document.getElementById("f-kinds");
-  fk.insertAdjacentHTML(
-    "beforeend",
-    kindOrder
-      .filter((k) => kindCounts.has(k))
-      .map((k) => `<label class="frow"><input type="checkbox" checked data-kind="${k}">${k}<span class="n">${kindCounts.get(k)}</span></label>`)
-      .join("")
-  );
-  for (const box of fk.querySelectorAll("input")) {
-    box.addEventListener("change", () => {
-      box.checked ? hiddenKinds.delete(box.dataset.kind) : hiddenKinds.add(box.dataset.kind);
-      refresh();
-    });
-  }
-
-  const confCounts = new Map();
-  for (const e of links) confCounts.set(e.confidence, (confCounts.get(e.confidence) || 0) + 1);
-  const fc = document.getElementById("f-conf");
-  fc.insertAdjacentHTML(
-    "beforeend",
-    ["EXTRACTED", "INFERRED", "AMBIGUOUS"]
-      .filter((c) => confCounts.has(c))
-      .map((c) => `<label class="frow"><input type="checkbox" checked data-conf="${c}">${c.toLowerCase()}<span class="n">${confCounts.get(c)}</span></label>`)
-      .join("")
-  );
-  for (const box of fc.querySelectorAll("input")) {
-    box.addEventListener("change", () => {
-      box.checked ? hiddenConf.delete(box.dataset.conf) : hiddenConf.add(box.dataset.conf);
-      refresh();
-    });
-  }
-
-  const fm = document.getElementById("f-modules");
-  fm.insertAdjacentHTML(
-    "beforeend",
-    communityMeta
-      .filter((m) => m.id !== UNGROUPED || m.size > 0)
-      .map(
-        (m) =>
-          `<div class="mod" data-c="${m.id}"><span class="dot" style="background:${communityColor(m.id)}"></span><span class="name">${escapeHtml(m.name)}</span><span class="n">${m.size}</span></div>`
-      )
-      .join("")
-  );
-  for (const el of fm.querySelectorAll(".mod")) {
-    el.addEventListener("click", () => {
-      const c = Number(el.dataset.c);
-      setIsolated(isolatedCommunity === c ? null : c);
-    });
-  }
-}
-
-// Tabs
-function selectTab(which) {
-  document.getElementById("tab-btn-explorer").classList.toggle("active", which === "explorer");
-  document.getElementById("tab-btn-filters").classList.toggle("active", which === "filters");
-  document.getElementById("tab-explorer").style.display = which === "explorer" ? "block" : "none";
-  document.getElementById("tab-filters").style.display = which === "filters" ? "block" : "none";
-}
-document.getElementById("tab-btn-explorer").addEventListener("click", () => selectTab("explorer"));
-document.getElementById("tab-btn-filters").addEventListener("click", () => selectTab("filters"));
-document.getElementById("sidebar-btn").addEventListener("click", () => {
-  document.body.classList.toggle("sidebar-closed");
-  if (renderer) renderer.resize();
-  fitView(300);
+  const hit =
+    nodes.find((node) => nodeAllowed(node) && node.name.toLowerCase() === searchQuery) ||
+    nodes.find((node) => nodeAllowed(node) && node.name.toLowerCase().includes(searchQuery));
+  if (hit) setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: String(hit.id) }, { push: true });
 });
 
 // --- AI chat -----------------------------------------------------------------
@@ -1582,8 +1844,7 @@ for (const [key, { input, out, fmt }] of Object.entries(sliders)) {
     settings[key] = Number(event.target.value);
     document.getElementById(out).textContent = fmt(settings[key]);
     saveSettings();
-    if (key === "nodeScale") syncSizes();
-    if (key === "labelDensity" && renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+    if (key === "nodeScale" || key === "labelDensity") applyState();
     refresh();
   });
 }
@@ -1591,17 +1852,24 @@ document.getElementById("s-reset").addEventListener("click", () => {
   settings = { ...DEFAULT_SETTINGS };
   saveSettings();
   syncSlidersFromSettings();
-  syncSizes();
-  if (renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+  applySemanticZoom();
   refresh();
 });
 document.getElementById("s-livesim").addEventListener("change", (event) => {
   settings.liveSim = event.target.checked;
   saveSettings();
-  if (settings.liveSim) startSim(0.03);
+
 });
-document.getElementById("s-relayout").addEventListener("click", () => runLayout(true));
-document.getElementById("fit-btn").addEventListener("click", () => fitView(500));
+document.getElementById("s-relayout").addEventListener("click", () => {
+  // Drop cached positions for the scenes this settings change affects, then
+  // rebuild: a cached layout computed under different forces is not this
+  // layout.
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("aag-layout:")) localStorage.removeItem(key);
+  }
+  applyState();
+});
+document.getElementById("fit-btn").addEventListener("click", () => setState({ cam: null }));
 document.getElementById("settings-btn").addEventListener("click", () => {
   const panel = document.getElementById("settings-panel");
   const open = panel.style.display !== "block";
@@ -1610,59 +1878,26 @@ document.getElementById("settings-btn").addEventListener("click", () => {
 });
 syncSlidersFromSettings();
 
-// --- Layout driver ----------------------------------------------------------
-// Iterations scale down with graph size; work is chunked into batches so the
-// progress bar paints and the tab never freezes, even at 5k+ nodes.
-function runLayout(isRerun) {
-  stopSim();
-  const total = nodes.length > 5000 ? 160 : nodes.length > 1000 ? 260 : 400;
-  const noverlapIters = 60;
-  const progress = document.getElementById("progress");
-  const fill = document.getElementById("progress-fill");
-  // Only a real layout pass raises the overlay; the Overview needs no layout
-  // of the full graph and must not sit behind a spinner that never clears.
-  if (!isRerun) progress.style.display = "flex";
-  let iter = 0;
-
-  function batch() {
-    const chunk = nodes.length > 5000 ? 4 : 12;
-    for (let i = 0; i < chunk && iter < total; i++, iter++) {
-      fa2Step(Math.pow(1 - iter / total, 1.6));
-    }
-    fill.style.width = `${Math.round((iter / total) * 90)}%`;
-    if (isRerun) { syncGraph(); refresh(); }
-    if (iter < total) { setTimeout(batch, 0); return; }
-    for (let i = 0; i < noverlapIters; i++) { if (noverlapStep() === 0) break; }
-    fill.style.width = "100%";
-    progress.style.display = "none";
-    syncGraph();
-    fitView(isRerun ? 500 : 0);
-    refresh();
-    if (!isRerun) {
-      const target = resolveFocus(State.focus);
-      if (target) focusNode(target);
-      else if (State.focus) notice(`No node named "${State.focus}" in this graph — showing everything instead.`);
-    }
-    // Small settle kick; decays to sleep unless liveSim keeps a floor.
-    startSim(0.03);
-  }
-  setTimeout(batch, 0);
-}
-
 // --- Mode + URL state --------------------------------------------------------
 // One store, one writer. Every state worth sharing lives in the query string,
-// so any view can be pasted into a review — see the URL schema in
-// `docs/graph-experience.md`. Modes not built yet are simply absent from the
-// switcher; a dead button is worse than a missing one.
+// so any view can be pasted into a review — schema in
+// `docs/graph-experience.md`.
 const MODE_LIST = [
   { id: "overview", label: "Overview", hint: "Modules and how they connect" },
   { id: "explore", label: "Explore", hint: "One symbol and its neighbourhood" },
+  { id: "path", label: "Path", hint: "How one symbol reaches another" },
+  { id: "impact", label: "Impact", hint: "What breaks if this changes" },
+  { id: "contracts", label: "Contracts", hint: "Endpoints, schemas, and who serves them" },
 ];
-const MODE_IDS = MODE_LIST.map((m) => m.id);
+const MODE_IDS = MODE_LIST.map((mode) => mode.id);
 
 const State = {
   mode: "overview",
   focus: null,
+  from: null,
+  to: null,
+  up: 1,
+  down: 1,
   community: null,
   expanded: new Set(),
   rel: null,
@@ -1672,77 +1907,94 @@ const State = {
   cam: null,
 };
 
-const ALL_REL = [...new Set(links.map((e) => e.kind))];
-const ALL_CONF = [...new Set(links.map((e) => e.confidence))];
-const ALL_KIND = [...new Set(nodes.map((n) => n.kind))];
+const ALL_REL = [...new Set(links.map((edge) => edge.kind))];
+const ALL_CONF = [...new Set(links.map((edge) => edge.confidence))];
+const ALL_KIND = [...new Set(nodes.map((node) => node.kind))];
 
 function parseSet(value, cast) {
   if (!value) return null;
-  const parts = value.split(",").map((p) => p.trim()).filter(Boolean);
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
   return parts.length ? new Set(cast ? parts.map(cast) : parts) : null;
 }
+const clampDepth = (value, fallback) => {
+  // `Number(null)` is 0, not NaN, so an absent parameter would silently read
+  // as depth zero and show a lone node.
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(6, Math.round(parsed))) : fallback;
+};
 
 function readUrl() {
-  const q = new URLSearchParams(location.search);
-  const mode = q.get("mode");
-  State.mode = MODE_IDS.includes(mode) ? mode : q.get("focus") ? "explore" : "overview";
-  State.focus = q.get("focus") || null;
-  State.community = q.has("community") ? Number(q.get("community")) : null;
-  State.expanded = parseSet(q.get("expanded"), Number) || new Set();
-  State.rel = parseSet(q.get("rel"));
-  State.conf = parseSet(q.get("conf"), (c) => c.toUpperCase());
-  State.kind = parseSet(q.get("kind"));
-  State.pins = parseSet(q.get("pin"), Number) || new Set();
-  const cam = q.get("cam");
+  const query = new URLSearchParams(location.search);
+  const mode = query.get("mode");
+  State.mode = MODE_IDS.includes(mode) ? mode : query.get("focus") ? "explore" : "overview";
+  State.focus = query.get("focus") || null;
+  State.from = query.get("from") || null;
+  State.to = query.get("to") || null;
+  State.up = clampDepth(query.get("up"), 1);
+  State.down = clampDepth(query.get("down"), 1);
+  State.community = query.has("community") ? Number(query.get("community")) : null;
+  State.expanded = parseSet(query.get("expanded"), Number) || new Set();
+  State.rel = parseSet(query.get("rel"));
+  State.conf = parseSet(query.get("conf"), (value) => value.toUpperCase());
+  State.kind = parseSet(query.get("kind"));
+  State.pins = parseSet(query.get("pin"), Number) || new Set();
+  const cam = query.get("cam");
   if (cam) {
     const [x, y, ratio] = cam.split(",").map(Number);
-    State.cam = Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(ratio) ? { x, y, ratio } : null;
+    State.cam = [x, y, ratio].every(Number.isFinite) ? { x, y, ratio } : null;
   } else {
     State.cam = null;
   }
 }
 
 function writeUrl(push) {
-  const q = new URLSearchParams();
-  q.set("mode", State.mode);
-  if (State.focus) q.set("focus", State.focus);
-  if (State.community !== null) q.set("community", String(State.community));
-  if (State.expanded.size) q.set("expanded", [...State.expanded].sort((a, b) => a - b).join(","));
-  if (State.rel) q.set("rel", [...State.rel].join(","));
-  if (State.conf) q.set("conf", [...State.conf].join(","));
-  if (State.kind) q.set("kind", [...State.kind].join(","));
-  if (State.pins.size) q.set("pin", [...State.pins].join(","));
-  if (State.cam) q.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
-  const url = `${location.pathname}?${q.toString()}`;
-  // A mode or focus change is a navigation; a filter tweak is not, or the
-  // back button would walk one checkbox at a time.
+  const query = new URLSearchParams();
+  query.set("mode", State.mode);
+  if (State.focus) query.set("focus", State.focus);
+  if (State.from) query.set("from", State.from);
+  if (State.to) query.set("to", State.to);
+  if (State.up !== 1) query.set("up", String(State.up));
+  if (State.down !== 1) query.set("down", String(State.down));
+  if (State.community !== null) query.set("community", String(State.community));
+  if (State.expanded.size) query.set("expanded", [...State.expanded].sort((a, b) => a - b).join(","));
+  if (State.rel) query.set("rel", [...State.rel].join(","));
+  if (State.conf) query.set("conf", [...State.conf].join(","));
+  if (State.kind) query.set("kind", [...State.kind].join(","));
+  if (State.pins.size) query.set("pin", [...State.pins].join(","));
+  if (State.cam) query.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
+  const url = `${location.pathname}?${query.toString()}`;
+  // A mode or focus change is a navigation; a filter tweak is not, or the back
+  // button would walk one checkbox at a time.
   if (push) history.pushState(null, "", url);
   else history.replaceState(null, "", url);
 }
 
 function setState(patch, options) {
+  const cameraKept = patch && Object.prototype.hasOwnProperty.call(patch, "cam");
+  if (!cameraKept) State.cam = null;
   Object.assign(State, patch);
   writeUrl(options && options.push);
   applyState();
 }
 
-// Filters are stored as what is *allowed*; the reducers work on what is
-// hidden. Translate once, here, so both stay in sync.
+// Filters are stored as what is allowed; the reducers work on what is hidden.
+let hiddenKinds = new Set();
+let hiddenConf = new Set();
+let hiddenRel = new Set();
+let searchQuery = "";
+
 function syncFilterSets() {
-  hiddenKinds.clear();
-  if (State.kind) for (const kind of ALL_KIND) if (!State.kind.has(kind)) hiddenKinds.add(kind);
-  hiddenConf.clear();
-  if (State.conf) for (const conf of ALL_CONF) if (!State.conf.has(conf)) hiddenConf.add(conf);
-  hiddenRel = new Set();
-  if (State.rel) for (const rel of ALL_REL) if (!State.rel.has(rel)) hiddenRel.add(rel);
-  isolatedCommunity = State.community;
+  hiddenKinds = new Set(State.kind ? ALL_KIND.filter((kind) => !State.kind.has(kind)) : []);
+  hiddenConf = new Set(State.conf ? ALL_CONF.filter((conf) => !State.conf.has(conf)) : []);
+  hiddenRel = new Set(State.rel ? ALL_REL.filter((rel) => !State.rel.has(rel)) : []);
 }
 
 function buildModeSwitcher() {
   const host = document.getElementById("modes");
   host.innerHTML = MODE_LIST.map(
-    (m, i) =>
-      `<button role="tab" data-mode="${m.id}" aria-selected="false" title="${escapeHtml(m.hint)} (${i + 1})">${m.label}</button>`
+    (mode, index) =>
+      `<button role="tab" data-mode="${mode.id}" aria-selected="false" title="${escapeHtml(mode.hint)} (${index + 1})">${mode.label}</button>`
   ).join("");
   for (const button of host.querySelectorAll("button")) {
     button.addEventListener("click", () => enterMode(button.dataset.mode));
@@ -1754,344 +2006,10 @@ function enterMode(mode) {
   setState({ mode }, { push: true });
 }
 
-// --- Overview: collapsed communities and the bundles between them ------------
-// Opens on ~200 aggregates instead of ~6000 symbols. Every aggregate expands
-// to its members, and every bundle reports the relations it stands for, so
-// nothing is hidden without saying so.
-let ovGraph = null;
-let ovRenderer = null;
-let ovFingerprint = null;
-let ovSelected = null;
-
-function overviewFingerprint() {
-  return `${[...State.expanded].sort((a, b) => a - b).join(",")}|${State.community}`;
-}
-
-function overviewAnchor(community) {
-  return State.expanded.has(community.id) && community.representatives.length
-    ? `n${community.representatives[0]}`
-    : `c${community.id}`;
-}
-
-function overviewLayout(keys, edges, sizeOf) {
-  // Deterministic: seeded ring by rank, then a few hundred rounds of
-  // attract-along-bundles and repel-all-pairs, then a short no-overlap pass.
-  // At ~200 aggregates the naive all-pairs pass is cheaper than setting up a
-  // quadtree. Repulsion scales with size, or the few large modules pile on
-  // top of each other in the middle while the small ones spread out.
-  const positions = new Map();
-  const radius = 120 + 22 * Math.sqrt(keys.length);
-  keys.forEach((key, index) => {
-    const angle = (2 * Math.PI * index) / keys.length;
-    positions.set(key, {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-      dx: 0,
-      dy: 0,
-      r: sizeOf ? sizeOf(key) : 6,
-    });
-  });
-  for (let round = 0; round < 240; round++) {
-    const cooling = 1 - round / 240;
-    for (const key of keys) {
-      const point = positions.get(key);
-      point.dx = 0;
-      point.dy = 0;
-    }
-    for (let i = 0; i < keys.length; i++) {
-      const a = positions.get(keys[i]);
-      for (let j = i + 1; j < keys.length; j++) {
-        const b = positions.get(keys[j]);
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let distanceSquared = dx * dx + dy * dy;
-        if (distanceSquared < 1) {
-          dx = (i - j) || 1;
-          dy = 1;
-          distanceSquared = 2;
-        }
-        const force = (9000 + 900 * (a.r + b.r)) / distanceSquared;
-        const distance = Math.sqrt(distanceSquared);
-        a.dx += (dx / distance) * force;
-        a.dy += (dy / distance) * force;
-        b.dx -= (dx / distance) * force;
-        b.dy -= (dy / distance) * force;
-      }
-    }
-    for (const edge of edges) {
-      const a = positions.get(edge.a);
-      const b = positions.get(edge.b);
-      if (!a || !b) continue;
-      const pull = 0.006 * Math.log(1 + edge.count);
-      a.dx += (b.x - a.x) * pull;
-      a.dy += (b.y - a.y) * pull;
-      b.dx += (a.x - b.x) * pull;
-      b.dy += (a.y - b.y) * pull;
-    }
-    for (const key of keys) {
-      const point = positions.get(key);
-      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 - point.x * 0.0015;
-      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 - point.y * 0.0015;
-    }
-  }
-  // Separate whatever still overlaps. Two aggregates drawn on top of each
-  // other read as one module, which is a wrong answer, not a cosmetic one.
-  const scale = 3.2;
-  for (let round = 0; round < 40; round++) {
-    let moved = 0;
-    for (let i = 0; i < keys.length; i++) {
-      const a = positions.get(keys[i]);
-      for (let j = i + 1; j < keys.length; j++) {
-        const b = positions.get(keys[j]);
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const wanted = (a.r + b.r) * scale;
-        if (distance >= wanted) continue;
-        const push = (wanted - distance) / 2;
-        const ux = dx / distance;
-        const uy = dy / distance;
-        a.x -= ux * push;
-        a.y -= uy * push;
-        b.x += ux * push;
-        b.y += uy * push;
-        moved++;
-      }
-    }
-    if (moved === 0) break;
-  }
-  return positions;
-}
-
-function buildOverview() {
-  const fingerprint = overviewFingerprint();
-  if (ovGraph && ovFingerprint === fingerprint) return;
-  ovFingerprint = fingerprint;
-
-  ovGraph = new graphology.Graph({ multi: true, type: "undirected" });
-  const shown = COMMUNITIES.filter((c) => State.community === null || c.id === State.community);
-  const anchorOf = new Map();
-
-  for (const community of shown) {
-    const meta = communityMeta[community.id] || {};
-    if (State.expanded.has(community.id)) {
-      for (const id of community.members) {
-        const node = byId.get(id);
-        if (!node) continue;
-        ovGraph.addNode(`n${id}`, {
-          label: node.name,
-          size: 3 + Math.min(Math.sqrt(node.degree || 0) * 1.6, 9),
-          color: communityColor(community.id),
-          _member: node,
-          _community: community,
-        });
-      }
-    } else {
-      ovGraph.addNode(`c${community.id}`, {
-        label: `${meta.label || community.label || "#" + community.id} (${community.members.length})`,
-        size: 6 + Math.min(Math.sqrt(community.members.length) * 3.2, 26),
-        color: communityColor(community.id),
-        _aggregate: community,
-      });
-    }
-    anchorOf.set(community.id, overviewAnchor(community));
-  }
-
-  // Internal edges only for expanded communities — that is what expanding
-  // means. Collapsed communities carry their internal count as a fact.
-  if (State.expanded.size) {
-    let internal = 0;
-    for (const edge of links) {
-      const left = edge.s.community;
-      if (left !== edge.t.community || !State.expanded.has(left)) continue;
-      if (!ovGraph.hasNode(`n${edge.source}`) || !ovGraph.hasNode(`n${edge.target}`)) continue;
-      ovGraph.addEdgeWithKey(`i${internal++}`, `n${edge.source}`, `n${edge.target}`, {
-        size: 0.6,
-        color: EDGE_COLOR,
-        _internal: edge,
-      });
-    }
-  }
-
-  let bundleIndex = 0;
-  for (const bundle of BUNDLES) {
-    const from = anchorOf.get(bundle.a);
-    const to = anchorOf.get(bundle.b);
-    if (!from || !to || !ovGraph.hasNode(from) || !ovGraph.hasNode(to)) continue;
-    ovGraph.addEdgeWithKey(`b${bundleIndex++}`, from, to, {
-      size: Math.min(0.6 + Math.log(1 + bundle.count) * 0.9, 6),
-      color: bundle.ambiguous > bundle.extracted + bundle.inferred ? "#4a4238" : EDGE_COLOR,
-      _bundle: bundle,
-    });
-  }
-
-  const keys = ovGraph.nodes();
-  const bundleEdges = BUNDLES.map((b) => ({ a: anchorOf.get(b.a), b: anchorOf.get(b.b), count: b.count })).filter(
-    (e) => e.a && e.b && ovGraph.hasNode(e.a) && ovGraph.hasNode(e.b)
-  );
-  const positions = overviewLayout(keys, bundleEdges, (key) => ovGraph.getNodeAttribute(key, "size") || 6);
-  for (const key of keys) {
-    const point = positions.get(key);
-    ovGraph.mergeNodeAttributes(key, { x: point.x, y: point.y });
-  }
-
-  if (ovRenderer) {
-    ovRenderer.kill();
-    ovRenderer = null;
-  }
-  ovRenderer = new Sigma(ovGraph, document.getElementById("view-overview"), {
-    // Switching modes hides this container. A hidden container is a normal
-    // state here, not a misconfiguration, so sigma must not treat zero width
-    // as an error.
-    allowInvalidContainer: true,
-    renderEdgeLabels: false,
-    defaultEdgeColor: EDGE_COLOR,
-    labelColor: { color: "#f2f2ee" },
-    labelSize: 11,
-    labelWeight: "400",
-    labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    // Label the aggregates worth reading, not all of them: a wider grid cell
-    // and a higher size floor keep the overview legible instead of overprinted.
-    labelRenderedSizeThreshold: 13,
-    labelGridCellSize: 170,
-    labelDensity: 0.6,
-    minCameraRatio: 0.05,
-    maxCameraRatio: 12,
-  });
-  ovRenderer.on("clickNode", ({ node }) => showAggregate(node));
-  ovRenderer.on("clickStage", () => {
-    ovSelected = null;
-    document.getElementById("panel").classList.remove("open");
-  });
-  ovRenderer.getCamera().animatedReset({ duration: 0 });
-  fitOverview();
-  buildLegend();
-}
-
-function fitOverview() {
-  if (!ovGraph || !ovRenderer || !ovGraph.order) return;
-  // Sigma frames the graph's own extent at ratio 1. Labels and node radii sit
-  // outside that extent, so the fit needs headroom or the outer ring of
-  // aggregates is clipped.
-  ovRenderer.getCamera().setState({ x: 0.5, y: 0.5, angle: 0, ratio: 1.22 });
-}
-
-function confidenceWord(value) {
-  return String(value || "").toLowerCase();
-}
-
-function showAggregate(key) {
-  ovSelected = key;
-  const attributes = ovGraph.getNodeAttributes(key);
-  const panel = document.getElementById("panel");
-  if (attributes._member) {
-    showPanel(attributes._member);
-    return;
-  }
-  const community = attributes._aggregate;
-  const meta = communityMeta[community.id] || {};
-  const cohesion = community.internalEdges + community.externalEdges
-    ? Math.round((community.internalEdges / (community.internalEdges + community.externalEdges)) * 100)
-    : 0;
-  const representatives = community.representatives
-    .map((id) => byId.get(id))
-    .filter(Boolean)
-    .map(
-      (node) =>
-        `<div class="callrow" data-node="${node.id}"><span class="cname">${escapeHtml(node.name)}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
-    )
-    .join("");
-  const bundles = BUNDLES.filter((b) => b.a === community.id || b.b === community.id)
-    .sort((left, right) => right.count - left.count)
-    .slice(0, 6)
-    .map((bundle) => {
-      const other = bundle.a === community.id ? bundle.b : bundle.a;
-      const otherMeta = communityMeta[other] || {};
-      return `<div class="callrow"><span class="cname">${bundle.kind} &times;${bundle.count}</span><span class="cfile">${escapeHtml(otherMeta.label || "#" + other)}</span></div>`;
-    })
-    .join("");
-  panel.innerHTML = `
-    <h3>${escapeHtml(meta.label || community.label || "#" + community.id)}</h3>
-    <p class="comm-chip"><span class="dot" style="background:${communityColor(community.id)}"></span>module aggregate</p>
-    <dl class="agg-facts">
-      <dt>symbols</dt><dd>${community.members.length}</dd>
-      <dt>internal edges</dt><dd>${community.internalEdges}</dd>
-      <dt>external edges</dt><dd>${community.externalEdges}</dd>
-      <dt>cohesion</dt><dd>${cohesion}%</dd>
-      <dt>entrypoints</dt><dd>${community.entrypoints}</dd>
-      <dt>worst confidence</dt><dd>${confidenceWord(community.worstConfidence)}</dd>
-    </dl>
-    <div class="agg-actions">
-      <button data-act="toggle">${State.expanded.has(community.id) ? "Collapse" : "Expand"} in place</button>
-      <button data-act="isolate">${State.community === community.id ? "Show all modules" : "Isolate"}</button>
-      <button data-act="explore">Explore this module</button>
-    </div>
-    ${representatives ? `<h4>Most connected</h4>${representatives}` : ""}
-    ${bundles ? `<h4>Connects to</h4>${bundles}` : ""}
-  `;
-  panel.classList.add("open");
-  panel.querySelector('[data-act="toggle"]').addEventListener("click", () => {
-    const expanded = new Set(State.expanded);
-    expanded.has(community.id) ? expanded.delete(community.id) : expanded.add(community.id);
-    setState({ expanded });
-  });
-  panel.querySelector('[data-act="isolate"]').addEventListener("click", () => {
-    setState({ community: State.community === community.id ? null : community.id });
-  });
-  panel.querySelector('[data-act="explore"]').addEventListener("click", () => {
-    const target = byId.get(community.representatives[0]);
-    setState({ mode: "explore", focus: target ? target.name : null, community: community.id }, { push: true });
-  });
-  for (const row of panel.querySelectorAll("[data-node]")) {
-    row.addEventListener("click", () => {
-      const node = byId.get(Number(row.dataset.node));
-      if (node) setState({ mode: "explore", focus: node.name, community: community.id }, { push: true });
-    });
-  }
-}
-
-function buildLegend() {
-  const host = document.getElementById("legend-list");
-  const ranked = communityMeta
-    .filter((m) => m.id !== UNGROUPED && m.size > 0)
-    .slice()
-    .sort((left, right) => right.size - left.size)
-    .slice(0, 40);
-  host.innerHTML = ranked
-    .map(
-      (m) =>
-        `<div class="row${State.community === m.id ? " on" : ""}" data-c="${m.id}" title="${escapeHtml(m.name)}">` +
-        `<span class="swatch" style="background:${communityColor(m.id)}"></span>` +
-        `<span class="name">${escapeHtml(m.label)}</span><span class="n">${m.size}</span></div>`
-    )
-    .join("");
-  for (const row of host.querySelectorAll(".row")) {
-    row.addEventListener("click", () => {
-      const id = Number(row.dataset.c);
-      setState({ community: State.community === id ? null : id });
-    });
-  }
-}
-
-// --- Detail scene: built on first use ---------------------------------------
-// The force layout over every symbol is the expensive part of this page. It
-// runs when a mode actually needs it, so opening the page costs the Overview
-// only.
-let detailReady = false;
-function ensureDetail() {
-  if (detailReady) return;
-  detailReady = true;
-  initRenderer();
-  buildTree();
-  buildFilters();
-  selectTab("explorer");
-  runLayout(false);
-}
-
 let noticeTimer = null;
-// A shared link can name a symbol that has since been renamed or deleted. Say
-// so — degrading to a blank canvas silently is how a reader concludes the tool
-// is broken.
+// A shared link can name a symbol that has since been renamed or deleted, and
+// a scene can be capped. Say so — degrading silently is how a reader concludes
+// the tool is broken.
 function notice(message) {
   const host = document.getElementById("notice");
   if (!message) {
@@ -2101,43 +2019,252 @@ function notice(message) {
   host.textContent = message;
   host.hidden = false;
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => { host.hidden = true; }, 6000);
+  noticeTimer = setTimeout(() => {
+    host.hidden = true;
+  }, 6000);
 }
 
 function resolveFocus(value) {
-  if (value === null || value === undefined) return null;
+  if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   if (Number.isInteger(numeric) && byId.has(numeric)) return byId.get(numeric);
   return (
-    nodes.find((n) => n.file === value && n.kind === "file") ||
-    nodes.find((n) => n.name === value) ||
-    nodes.find((n) => n.file === value) ||
+    nodes.find((node) => node.file === value && node.kind === "file") ||
+    nodes.find((node) => node.name === value) ||
+    nodes.find((node) => node.file === value) ||
     null
   );
 }
 
+// --- Inspector ---------------------------------------------------------------
+// One panel for symbols, aggregates, paths, and contracts, because a reader
+// should not have to learn a second place to look.
+function inspect(key) {
+  const attributes = scene.getNodeAttributes(key);
+  if (attributes._aggregate) {
+    inspectAggregate(attributes._aggregate);
+    return;
+  }
+  const node = attributes._node;
+  if (!node) return;
+  selected = node;
+  renderer.refresh();
+  inspectNode(node, attributes);
+}
+
+function factRow(term, value) {
+  return `<dt>${term}</dt><dd>${value}</dd>`;
+}
+
+function relationRows(list, label) {
+  if (!list.length) return "";
+  const rows = list
+    .slice(0, 12)
+    .map((entry) => {
+      const other = entry.node;
+      return (
+        `<div class="callrow" data-node="${other.id}" tabindex="0" role="button">` +
+        `<span class="cname">${escapeHtml(nodeLabel(other))}</span>` +
+        `<span class="cfile">${escapeHtml(entry.edge.kind)} · ${entry.edge.confidence.toLowerCase()} · ${escapeHtml(other.file)}</span></div>`
+      );
+    })
+    .join("");
+  const more = list.length > 12 ? `<p class="cc-note">${list.length - 12} more</p>` : "";
+  return `<h4>${label} (${list.length})</h4>${rows}${more}`;
+}
+
+function inspectNode(node, attributes) {
+  const panel = document.getElementById("panel");
+  const callers = (incoming.get(node.id) || [])
+    .filter(edgeAllowed)
+    .map((edge) => ({ edge, node: byId.get(edge.source) }))
+    .filter((entry) => entry.node);
+  const callees = (outgoing.get(node.id) || [])
+    .filter(edgeAllowed)
+    .map((edge) => ({ edge, node: byId.get(edge.target) }))
+    .filter((entry) => entry.node);
+  const meta = communityMeta[node.community] || {};
+  const impact = attributes && attributes._impact;
+  panel.innerHTML = `
+    <h3>${escapeHtml(nodeLabel(node))}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(node.community)}"></span>${escapeHtml(meta.label || "unconnected")}</p>
+    <dl class="agg-facts">
+      ${factRow("kind", escapeHtml(node.kind))}
+      ${factRow("location", `${escapeHtml(node.file)}:${node.startLine}`)}
+      ${factRow("perspective", escapeHtml(node.perspective || "observed"))}
+      ${factRow("degree", node.degree || 0)}
+      ${factRow("incoming / outgoing", `${callers.length} / ${callees.length}`)}
+      ${ENTRYPOINTS.has(node.id) ? factRow("entrypoint", "yes") : ""}
+      ${impact ? factRow("impact", escapeHtml(impact)) : ""}
+    </dl>
+    <div class="agg-actions">
+      <button data-act="explore">Explore here</button>
+      <button data-act="impact">Impact</button>
+      <button data-act="path-from">Path from</button>
+      <button data-act="path-to">Path to</button>
+      <button data-act="pin">${State.pins.has(node.id) ? "Unpin" : "Pin"}</button>
+      <button data-act="source">Open source</button>
+      <a class="hbtn" href="wiki/${wikiSlug(node.file)}.html">wiki</a>
+    </div>
+    ${relationRows(callers, "Incoming")}
+    ${relationRows(callees, "Outgoing")}
+  `;
+  panel.classList.add("open");
+  const act = {
+    explore: () => setState({ mode: "explore", focus: String(node.id) }, { push: true }),
+    impact: () => setState({ mode: "impact", focus: String(node.id) }, { push: true }),
+    "path-from": () => setState({ mode: "path", from: String(node.id) }, { push: true }),
+    "path-to": () => setState({ mode: "path", to: String(node.id) }, { push: true }),
+    pin: () => {
+      const pins = new Set(State.pins);
+      pins.has(node.id) ? pins.delete(node.id) : pins.add(node.id);
+      setState({ pins });
+    },
+    source: () => openFile(node.file, node.startLine, node.endLine),
+  };
+  for (const button of panel.querySelectorAll("[data-act]")) {
+    button.addEventListener("click", () => act[button.dataset.act] && act[button.dataset.act]());
+  }
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    const go = () => {
+      const target = byId.get(Number(row.dataset.node));
+      if (target) setState({ mode: "explore", focus: String(target.id) }, { push: true });
+    };
+    row.addEventListener("click", go);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+}
+
+function inspectAggregate(community) {
+  const panel = document.getElementById("panel");
+  const meta = communityMeta[community.id] || {};
+  const total = community.internalEdges + community.externalEdges;
+  const cohesion = total ? Math.round((community.internalEdges / total) * 100) : 0;
+  const representatives = community.representatives
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(
+      (node) =>
+        `<div class="callrow" data-node="${node.id}" tabindex="0" role="button"><span class="cname">${escapeHtml(nodeLabel(node))}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
+    )
+    .join("");
+  const bundles = BUNDLES.filter((bundle) => bundle.a === community.id || bundle.b === community.id)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 8)
+    .map((bundle) => {
+      const other = bundle.a === community.id ? bundle.b : bundle.a;
+      const otherMeta = communityMeta[other] || {};
+      return `<div class="callrow"><span class="cname">${bundle.kind} &times;${bundle.count}</span><span class="cfile">${escapeHtml(otherMeta.label || "#" + other)} · ${bundle.ambiguous} ambiguous</span></div>`;
+    })
+    .join("");
+  panel.innerHTML = `
+    <h3>${escapeHtml(meta.label || "#" + community.id)}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(community.id)}"></span>module aggregate</p>
+    <dl class="agg-facts">
+      ${factRow("symbols", community.members.length)}
+      ${factRow("internal edges", community.internalEdges)}
+      ${factRow("external edges", community.externalEdges)}
+      ${factRow("cohesion", `${cohesion}%`)}
+      ${factRow("entrypoints", community.entrypoints)}
+      ${factRow("worst confidence", String(community.worstConfidence || "").toLowerCase())}
+    </dl>
+    <div class="agg-actions">
+      <button data-act="toggle">${State.expanded.has(community.id) ? "Collapse" : "Expand"} in place</button>
+      <button data-act="isolate">${State.community === community.id ? "Show all" : "Isolate"}</button>
+      <button data-act="explore">Explore this module</button>
+    </div>
+    ${representatives ? `<h4>Most connected</h4>${representatives}` : ""}
+    ${bundles ? `<h4>Connects to</h4>${bundles}` : ""}
+  `;
+  panel.classList.add("open");
+  const act = {
+    toggle: () => {
+      const expanded = new Set(State.expanded);
+      expanded.has(community.id) ? expanded.delete(community.id) : expanded.add(community.id);
+      setState({ expanded });
+    },
+    isolate: () => setState({ community: State.community === community.id ? null : community.id }),
+    explore: () => {
+      const target = byId.get(community.representatives[0]);
+      setState({ mode: "explore", focus: target ? String(target.id) : null, community: community.id }, { push: true });
+    },
+  };
+  for (const button of panel.querySelectorAll("[data-act]")) {
+    button.addEventListener("click", () => act[button.dataset.act] && act[button.dataset.act]());
+  }
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    row.addEventListener("click", () => {
+      const target = byId.get(Number(row.dataset.node));
+      if (target) setState({ mode: "explore", focus: String(target.id), community: community.id }, { push: true });
+    });
+  }
+}
+
+// --- Mode chrome -------------------------------------------------------------
+// Depth and endpoint controls belong to the modes that use them, and appear
+// only there.
+function renderModeControls() {
+  const host = document.getElementById("mode-controls");
+  const parts = [];
+  if (State.mode === "explore" || State.mode === "impact") {
+    parts.push(
+      `<label>upstream <input id="ctl-up" type="number" min="0" max="6" value="${State.up}"></label>`,
+      `<label>downstream <input id="ctl-down" type="number" min="0" max="6" value="${State.down}"></label>`
+    );
+  }
+  if (State.mode === "path") {
+    const name = (value) => {
+      const node = resolveFocus(value);
+      return node ? node.name : "";
+    };
+    parts.push(
+      `<label>from <input id="ctl-from" type="text" value="${escapeHtml(name(State.from))}" placeholder="symbol"></label>`,
+      `<label>to <input id="ctl-to" type="text" value="${escapeHtml(name(State.to))}" placeholder="symbol"></label>`
+    );
+  }
+  host.innerHTML = parts.join("");
+  host.hidden = !parts.length;
+  const bind = (id, apply) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener("change", () => apply(input.value));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") apply(input.value);
+    });
+  };
+  bind("ctl-up", (value) => setState({ up: clampDepth(value, State.up) }));
+  bind("ctl-down", (value) => setState({ down: clampDepth(value, State.down) }));
+  bind("ctl-from", (value) => setState({ from: value || null }, { push: true }));
+  bind("ctl-to", (value) => setState({ to: value || null }, { push: true }));
+}
+
+const SPEC_BUILDERS = {
+  overview: overviewSpec,
+  explore: exploreSpec,
+  path: pathSpec,
+  impact: impactSpec,
+  contracts: contractsSpec,
+};
+
 function applyState() {
   syncFilterSets();
-  document.body.classList.toggle("mode-overview", State.mode === "overview");
+  document.body.dataset.mode = State.mode;
   document.getElementById("legend").hidden = State.mode !== "overview";
   for (const button of document.querySelectorAll("#modes button")) {
     button.setAttribute("aria-selected", String(button.dataset.mode === State.mode));
   }
-  if (State.mode === "overview") {
-    buildOverview();
-    buildLegend();
-    if (ovRenderer) ovRenderer.refresh();
-    return;
+  renderModeControls();
+  if (State.mode === "overview") buildLegend();
+  if (State.focus && !resolveFocus(State.focus)) {
+    notice(`No node named "${State.focus}" in this graph.`);
   }
-  ensureDetail();
-  const target = resolveFocus(State.focus);
-  if (target) {
-    notice(null);
-    focusNode(target);
-  } else if (State.focus) {
-    notice(`No node named "${State.focus}" in this graph — showing everything instead.`);
-  }
-  refresh();
+  renderScene((SPEC_BUILDERS[State.mode] || overviewSpec)());
+  markTreeActive();
 }
 
 window.addEventListener("popstate", () => {
@@ -2145,38 +2272,289 @@ window.addEventListener("popstate", () => {
   applyState();
 });
 
+// --- Legend ------------------------------------------------------------------
+function buildLegend() {
+  const host = document.getElementById("legend-list");
+  const ranked = communityMeta
+    .filter((meta) => meta.id !== UNGROUPED && meta.size > 0)
+    .slice()
+    .sort((left, right) => right.size - left.size)
+    .slice(0, 40);
+  host.innerHTML = ranked
+    .map(
+      (meta) =>
+        `<div class="row${State.community === meta.id ? " on" : ""}" data-c="${meta.id}" tabindex="0" role="button" title="${escapeHtml(meta.name)}">` +
+        `<span class="swatch" style="background:${communityColor(meta.id)}"></span>` +
+        `<span class="name">${escapeHtml(meta.label)}</span><span class="n">${meta.size}</span></div>`
+    )
+    .join("");
+  for (const row of host.querySelectorAll(".row")) {
+    const toggle = () => {
+      const id = Number(row.dataset.c);
+      setState({ community: State.community === id ? null : id });
+    };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  }
+}
+
+// --- Sidebar -----------------------------------------------------------------
+// Ranked, not alphabetical: a real repository opens on `.github/` and
+// `.history/` when the tree is sorted by name, which buries the source.
+function fileEntries() {
+  const counts = new Map();
+  for (const node of nodes) {
+    if (node.kind === "file" || node.kind === "doc") continue;
+    counts.set(node.file, (counts.get(node.file) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
+    .slice(0, 400);
+}
+
+function buildTree() {
+  const host = document.getElementById("tree");
+  const entries = fileEntries();
+  host.innerHTML =
+    `<p class="cc-note">${entries.length} files, most symbols first</p>` +
+    entries
+      .map(
+        ([file, count]) =>
+          `<div class="leaf" data-file="${escapeHtml(file)}" tabindex="0" role="button" title="${escapeHtml(file)}">` +
+          `<span class="name">${escapeHtml(file)}</span><span class="n">${count}</span></div>`
+      )
+      .join("");
+  for (const leaf of host.querySelectorAll(".leaf")) {
+    const go = () => setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: leaf.dataset.file }, { push: true });
+    leaf.addEventListener("click", go);
+    leaf.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+}
+
+function markTreeActive() {
+  const target = resolveFocus(State.focus);
+  for (const leaf of document.querySelectorAll("#tree .leaf")) {
+    leaf.classList.toggle("active", !!target && leaf.dataset.file === target.file);
+  }
+}
+
+function checkboxGroup(hostId, title, values, allowed, counts, onChange) {
+  const host = document.getElementById(hostId);
+  host.innerHTML =
+    `<h4>${title}</h4>` +
+    values
+      .map(
+        (value) =>
+          `<label class="frow"><input type="checkbox" ${!allowed || allowed.has(value) ? "checked" : ""} data-value="${escapeHtml(value)}">` +
+          `${escapeHtml(String(value).toLowerCase())}<span class="n">${counts.get(value) || 0}</span></label>`
+      )
+      .join("");
+  for (const box of host.querySelectorAll("input")) {
+    box.addEventListener("change", () => {
+      const picked = [...host.querySelectorAll("input")].filter((input) => input.checked).map((input) => input.dataset.value);
+      onChange(picked.length === values.length ? null : new Set(picked));
+    });
+  }
+}
+
+function buildFilters() {
+  const kindCounts = new Map();
+  for (const node of nodes) kindCounts.set(node.kind, (kindCounts.get(node.kind) || 0) + 1);
+  const relCounts = new Map();
+  const confCounts = new Map();
+  for (const edge of links) {
+    relCounts.set(edge.kind, (relCounts.get(edge.kind) || 0) + 1);
+    confCounts.set(edge.confidence, (confCounts.get(edge.confidence) || 0) + 1);
+  }
+  checkboxGroup("f-kinds", "Node kinds", ALL_KIND, State.kind, kindCounts, (kind) => setState({ kind }));
+  checkboxGroup("f-rels", "Relation kinds", ALL_REL, State.rel, relCounts, (rel) => setState({ rel }));
+  checkboxGroup("f-conf", "Edge confidence", ALL_CONF, State.conf, confCounts, (conf) => setState({ conf }));
+}
+
+function selectTab(which) {
+  for (const name of ["explorer", "filters"]) {
+    document.getElementById(`tab-${name}`).classList.toggle("on", name === which);
+    document.getElementById(`tab-btn-${name}`).classList.toggle("active", name === which);
+    document.getElementById(`tab-btn-${name}`).setAttribute("aria-selected", String(name === which));
+  }
+}
+
+// --- Command palette ---------------------------------------------------------
+const COMMANDS = [
+  ...MODE_LIST.map((mode) => ({ label: `Mode: ${mode.label}`, run: () => enterMode(mode.id) })),
+  { label: "Reset filters", run: () => setState({ rel: null, conf: null, kind: null, community: null }) },
+  { label: "Clear pins", run: () => setState({ pins: new Set() }) },
+  { label: "Collapse all modules", run: () => setState({ expanded: new Set() }) },
+  { label: "Fit view", run: () => setState({ cam: null }) },
+  {
+    label: "Copy shareable link",
+    run: () => navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => notice("Link copied.")),
+  },
+];
+
+let paletteIndex = 0;
+let paletteItems = [];
+
+function togglePalette(force) {
+  const host = document.getElementById("palette");
+  const open = force === undefined ? host.hidden : force;
+  host.hidden = !open;
+  if (open) {
+    const input = document.getElementById("palette-input");
+    input.value = "";
+    renderPalette("");
+    input.focus();
+  }
+}
+
+function renderPalette(query) {
+  const lowered = query.toLowerCase().trim();
+  const matches = (text) => !lowered || text.toLowerCase().includes(lowered);
+  paletteItems = [
+    ...COMMANDS.filter((command) => matches(command.label)).map((command) => ({ label: command.label, hint: "command", run: command.run })),
+    ...(lowered
+      ? nodes
+          .filter((node) => matches(node.name) || matches(node.file))
+          .slice(0, 30)
+          .map((node) => ({
+            label: nodeLabel(node),
+            hint: node.file,
+            run: () => setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: String(node.id) }, { push: true }),
+          }))
+      : []),
+  ].slice(0, 40);
+  paletteIndex = 0;
+  const list = document.getElementById("palette-list");
+  list.innerHTML = paletteItems
+    .map(
+      (item, index) =>
+        `<div class="prow${index === 0 ? " on" : ""}" data-i="${index}"><span class="name">${escapeHtml(item.label)}</span><span class="hint">${escapeHtml(item.hint)}</span></div>`
+    )
+    .join("");
+  for (const row of list.querySelectorAll(".prow")) {
+    row.addEventListener("click", () => runPalette(Number(row.dataset.i)));
+  }
+}
+
+function movePalette(delta) {
+  if (!paletteItems.length) return;
+  paletteIndex = (paletteIndex + delta + paletteItems.length) % paletteItems.length;
+  const list = document.getElementById("palette-list");
+  for (const row of list.querySelectorAll(".prow")) {
+    row.classList.toggle("on", Number(row.dataset.i) === paletteIndex);
+  }
+  const active = list.querySelector(".prow.on");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function runPalette(index) {
+  const item = paletteItems[index];
+  togglePalette(false);
+  if (item) item.run();
+}
+
+// --- Keyboard ----------------------------------------------------------------
+// Every core task is reachable without a pointer.
+function walkNeighbour(delta) {
+  const current = selected || resolveFocus(State.focus);
+  if (!current) return;
+  const ranked = [
+    ...(outgoing.get(current.id) || []).filter(edgeAllowed).map((edge) => byId.get(edge.target)),
+    ...(incoming.get(current.id) || []).filter(edgeAllowed).map((edge) => byId.get(edge.source)),
+  ].filter(Boolean);
+  if (!ranked.length) return;
+  const position = ranked.findIndex((node) => selected && node.id === selected.id);
+  const next = ranked[(position + delta + ranked.length) % ranked.length];
+  selected = next;
+  if (scene.hasNode(`n${next.id}`)) {
+    inspectNode(next, scene.getNodeAttributes(`n${next.id}`));
+    renderer.refresh();
+  } else {
+    setState({ focus: String(next.id) }, { push: true });
+  }
+}
+
 document.addEventListener("keydown", (event) => {
+  const palette = document.getElementById("palette");
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    togglePalette();
+    return;
+  }
+  if (!palette.hidden) {
+    if (event.key === "Escape") togglePalette(false);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      movePalette(1);
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      movePalette(-1);
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runPalette(paletteIndex);
+    }
+    return;
+  }
   if (event.target.matches("input, textarea")) return;
+  if (event.key === "/") {
+    event.preventDefault();
+    document.getElementById("search").focus();
+    return;
+  }
   const index = Number(event.key);
   if (Number.isInteger(index) && index >= 1 && index <= MODE_IDS.length) {
     enterMode(MODE_IDS[index - 1]);
     return;
   }
-  if (event.key === "Escape" && State.mode !== "overview") enterMode("overview");
+  if (event.key === "ArrowRight") walkNeighbour(1);
+  if (event.key === "ArrowLeft") walkNeighbour(-1);
+  if (event.key === "Escape") {
+    if (State.mode !== "overview") enterMode("overview");
+    else {
+      selected = null;
+      document.getElementById("panel").classList.remove("open");
+      if (renderer) renderer.refresh();
+    }
+  }
 });
 
 // --- Bootstrap ----------------------------------------------------------------
 {
-  const fileCount = nodes.filter((n) => n.kind === "file").length;
+  const fileCount = nodes.filter((node) => node.kind === "file").length;
   const repoName = "__REPO_NAME__";
-  document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> · ${fileCount} files`;
+  document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> \u00b7 ${fileCount} files`;
   document.getElementById("c-nodes").textContent = nodes.length;
   document.getElementById("c-edges").textContent = links.length;
-  document.getElementById("status-counts").textContent = `${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
 }
+
 function visible(element) {
   return !!(element && element.offsetWidth && element.offsetHeight);
 }
 window.addEventListener("resize", () => {
   if (renderer && visible(document.getElementById("view"))) renderer.resize();
-  if (ovRenderer && visible(document.getElementById("view-overview"))) ovRenderer.resize();
 });
+
+document.getElementById("tab-btn-explorer").addEventListener("click", () => selectTab("explorer"));
+document.getElementById("tab-btn-filters").addEventListener("click", () => selectTab("filters"));
+document.getElementById("palette-input").addEventListener("input", (event) => renderPalette(event.target.value));
+
 readUrl();
-// A page opened with ?focus= (the wiki links back that way) means Explore.
-if (!new URLSearchParams(location.search).has("mode") && new URLSearchParams(location.search).has("focus")) {
-  State.mode = "explore";
-}
 buildModeSwitcher();
+buildTree();
+buildFilters();
+selectTab("explorer");
 applyState();
 writeUrl(false);
 </script>

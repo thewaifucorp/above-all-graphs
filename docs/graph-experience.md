@@ -364,22 +364,85 @@ dismissed only by the full-graph layout, so it covered the Overview forever
 once that layout stopped running on load; and `community_label` fell back to an
 arbitrary member file, naming an 867-symbol module after `language-config.ts`.
 
+### Landed: five modes on one scene engine
+
+The page no longer has a whole-repository view at all. Every mode builds a
+*scene* — a node list, an edge list, and a layout kind — and one renderer draws
+it. That is what makes the budgets reachable: no view needs 6000 nodes on
+screen, so none of them asks for that.
+
+- **Explore** takes a focus symbol and walks upstream and downstream to
+  separate depths, ranking each hop by relation confidence, entrypoint and
+  contract status, and degree, then caps the scene and reports what it dropped.
+  Hover now *dims* instead of hiding, so the surrounding structure stays
+  visible while one node is highlighted — the old behaviour hid every
+  non-incident edge, which made it impossible to see two things relate.
+- **Path** runs a directed BFS between two endpoints and draws the result as
+  layers, left to right, because a path has an order that a force layout
+  destroys. No path, same endpoint, and missing endpoint are all distinct
+  stated outcomes rather than an empty canvas.
+- **Impact** separates dependents from dependencies, groups by depth, ranks
+  tests, entrypoints, and contracts ahead of generic transitive nodes, and
+  marks change state with a glyph and a size step — the module already owns
+  hue, so impact cannot borrow it.
+- **Contracts** pairs each endpoint, schema, table, and infrastructure
+  resource with the implementations that serve it, counts the ones with no
+  implementation, and separates declared from observed using the `perspective`
+  the exporter now ships per node.
+- **Command palette** (`⌘K`/`Ctrl+K`) over both commands and symbols, plus `/`
+  to search, `1`–`5` for modes, arrow keys to walk neighbours, and `Esc` to
+  unwind one layer at a time.
+- **Semantic zoom** by camera band, with a floor that stands down for small
+  scenes — a nine-node impact fan-out with no labels answers nothing.
+- **Layout cache** in `localStorage`, keyed by scene shape and force settings,
+  so a reload or a return from another mode lands on the same picture. A
+  changed node set invalidates rather than partially reusing.
+- **Accessibility**: visible focus rings, a `prefers-reduced-motion` block,
+  the inspector as a labelled region, the notice as a live region, and
+  keyboard activation on every list row.
+- **Header** relaid out as an honest flex row. The search box had been
+  absolutely centred, so it sat on top of the mode switcher as soon as there
+  were five modes; low-priority chrome now sheds at narrow widths.
+- **D3 is gone.** It was vendored solely for `d3.quadtree` in the retired
+  whole-repository force layout — 280 KB off every generated page and out of
+  the binary.
+
+Final measurements, medium fixture, 1440×900:
+
+| measurement | baseline | now | budget |
+|---|---|---|---|
+| document transferred | 12.97 MB | 5.17 MB | ≤ 6 MB |
+| `DOMContentLoaded` | 1373 ms | 400 ms | ≤ 1200 ms |
+| peak JS heap | 271.8 MB | 125 MB | ≤ 300 MB |
+| nodes in the initial scene | 5971 | 146 | ≤ 800 |
+| edges in the initial scene | 87 928 | 151 | ≤ 3000 |
+| Explore scene (depth 2/2) | n/a | 9 nodes / 18 edges | ≤ 800 |
+| Contracts scene | n/a | 31 nodes | ≤ 800 |
+| sustained fps while panning | 60.7 | 61.0 | ≥ 50 |
+| console errors across all modes | 0 | 0 | 0 |
+
+Two budgets are now enforced by `cargo test` rather than measured by hand:
+the edge table's cost per edge, and the whole generated page against the
+medium ceiling using a synthetic 6000-node / 87 000-edge graph. Those run in
+CI with everything else.
+
 ### Still open
 
-- Explore is still the old full-graph view wearing a mode label. It has no
-  independent upstream/downstream depth, no neighbour ranking, no breadcrumb,
-  and its hover still hides every other edge.
-- Path, Impact, and Contracts views.
-- Command palette, semantic-zoom bands, edge aggregation inside Explore.
-- Layout caching by fingerprint; the Overview layout is recomputed per build
-  of the scene.
-- Keyboard and screen-reader coverage beyond mode switching; reduced motion.
-- Budgets enforced in CI against the three fixtures, and visual regression
-  baselines.
-- Overview polish: two labels can still overlap near dense centres, the fit
-  leaves the outermost aggregate partly off-screen, and 146 modules is a lot
-  of small aggregates — the fold threshold and an "others" bucket both want
-  revisiting.
+- Visual regression baselines and browser-side budget enforcement. The payload
+  and page-size budgets are in CI; frame rate, interaction latency, and how the
+  page *looks* still need a Playwright harness this repository does not have.
+- The `large` synthetic fixture is only exercised through the page-size test,
+  not through the interaction budgets.
+- Overview at 146 modules is still a lot of small aggregates; the fold
+  threshold and an "others" bucket want revisiting, and the outermost aggregate
+  can sit partly off-screen.
+- Node kind is carried by a label glyph and relation kind by hue plus width,
+  because sigma's default programs draw circles and plain lines. The shape and
+  dash grammar in the specification above needs custom WebGL programs.
+- Explore ranks and caps neighbours but does not yet aggregate the ones it
+  drops into an expandable bundle the way Overview does.
+- Path shows the shortest route only; alternative paths of equal length are not
+  offered.
 
 ### Definition of done
 
