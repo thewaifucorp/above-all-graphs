@@ -34,8 +34,18 @@ Each carries:
   definition in the same block shadowing anything that reached the block entry.
 - **`control_dependence`** — which branch decides whether a block runs,
   computed from post-dominance over this function's CFG.
+- **Calls** — each call site with the identifiers passed to it.
+- **`dependences`** — the program dependence graph as `(dependent line, source
+  line, control|data)`, plus `dependences_of(line)` for the transitive backward
+  slice of one line.
+- **`taint_findings`** — source-to-sink flows: a known input (`req.query`,
+  `process.env`, `argv`, `stdin`, …) reaching a known sink (`exec`, `query`,
+  `innerHTML`, `writeFile`, …), with the assignments that carried it and
+  whether a branch decides that the sink runs at all.
 
-`aag flow <file> [--function name]` prints all of it.
+Three surfaces: `aag flow <file> [--function name]`, `aag pdg <file>
+[--line N]`, `aag taint <file>`, and the same two as MCP tools `pdg_query`
+(accepting `path` or `path:line`) and `taint`.
 
 ## Statement shape, per grammar
 
@@ -65,9 +75,25 @@ else:
 - Languages without a flow frontend return nothing rather than failing, so a
   mixed repository still analyses.
 
+## What the taint analysis is not
+
+It is intraprocedural and syntactic. Taint spreads when a definition's *line*
+reads an already-tainted name, which is line-granular rather than
+expression-granular, and it cannot follow a value through a call, a field, or a
+container. So:
+
+- A finding is a place to look, never a proven vulnerability.
+- No findings is **not** evidence of safety, and the CLI says so in its own
+  output rather than leaving a reader to assume otherwise.
+- A flow marked "guarded by a branch" means only that a branch decides whether
+  the sink runs. Whether that branch actually validates anything is not
+  something this analysis can know.
+
+The source and sink lists are deliberately short and specific. A long fuzzy
+list produces findings nobody reads.
+
 ## Not yet built
 
-Taint analysis (source-to-sink findings with provenance) and a PDG query
-surface over MCP both sit on top of this and are still open in P0.5. Neither is
-implemented, and nothing here should be presented as data-flow security
-analysis.
+Interprocedural flow — following a value from a caller into a callee and back —
+and sanitizer recognition. Both need the call graph the rest of `aag` already
+has to be joined to these per-function graphs, which is not done.

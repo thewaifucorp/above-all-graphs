@@ -54,6 +54,12 @@ fn main() -> anyhow::Result<()> {
         Command::Flow { file, function } => {
             println!("{}", aag::flow::format_file(&file, &function)?);
         }
+        Command::Pdg { file, line } => {
+            println!("{}", aag::flow::format_pdg(&file, line)?);
+        }
+        Command::Taint { file } => {
+            println!("{}", aag::flow::format_taint(&file)?);
+        }
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }

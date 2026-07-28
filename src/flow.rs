@@ -121,6 +121,39 @@ pub struct Use {
     pub line: u32,
 }
 
+/// A call site inside a function body, with the names passed to it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Call {
+    /// Called name, without receiver.
+    pub callee: String,
+    /// Block containing the call.
+    pub block: usize,
+    /// 1-based line.
+    pub line: u32,
+    /// Identifiers appearing in the argument list.
+    pub arguments: Vec<String>,
+}
+
+/// Why one statement depends on another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Dependence {
+    /// A branch decides whether the dependent runs.
+    Control,
+    /// A value the dependent reads is written by the other.
+    Data,
+}
+
+impl Dependence {
+    /// Stable string form.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Control => "control",
+            Self::Data => "data",
+        }
+    }
+}
+
 /// One function's control and data flow.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Cfg {
@@ -134,6 +167,8 @@ pub struct Cfg {
     pub definitions: Vec<Definition>,
     /// Every syntactic read.
     pub uses: Vec<Use>,
+    /// Every call site.
+    pub calls: Vec<Call>,
 }
 
 impl Cfg {
@@ -280,6 +315,59 @@ impl Cfg {
         found.into_iter().collect()
     }
 
+    /// The program dependence graph: control dependence plus data dependence,
+    /// as `(dependent line, source line, why)`.
+    ///
+    /// Lines rather than blocks, because that is the granularity a reader asks
+    /// the question at — "what does line 42 depend on".
+    #[must_use]
+    pub fn dependences(&self) -> Vec<(u32, u32, Dependence)> {
+        let mut found = BTreeSet::new();
+        for (block, guard) in self.control_dependence() {
+            let Some((dependent, owner)) = self.blocks.get(block).zip(self.blocks.get(guard))
+            else {
+                continue;
+            };
+            // The guard's own first line, not its last: a loop header spans
+            // its whole body, and reporting a dependence on a later line reads
+            // backwards.
+            if dependent.start_line != owner.start_line {
+                found.insert((dependent.start_line, owner.start_line, Dependence::Control));
+            }
+        }
+        for (use_index, sources) in self.def_use_chains() {
+            let usage = &self.uses[use_index];
+            for source in sources {
+                let definition = &self.definitions[source];
+                if definition.line != usage.line {
+                    found.insert((usage.line, definition.line, Dependence::Data));
+                }
+            }
+        }
+        found.into_iter().collect()
+    }
+
+    /// What one line depends on, transitively.
+    #[must_use]
+    pub fn dependences_of(&self, line: u32) -> Vec<(u32, u32, Dependence)> {
+        let all = self.dependences();
+        let mut seen: BTreeSet<u32> = BTreeSet::from([line]);
+        let mut frontier = vec![line];
+        let mut found = BTreeSet::new();
+        while let Some(current) = frontier.pop() {
+            for (dependent, source, why) in &all {
+                if *dependent != current {
+                    continue;
+                }
+                found.insert((*dependent, *source, *why));
+                if seen.insert(*source) {
+                    frontier.push(*source);
+                }
+            }
+        }
+        found.into_iter().collect()
+    }
+
     /// Immediate post-dominator of each block, if it has one.
     fn post_dominators(&self) -> HashMap<usize, Option<usize>> {
         let count = self.blocks.len();
@@ -327,6 +415,153 @@ impl Cfg {
                 (block, immediate)
             })
             .collect()
+    }
+}
+
+/// Expressions whose value comes from outside the program. Matching is on the
+/// tail identifier of a read, so `req.query`, `process.env`, and
+/// `os.environ` all land here.
+const TAINT_SOURCES: &[&str] = &[
+    "argv", "args", "env", "environ", "query", "body", "params", "headers", "cookies", "stdin",
+    "input", "form", "GET", "POST", "request",
+];
+
+/// Calls that must not receive attacker-controlled input without a decision in
+/// between. The list is deliberately short and specific: a long fuzzy list
+/// produces findings nobody reads.
+const TAINT_SINKS: &[&str] = &[
+    "eval",
+    "exec",
+    "execSync",
+    "execFile",
+    "spawn",
+    "spawnSync",
+    "system",
+    "popen",
+    "query",
+    "execute",
+    "executemany",
+    "raw",
+    "innerHTML",
+    "insertAdjacentHTML",
+    "writeFile",
+    "writeFileSync",
+    "readFile",
+    "readFileSync",
+    "createReadStream",
+    "sendFile",
+    "send_file",
+    "render_template_string",
+    "deserialize",
+    "loads",
+    "unserialize",
+    "Function",
+];
+
+/// One source-to-sink flow, with the hops that carried it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaintFinding {
+    /// Function the flow lives in.
+    pub function: String,
+    /// Name the value entered through.
+    pub source: String,
+    /// 1-based line the value entered at.
+    pub source_line: u32,
+    /// Call that consumed it.
+    pub sink: String,
+    /// 1-based line of that call.
+    pub sink_line: u32,
+    /// `(line, name)` for each assignment that carried the value along.
+    pub hops: Vec<(u32, String)>,
+    /// Whether a branch decides that the sink runs — a validated flow and an
+    /// unguarded one deserve different attention.
+    pub guarded: bool,
+}
+
+impl Cfg {
+    /// Source-to-sink flows inside this function.
+    ///
+    /// Intraprocedural and syntactic: taint spreads when a definition's line
+    /// reads an already-tainted name, which is line-granular, not
+    /// expression-granular. It cannot follow a value through a call, a field,
+    /// or a container. Treat a finding as a place to look, never as a proven
+    /// vulnerability, and treat the absence of findings as no evidence at all.
+    #[must_use]
+    pub fn taint_findings(&self) -> Vec<TaintFinding> {
+        // Seed: names read on a line that also mentions a known input.
+        let mut tainted: BTreeMap<String, (u32, String)> = BTreeMap::new();
+        for usage in &self.uses {
+            if TAINT_SOURCES.contains(&usage.name.as_str()) {
+                tainted.insert(usage.name.clone(), (usage.line, usage.name.clone()));
+            }
+        }
+        for definition in &self.definitions {
+            if TAINT_SOURCES.contains(&definition.name.as_str()) {
+                tainted.insert(
+                    definition.name.clone(),
+                    (definition.line, definition.name.clone()),
+                );
+            }
+        }
+        if tainted.is_empty() {
+            return Vec::new();
+        }
+
+        // Propagate along definitions whose line reads something tainted.
+        let mut hops: BTreeMap<String, Vec<(u32, String)>> = tainted
+            .keys()
+            .map(|name| (name.clone(), Vec::new()))
+            .collect();
+        let mut origin: BTreeMap<String, (u32, String)> = tainted.clone();
+        for _ in 0..8 {
+            let mut grew = false;
+            for definition in &self.definitions {
+                if origin.contains_key(&definition.name) {
+                    continue;
+                }
+                let carried = self.uses.iter().find(|usage| {
+                    usage.line == definition.line && origin.contains_key(&usage.name)
+                });
+                if let Some(usage) = carried {
+                    let mut chain = hops.get(&usage.name).cloned().unwrap_or_default();
+                    chain.push((definition.line, definition.name.clone()));
+                    hops.insert(definition.name.clone(), chain);
+                    let seed = origin
+                        .get(&usage.name)
+                        .cloned()
+                        .unwrap_or((definition.line, definition.name.clone()));
+                    origin.insert(definition.name.clone(), seed);
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+
+        let guards: HashMap<usize, usize> = self.control_dependence().into_iter().collect();
+        let mut findings = Vec::new();
+        for call in &self.calls {
+            if !TAINT_SINKS.contains(&call.callee.as_str()) {
+                continue;
+            }
+            for argument in &call.arguments {
+                let Some((source_line, source)) = origin.get(argument) else {
+                    continue;
+                };
+                findings.push(TaintFinding {
+                    function: self.function.clone(),
+                    source: source.clone(),
+                    source_line: *source_line,
+                    sink: call.callee.clone(),
+                    sink_line: call.line,
+                    hops: hops.get(argument).cloned().unwrap_or_default(),
+                    guarded: guards.contains_key(&call.block),
+                });
+                break;
+            }
+        }
+        findings
     }
 }
 
@@ -592,7 +827,14 @@ impl Builder<'_> {
         let statement = &unwrap_statement(statement);
         let line = line_of(statement);
         let block = self.ensure_current(line);
-        self.record_data_flow(statement, block);
+        // A branch or loop owns only its condition: its body becomes its own
+        // blocks, and recording the whole subtree here would count every
+        // nested definition, use, and call twice — once in the guard's block
+        // and once in the body's.
+        match condition_of(statement) {
+            Some(condition) => self.record_data_flow(&condition, block),
+            None => self.record_data_flow(statement, block),
+        }
         if let Some(slot) = self.cfg.blocks.get_mut(block) {
             slot.end_line = slot
                 .end_line
@@ -688,11 +930,52 @@ impl Builder<'_> {
         }
     }
 
-    /// Records the writes and reads a statement performs.
+    /// Records the writes, reads, and calls a statement performs.
     fn record_data_flow(&mut self, statement: &tree_sitter_language_pack::Node, block: usize) {
         let mut defined: HashSet<String> = HashSet::new();
         self.collect_definitions(statement, block, &mut defined);
         self.collect_uses(statement, block, &defined);
+        self.collect_calls(statement, block);
+    }
+
+    fn collect_calls(&mut self, node: &tree_sitter_language_pack::Node, block: usize) {
+        if matches!(
+            node.kind().as_str(),
+            "call_expression" | "call" | "invocation_expression" | "macro_invocation"
+        ) {
+            let callee = ["function", "callee", "name", "macro"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .and_then(|target| text(&target, self.source))
+                .and_then(callee_tail)
+                .unwrap_or_default()
+                .to_string();
+            let arguments = ["arguments", "argument_list", "parameters"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .map(|args| {
+                    let mut names = Vec::new();
+                    collect_identifiers(&args, self.source, &mut names);
+                    names
+                })
+                .unwrap_or_default();
+            if !callee.is_empty() {
+                self.cfg.calls.push(Call {
+                    callee,
+                    block,
+                    line: line_of(node),
+                    arguments,
+                });
+            }
+        }
+        for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+            if let Some(child) = node.named_child(index) {
+                if FUNCTION_KINDS.contains(&child.kind().as_str()) {
+                    continue;
+                }
+                self.collect_calls(&child, block);
+            }
+        }
     }
 
     fn collect_definitions(
@@ -733,8 +1016,13 @@ impl Builder<'_> {
         block: usize,
         defined: &HashSet<String>,
     ) {
-        if node.kind() == "identifier"
-            && let Some(name) = text(node, self.source)
+        // A property read is a read: `req.query` reads `query`. Such a name
+        // rarely has a local definition, so def-use chains simply find nothing
+        // for it, while taint seeding gets the input it needs.
+        if matches!(
+            node.kind().as_str(),
+            "identifier" | "property_identifier" | "field_identifier"
+        ) && let Some(name) = text(node, self.source)
         {
             // The left-hand side of an assignment is a write, not a read.
             let is_target = node
@@ -768,6 +1056,46 @@ impl Builder<'_> {
 }
 
 /// The bare name a binding pattern introduces (`mut total` → `total`).
+/// The part of a branch or loop that runs in the guard's own block: its
+/// condition. `None` for a statement that owns its whole subtree.
+fn condition_of(node: &tree_sitter_language_pack::Node) -> Option<tree_sitter_language_pack::Node> {
+    if !matches!(
+        terminator_exit(node.kind().as_str()),
+        Some(BlockExit::Branch | BlockExit::Loop)
+    ) {
+        return None;
+    }
+    ["condition", "value", "left", "initializer"]
+        .into_iter()
+        .find_map(|field| node.child_by_field_name(field))
+        .or_else(|| node.named_child(0))
+}
+
+/// The final identifier of a callee expression (`fs.writeFileSync` →
+/// `writeFileSync`, `Command::new` → `new`).
+fn callee_tail(raw: &str) -> Option<&str> {
+    raw.trim()
+        .rsplit(|character: char| !character.is_alphanumeric() && character != '_')
+        .find(|part| !part.is_empty())
+}
+
+fn collect_identifiers(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    out: &mut Vec<String>,
+) {
+    if node.kind() == "identifier"
+        && let Some(name) = text(node, source)
+    {
+        out.push(name.to_string());
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_identifiers(&child, source, out);
+        }
+    }
+}
+
 /// Peels `expression_statement`-style wrappers off a statement.
 fn unwrap_statement(node: &tree_sitter_language_pack::Node) -> tree_sitter_language_pack::Node {
     let mut current = node.clone();
@@ -804,10 +1132,7 @@ pub fn analyze_map(file_path: &str, source: &str) -> Result<BTreeMap<String, Cfg
 /// # Errors
 /// Returns an error when the file cannot be read or parsed.
 pub fn format_file(path: &std::path::Path, function_filter: &str) -> Result<String> {
-    let source = std::fs::read_to_string(path).map_err(|error| Error::Parse {
-        file: path.display().to_string(),
-        reason: error.to_string(),
-    })?;
+    let source = read(path)?;
     let name = path.to_string_lossy();
     let graphs = analyze(&name, &source)?;
     if graphs.is_empty() {
@@ -881,6 +1206,102 @@ pub fn format_file(path: &std::path::Path, function_filter: &str) -> Result<Stri
         format!("no function named {function_filter} in {name}")
     } else {
         out.join("\n").trim_end().to_string()
+    })
+}
+
+/// Renders the dependence graph for one file, or for one line of it.
+///
+/// # Errors
+/// Returns an error when the file cannot be read or parsed.
+pub fn format_pdg(path: &std::path::Path, line: Option<u32>) -> Result<String> {
+    let source = read(path)?;
+    let name = path.to_string_lossy();
+    let mut out = Vec::new();
+    for cfg in analyze(&name, &source)? {
+        let dependences = match line {
+            Some(line) => cfg.dependences_of(line),
+            None => cfg.dependences(),
+        };
+        if dependences.is_empty() {
+            continue;
+        }
+        out.push(format!("## {}", cfg.function));
+        for (dependent, source_line, why) in dependences {
+            out.push(format!(
+                "line {dependent} depends on line {source_line} ({})",
+                why.as_str()
+            ));
+        }
+        out.push(String::new());
+    }
+    Ok(if out.is_empty() {
+        match line {
+            Some(line) => format!("nothing in {name} depends on line {line}"),
+            None => format!("no dependences extracted from {name}"),
+        }
+    } else {
+        out.join("\n").trim_end().to_string()
+    })
+}
+
+/// Renders source-to-sink findings for one file.
+///
+/// # Errors
+/// Returns an error when the file cannot be read or parsed.
+pub fn format_taint(path: &std::path::Path) -> Result<String> {
+    let source = read(path)?;
+    let name = path.to_string_lossy();
+    let mut out = Vec::new();
+    for cfg in analyze(&name, &source)? {
+        for finding in cfg.taint_findings() {
+            let hops = if finding.hops.is_empty() {
+                "direct".to_string()
+            } else {
+                finding
+                    .hops
+                    .iter()
+                    .map(|(line, name)| format!("{name}@{line}"))
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            };
+            out.push(format!(
+                "{}: {} (line {}) reaches {}() at line {} via {}{}",
+                finding.function,
+                finding.source,
+                finding.source_line,
+                finding.sink,
+                finding.sink_line,
+                hops,
+                if finding.guarded {
+                    " — guarded by a branch"
+                } else {
+                    " — no branch in between"
+                }
+            ));
+        }
+    }
+    Ok(if out.is_empty() {
+        format!(
+            "no source-to-sink flows found in {name}. This analysis is \
+             intraprocedural and syntactic, so absence of findings is not \
+             evidence of safety."
+        )
+    } else {
+        let mut lines = vec![
+            "Intraprocedural, syntactic taint: each finding is a place to look, \
+             not a proven vulnerability."
+                .to_string(),
+            String::new(),
+        ];
+        lines.extend(out);
+        lines.join("\n")
+    })
+}
+
+fn read(path: &std::path::Path) -> Result<String> {
+    std::fs::read_to_string(path).map_err(|error| Error::Parse {
+        file: path.display().to_string(),
+        reason: error.to_string(),
     })
 }
 
@@ -1082,6 +1503,97 @@ mod tests {
                 "{path}: `a` is defined"
             );
         }
+    }
+
+    #[test]
+    fn dependences_separate_control_from_data() {
+        let source = "fn run(flag: bool) {\n    let value = 1;\n    if flag {\n        let out = value;\n    }\n}";
+        let cfg = cfg_of("a.rs", source, "run");
+        let kinds: BTreeSet<Dependence> =
+            cfg.dependences().iter().map(|(_, _, why)| *why).collect();
+        assert!(
+            kinds.contains(&Dependence::Data),
+            "`out` reads `value`: {:?}",
+            cfg.dependences()
+        );
+        assert!(
+            kinds.contains(&Dependence::Control),
+            "the guarded statement depends on the branch: {:?}",
+            cfg.dependences()
+        );
+    }
+
+    #[test]
+    fn transitive_dependences_walk_backwards() {
+        let source = "fn run() {\n    let a = 1;\n    let b = a;\n    let c = b;\n}";
+        let cfg = cfg_of("a.rs", source, "run");
+        let sources: BTreeSet<u32> = cfg
+            .dependences_of(4)
+            .iter()
+            .map(|(_, source, _)| *source)
+            .collect();
+        assert!(
+            !sources.is_empty(),
+            "`c` depends on `b` which depends on `a`: {:?}",
+            cfg.dependences()
+        );
+    }
+
+    #[test]
+    fn taint_reports_an_unguarded_flow_from_input_to_a_sink() {
+        let source = "function handle(req) {\n  const cmd = req.query;\n  exec(cmd);\n}";
+        let cfg = cfg_of("a.js", source, "handle");
+        let findings = cfg.taint_findings();
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].sink, "exec");
+        assert!(!findings[0].guarded, "nothing decides whether exec runs");
+        assert!(
+            findings[0].hops.iter().any(|(_, name)| name == "cmd"),
+            "the carrying assignment must be in the chain: {:?}",
+            findings[0].hops
+        );
+    }
+
+    #[test]
+    fn taint_marks_a_flow_that_passes_a_branch_as_guarded() {
+        let source = "function handle(req) {\n  const cmd = req.query;\n  if (allowed(cmd)) {\n    exec(cmd);\n  }\n}";
+        let cfg = cfg_of("a.js", source, "handle");
+        let findings = cfg.taint_findings();
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert!(
+            findings[0].guarded,
+            "a branch decides whether the sink runs, which is worth distinguishing"
+        );
+    }
+
+    #[test]
+    fn clean_function_produces_no_findings() {
+        let cfg = cfg_of("a.js", "function run() { const a = 1; helper(a); }", "run");
+        assert!(cfg.taint_findings().is_empty());
+    }
+
+    #[test]
+    fn a_sink_reached_by_a_constant_is_not_a_finding() {
+        let cfg = cfg_of(
+            "a.js",
+            "function run() { const cmd = \"ls\"; exec(cmd); }",
+            "run",
+        );
+        assert!(
+            cfg.taint_findings().is_empty(),
+            "nothing external reaches this sink"
+        );
+    }
+
+    #[test]
+    fn calls_are_collected_with_their_arguments() {
+        let cfg = cfg_of("a.js", "function run(x) { helper(x, 2); }", "run");
+        let call = cfg
+            .calls
+            .iter()
+            .find(|call| call.callee == "helper")
+            .expect("the call site");
+        assert!(call.arguments.contains(&"x".to_string()), "{call:?}");
     }
 
     #[test]

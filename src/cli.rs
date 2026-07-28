@@ -140,6 +140,23 @@ pub enum Command {
         function: String,
     },
 
+    /// Show the program dependence graph for a file: which lines depend on
+    /// which, by control or by data.
+    Pdg {
+        /// File to analyze.
+        file: PathBuf,
+        /// Only what this line depends on, transitively.
+        #[arg(long)]
+        line: Option<u32>,
+    },
+
+    /// Show source-to-sink flows in a file. Intraprocedural and syntactic —
+    /// each finding is a place to look, not a proven vulnerability.
+    Taint {
+        /// File to analyze.
+        file: PathBuf,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.

@@ -131,11 +131,17 @@ P2 gates expand reach after the core is measurable and dependable.
    chains, and control dependence from post-dominance — for Rust, JavaScript,
    TypeScript, Python, Java, C#, and Go, callable as `aag flow <file>` and
    covered by tests. See [flow](flow.md).
-   Still open: a PDG query surface over MCP, and provenance-aware
-   source-to-sink taint findings. Nothing here is security analysis yet, and
-   the data flow is syntactic — aliasing through references, fields, and
-   containers is not tracked, so reaching definitions over-approximates what
-   may reach and under-approximates what does.
+   Also landed: the program dependence graph (`aag pdg`, MCP `pdg_query`,
+   including the transitive backward slice of one line) and source-to-sink
+   taint findings (`aag taint`, MCP `taint`) carrying the assignments that
+   carried the value and whether a branch decides the sink runs.
+   Still open: interprocedural flow — following a value from a caller into a
+   callee — and sanitizer recognition. Not claimed: this is not security
+   analysis. The data flow is syntactic and line-granular, aliasing through
+   references, fields, and containers is not tracked, a finding is a place to
+   look rather than a proven vulnerability, and no findings is not evidence of
+   safety. Reaching definitions over-approximates what may reach and
+   under-approximates what does.
 
 ### P1 — complete workflows and heterogeneous graphs
 

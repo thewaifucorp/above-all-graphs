@@ -71,6 +71,20 @@ const TOOL_SPECS: &[ToolSpec] = &[
         implemented: true,
     },
     ToolSpec {
+        name: "pdg_query",
+        description: "Statement-level dependences inside a file: which lines depend on which, by control or by data. Pass `<file>` or `<file>:<line>` to ask what one line depends on.",
+        arg: "target",
+        arg_description: "Repo-relative file path, optionally `path:line`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "taint",
+        description: "Source-to-sink flows in a file. Intraprocedural and syntactic: a finding is a place to look, not a proven vulnerability, and no findings is not evidence of safety.",
+        arg: "file",
+        arg_description: "Repo-relative file path.",
+        implemented: true,
+    },
+    ToolSpec {
         name: "rename",
         description: "Coordinated multi-file rename. Applies immediately and writes to disk — pass `name` (current) and `new_name`.",
         arg: "name",
@@ -510,6 +524,14 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "callers" => edges_text(root, arg, &Direction::Callers),
         "callees" => edges_text(root, arg, &Direction::Callees),
         "impact" => impact::format(root, arg),
+        "pdg_query" => {
+            let (file, line) = arg
+                .rsplit_once(':')
+                .and_then(|(file, line)| line.parse::<u32>().ok().map(|line| (file, Some(line))))
+                .unwrap_or((arg, None));
+            crate::flow::format_pdg(&root.join(file), line)
+        }
+        "taint" => crate::flow::format_taint(&root.join(arg)),
         "wiki" => write_wiki(root),
         "affected" => affected_text(root, arg),
         "detect_changes" => detect_changes_text(root, arg),
