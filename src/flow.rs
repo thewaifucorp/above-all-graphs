@@ -191,8 +191,10 @@ pub struct Cfg {
     pub uses: Vec<Use>,
     /// Every call site.
     pub calls: Vec<Call>,
-    /// `(line, identifiers read)` for each explicit `return`. A Rust tail
-    /// expression is not a `return` statement and is not captured here.
+    /// `(line, identifiers read)` for each value the function hands back:
+    /// every explicit `return`, plus the tail expression of a Rust body,
+    /// followed through the arms of a tail `if`/`match` to the expression
+    /// each arm actually yields.
     pub returns: Vec<(u32, Vec<String>)>,
 }
 
@@ -1056,6 +1058,97 @@ impl Cfg {
     }
 }
 
+/// Trailing node kinds that are statements rather than the value a Rust block
+/// evaluates to. Everything else in tail position is what the block hands back.
+fn is_statement_kind(kind: &str) -> bool {
+    kind.ends_with("_statement")
+        || kind.ends_with("_declaration")
+        || kind.ends_with("_item")
+        || matches!(kind, "line_comment" | "block_comment" | "attribute")
+}
+
+/// Whether a trailing node is the block's value rather than a discarded
+/// statement. The semicolon is the whole distinction in Rust, so it is what
+/// gets checked.
+fn yields_value(node: &tree_sitter_language_pack::Node, source: &str) -> bool {
+    if node.kind() == "expression_statement" {
+        return !text(node, source)
+            .unwrap_or_default()
+            .trim_end()
+            .ends_with(';');
+    }
+    !is_statement_kind(node.kind().as_str())
+}
+
+/// Records what a Rust body yields without saying `return`.
+///
+/// The tail of a block is a value, and a tail `if`/`match` yields whatever its
+/// taken arm yields, so each arm is followed to the expression it ends on.
+/// Without this a `fn f(x: &str) -> String { escape(x) }` looks like a function
+/// that returns nothing, and every caller loses the value it just received.
+fn collect_tail_returns(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    returns: &mut Vec<(u32, Vec<String>)>,
+) {
+    match node.kind().as_str() {
+        "block" | "unsafe_block" | "async_block" | "try_block" | "match_block" => {
+            let Some(tail) = last_named_child(node) else {
+                return;
+            };
+            if node.kind() == "match_block" || yields_value(&tail, source) {
+                collect_tail_returns(&tail, source, returns);
+            }
+        }
+        // A tail `if`/`match` parses as an expression statement without the
+        // semicolon that would discard its value; an `else` wraps its block.
+        "expression_statement" | "else_clause" => {
+            if let Some(inner) = last_named_child(node) {
+                collect_tail_returns(&inner, source, returns);
+            }
+        }
+        "if_expression" => {
+            for field in ["consequence", "alternative"] {
+                if let Some(branch) = node.child_by_field_name(field) {
+                    collect_tail_returns(&branch, source, returns);
+                }
+            }
+        }
+        "match_expression" => {
+            let Some(body) = node.child_by_field_name("body") else {
+                return;
+            };
+            for index in 0..u32::try_from(body.named_child_count()).unwrap_or(u32::MAX) {
+                if let Some(arm) = body.named_child(index)
+                    && arm.kind() == "match_arm"
+                    && let Some(value) = arm.child_by_field_name("value")
+                {
+                    collect_tail_returns(&value, source, returns);
+                }
+            }
+        }
+        // A `return` in tail position is already recorded by the CFG walk.
+        "return_expression" | "return_statement" => {}
+        _ => {
+            let mut identifiers = Vec::new();
+            collect_identifiers(node, source, &mut identifiers);
+            if !identifiers.is_empty() {
+                returns.push((line_of(node), identifiers));
+            }
+        }
+    }
+}
+
+fn last_named_child(
+    node: &tree_sitter_language_pack::Node,
+) -> Option<tree_sitter_language_pack::Node> {
+    let count = u32::try_from(node.named_child_count()).ok()?;
+    (0..count)
+        .rev()
+        .filter_map(|index| node.named_child(index))
+        .find(|child| !matches!(child.kind().as_str(), "line_comment" | "block_comment"))
+}
+
 /// Node kinds that end a basic block, and what they mean.
 fn terminator_exit(kind: &str) -> Option<BlockExit> {
     match kind {
@@ -1136,7 +1229,11 @@ pub fn analyze(file_path: &str, source: &str) -> Result<Vec<Cfg>> {
         .into_iter()
         .filter_map(|(name, function)| {
             let body = function.child_by_field_name("body")?;
-            Some(build_cfg(&name, &function, &body, source))
+            let mut cfg = build_cfg(&name, &function, &body, source);
+            if language == "rust" {
+                collect_tail_returns(&body, source, &mut cfg.returns);
+            }
+            Some(cfg)
         })
         .collect())
 }
@@ -2326,6 +2423,81 @@ mod tests {
             cfg.blocks
                 .iter()
                 .any(|block| block.exit == BlockExit::Return)
+        );
+    }
+
+    #[test]
+    fn a_rust_tail_expression_is_a_return() {
+        let returns = cfg_of("a.rs", "fn run(x: i32) -> i32 { x }", "run").returns;
+        assert_eq!(
+            returns,
+            vec![(1, vec!["x".to_string()])],
+            "the value a body ends on is what the function hands back"
+        );
+    }
+
+    #[test]
+    fn every_arm_of_a_tail_match_is_a_return() {
+        let cfg = cfg_of(
+            "a.rs",
+            "fn run(left: i32, right: i32, flag: bool) -> i32 {\n    match flag {\n        true => left,\n        false => right,\n    }\n}",
+            "run",
+        );
+        let returned: Vec<&str> = cfg
+            .returns
+            .iter()
+            .flat_map(|(_, names)| names.iter().map(String::as_str))
+            .collect();
+        assert!(
+            returned.contains(&"left") && returned.contains(&"right"),
+            "an arm yields the value the match yields: {:?}",
+            cfg.returns
+        );
+    }
+
+    #[test]
+    fn a_tail_if_yields_through_both_branches_and_a_trailing_statement_is_not_a_value() {
+        let cfg = cfg_of(
+            "a.rs",
+            "fn run(value: i32, other: i32, flag: bool) -> i32 {\n    if flag {\n        value\n    } else {\n        other\n    }\n}",
+            "run",
+        );
+        let returned: Vec<&str> = cfg
+            .returns
+            .iter()
+            .flat_map(|(_, names)| names.iter().map(String::as_str))
+            .collect();
+        assert!(
+            returned.contains(&"value") && returned.contains(&"other"),
+            "both branches are tail positions: {:?}",
+            cfg.returns
+        );
+        assert!(
+            cfg_of("a.rs", "fn run(x: i32) { log(x); }", "run")
+                .returns
+                .is_empty(),
+            "a trailing statement is not a returned value"
+        );
+    }
+
+    #[test]
+    fn a_rust_sanitizer_is_recognized_through_its_tail_expression() {
+        let program = program_of(
+            "rust-tail",
+            &[(
+                "a.rs",
+                "fn clean(value: String) -> String {\n    escape(value)\n}\n\
+                 fn handle(req: String) -> String {\n    let raw = std::env::var(req).unwrap();\n    let safe = clean(raw);\n    Command::new(safe)\n}\n",
+            )],
+            2,
+        );
+        assert!(
+            program
+                .summary("a.rs", "clean")
+                .expect("a summary for clean")
+                .sanitizer,
+            "a tail call through a sanitizer makes one: {:?}",
+            program.summary("a.rs", "clean")
         );
     }
 

@@ -36,8 +36,13 @@ Each carries:
   computed from post-dominance over this function's CFG.
 - **Parameters and returns** — declared parameter names in order (`self`/`this`
   excluded, since a caller does not pass it at a position) and the names each
-  explicit `return` hands back. These are what a caller's argument and
-  assignment are matched against.
+  returned value hands back. These are what a caller's argument and
+  assignment are matched against. A returned value is every explicit `return`
+  plus a Rust tail expression: the value a body ends on is what the function
+  returns, and a tail `if`/`match` is followed into each arm, so
+  `fn clean(v: String) -> String { escape(v) }` is recognized as a sanitizer
+  the same way its `return`-writing twin is. The semicolon is the whole
+  distinction — `log(v);` in tail position hands nothing back.
 - **Calls** — each call site with the identifiers passed to it, grouped per
   positional argument. `f(a.b, 2, c)` gives `[["a"], [], ["c"]]`: a literal
   keeps its slot, so an argument can be matched to the parameter at the same
@@ -155,9 +160,6 @@ long fuzzy list produces findings nobody reads.
 
 ## Not yet built
 
-- A Rust tail expression is not a `return` statement and is not recorded as one,
-  so a function that returns its parameter without writing `return` has no
-  return-value summary.
 - Nothing is field- or container-sensitive, in a callee any more than in a
   caller, and dynamic dispatch is only as narrow as the call graph made it.
 - A parameter's flow is summarized one position at a time; a value that only

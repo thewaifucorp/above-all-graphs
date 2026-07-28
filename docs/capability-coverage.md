@@ -178,11 +178,14 @@ P2 gates expand reach after the core is measurable and dependable.
    suppressed flow is reported as suppressed rather than disappearing. Bounds are
    stated: 2 call hops by default, 400 joined functions, 8 rounds of
    assignment-chasing. See [flow](flow.md).
+   A returned value is every explicit `return` plus a Rust tail expression,
+   followed through the arms of a tail `if`/`match`, because the value a body
+   ends on is what a caller receives.
    Not claimed: this is not security analysis. The data flow is syntactic and
    line-granular, aliasing through references, fields, and containers is not
-   tracked in a callee any more than in a caller, a Rust tail expression is not
-   recorded as a return, a finding is a place to look rather than a proven
-   vulnerability, and no findings is not evidence of safety. Reaching
+   tracked in a callee any more than in a caller, a finding is a place to look
+   rather than a proven vulnerability, and no findings is not evidence of
+   safety. Reaching
    definitions over-approximates what may reach and under-approximates what
    does.
 
