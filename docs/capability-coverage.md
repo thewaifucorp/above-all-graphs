@@ -126,6 +126,16 @@ P2 gates expand reach after the core is measurable and dependable.
 - 5. Add statement-level control-flow and data-flow foundations: basic blocks,
    CFG, def-use, control/data dependence, PDG queries, and provenance-aware
    source-to-sink taint findings, starting with TypeScript and JavaScript.
+   Landed: basic blocks, a control-flow graph with typed edges (sequential,
+   true, false, back), definitions and uses, reaching definitions, def-use
+   chains, and control dependence from post-dominance — for Rust, JavaScript,
+   TypeScript, Python, Java, C#, and Go, callable as `aag flow <file>` and
+   covered by tests. See [flow](flow.md).
+   Still open: a PDG query surface over MCP, and provenance-aware
+   source-to-sink taint findings. Nothing here is security analysis yet, and
+   the data flow is syntactic — aliasing through references, fields, and
+   containers is not tracked, so reaching definitions over-approximates what
+   may reach and under-approximates what does.
 
 ### P1 — complete workflows and heterogeneous graphs
 

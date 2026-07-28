@@ -130,6 +130,16 @@ pub enum Command {
         path: PathBuf,
     },
 
+    /// Show statement-level control and data flow for one file: basic blocks,
+    /// CFG edges, def-use chains, and what guards each block.
+    Flow {
+        /// File to analyze.
+        file: PathBuf,
+        /// Only this function.
+        #[arg(long, default_value = "")]
+        function: String,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.

@@ -16,6 +16,7 @@ pub mod error;
 pub mod explore;
 pub mod export;
 pub mod federation;
+pub mod flow;
 pub mod hook;
 pub mod hub;
 pub mod impact;

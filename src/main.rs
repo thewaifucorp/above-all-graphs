@@ -51,6 +51,9 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Explore { query, path } => aag::explore::run(&path, &query)?,
         Command::Impact { symbol, path } => aag::impact::run(&path, &symbol)?,
+        Command::Flow { file, function } => {
+            println!("{}", aag::flow::format_file(&file, &function)?);
+        }
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }
