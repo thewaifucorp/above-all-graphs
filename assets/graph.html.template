@@ -193,6 +193,8 @@
   #filemodal .fm-line.hl { background: var(--accent-dim); }
   #filemodal .fm-no { width: 48px; text-align: right; padding-right: 12px; color: var(--text-dim); user-select: none; flex-shrink: 0; }
   #filemodal .fm-code { white-space: pre; padding-right: 16px; color: #c4c9d4; }
+  .fm-missing { padding: 28px; color: var(--text-dim, #9a978f); line-height: 1.7; }
+  .fm-missing code { color: var(--accent, #ffc600); }
   .tk-k { color: #c792ea; }
   .tk-s { color: #8fd48f; }
   .tk-c { color: #5b6273; font-style: italic; }
@@ -296,8 +298,39 @@
 <script>/*__GRAPHOLOGY_JS__*/</script>
 <script>/*__SIGMA_JS__*/</script>
 <script>
-const DATA = /*__GRAPH_DATA__*/;
-const FILES = /*__FILES_DATA__*/;
+const RAW_DATA = /*__GRAPH_DATA__*/;
+const RAW_FILES = /*__FILES_DATA__*/;
+const FILES = RAW_FILES.files || RAW_FILES;
+const FILES_OMITTED = RAW_FILES.omitted || 0;
+const DATA = decodePayload(RAW_DATA);
+
+/// Expands the columnar page payload into the object shape the rest of this
+/// page works with. The payload is columnar because an edge as four integers
+/// in parallel arrays costs a quarter of what the same edge costs as an
+/// object with four named keys, and the edge list dominates the page — see
+/// `docs/graph-experience.md`. Anything else (an older page, a hand-edited
+/// payload) passes through untouched.
+function decodePayload(raw) {
+  if (!raw || raw.format !== "columnar-1") return raw;
+  const dict = raw.dict, n = raw.nodes, e = raw.edges;
+  const nodes = n.id.map((id, i) => ({
+    id,
+    kind: dict.nodeKind[n.kind[i]],
+    name: n.name[i],
+    file: dict.file[n.file[i]],
+    startLine: n.startLine[i],
+    endLine: n.endLine[i],
+    community: n.community[i],
+    degree: n.degree[i],
+  }));
+  const edges = e.source.map((source, i) => ({
+    source,
+    target: e.target[i],
+    kind: dict.edgeKind[e.kind[i]],
+    confidence: dict.confidence[e.confidence[i]],
+  }));
+  return Object.assign({}, raw, { nodes, edges });
+}
 
 // Module (community) colors — muted, readable on the dark surface without
 // reading as neon. Assigned by module size; wraps past 16.
@@ -928,8 +961,16 @@ function highlightLine(raw, lang, st) {
 
 function openFile(file, startLine, endLine) {
   const content = FILES[file];
-  if (content === undefined) return;
   document.getElementById("fm-title").textContent = file;
+  // Beyond the page's source budget a file's text is not embedded. Say so and
+  // give the reader the location, rather than opening an empty modal.
+  if (content === undefined) {
+    document.getElementById("fm-body").innerHTML =
+      `<div class="fm-missing">Source not embedded in this page &mdash; ${FILES_OMITTED} file(s) exceeded the offline source budget.` +
+      `<br><br><code>${escapeHtml(file)}</code>${startLine ? `, line ${startLine}` : ""}<br><br>Open it in your editor to read it.</div>`;
+    document.getElementById("filemodal").style.display = "flex";
+    return;
+  }
   const lang = langOf(file);
   const st = { block: false };
   const lines = content.split("\n");
