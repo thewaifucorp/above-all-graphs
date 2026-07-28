@@ -335,11 +335,11 @@ pub struct ShapeFinding {
 
 /// Compares each declared response shape with what its handler returns.
 ///
-/// Syntactic and shallow, on purpose: the declared schema's top-level property
-/// names are compared with the keys of object literals the handler returns or
-/// passes to a JSON responder. A field the handler copies from a variable it
-/// built elsewhere reads as missing, which is why a finding is a place to look
-/// rather than a defect.
+/// Syntactic on purpose, but not shallow: the declared schema is flattened to
+/// dotted field paths (`data.id`) through `$ref`s and array items, and the
+/// handler's response is flattened the same way, following a body it assembled
+/// in a local variable before answering with it. A finding is still a place to
+/// look rather than a defect.
 ///
 /// # Errors
 /// As [`surfaces`], plus a parse error when a handler's file cannot be read.
@@ -440,41 +440,72 @@ fn response_fields(
     schema_properties(schema, schemas)
 }
 
-/// Resolves a schema — inline, a `$ref`, or an array of either — to its
-/// top-level property names.
+/// How deep a nested schema or response body is flattened. A contract that
+/// nests deeper than this is compared down to the cut and no further, which
+/// keeps a recursive `$ref` from turning into an infinite field list.
+const SHAPE_DEPTH: usize = 4;
+
+/// Resolves a schema — inline, a `$ref`, or an array of either — to the dotted
+/// field paths it declares, each with whether the contract marks it required.
 fn schema_properties(schema: &Value, schemas: &BTreeMap<&str, &Node>) -> BTreeMap<String, bool> {
-    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
-        let name = reference.rsplit('/').next().unwrap_or_default();
-        let Some(target) = schemas.get(name) else {
-            return BTreeMap::new();
-        };
-        let Some(body) = target
-            .description
-            .as_deref()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-        else {
-            return BTreeMap::new();
-        };
-        return schema_properties(&body, schemas);
+    let mut out = BTreeMap::new();
+    let mut visiting = BTreeSet::new();
+    flatten_schema(schema, schemas, "", 0, &mut visiting, &mut out);
+    out
+}
+
+/// Walks a schema into `out`, keyed by dotted path. `visiting` holds the
+/// `$ref` names on the current branch, so a schema that refers to itself stops
+/// at the cycle instead of unrolling forever.
+fn flatten_schema(
+    schema: &Value,
+    schemas: &BTreeMap<&str, &Node>,
+    prefix: &str,
+    depth: usize,
+    visiting: &mut BTreeSet<String>,
+    out: &mut BTreeMap<String, bool>,
+) {
+    if depth > SHAPE_DEPTH {
+        return;
     }
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let name = reference.rsplit('/').next().unwrap_or_default().to_string();
+        if !visiting.insert(name.clone()) {
+            return;
+        }
+        if let Some(body) = schemas
+            .get(name.as_str())
+            .and_then(|target| target.description.as_deref())
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        {
+            flatten_schema(&body, schemas, prefix, depth, visiting, out);
+        }
+        visiting.remove(&name);
+        return;
+    }
+    // An array of objects declares the item's fields at the same path: a list
+    // response and a single one disagree about cardinality, not about names.
     if let Some(items) = schema.get("items") {
-        return schema_properties(items, schemas);
+        flatten_schema(items, schemas, prefix, depth, visiting, out);
+        return;
     }
     let required: BTreeSet<&str> = schema
         .get("required")
         .and_then(Value::as_array)
         .map(|names| names.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .map(|properties| {
-            properties
-                .keys()
-                .map(|name| (name.clone(), required.contains(name.as_str())))
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+    for (name, property) in properties {
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        out.insert(path.clone(), required.contains(name.as_str()));
+        flatten_schema(property, schemas, &path, depth + 1, visiting, out);
+    }
 }
 
 /// Keys of the object literals a handler returns, or hands to a JSON responder.
@@ -495,8 +526,16 @@ fn returned_fields(file: &Path, handler: &str) -> Result<BTreeSet<String>> {
     let Some(tree) = parser.parse(&source) else {
         return Ok(BTreeSet::new());
     };
+    let mut locals = BTreeMap::new();
     let mut fields = BTreeSet::new();
-    collect_returned(&tree.root_node(), &source, handler, false, &mut fields);
+    collect_returned(
+        &tree.root_node(),
+        &source,
+        handler,
+        false,
+        &mut locals,
+        &mut fields,
+    );
     Ok(fields)
 }
 
@@ -518,14 +557,29 @@ const RESPONDERS: &[&str] = &[
     "return_json",
 ];
 
-/// Walks for object literals a handler returns. `inside` becomes true once the
+/// Statement kinds that bind a value to a name, with the fields holding the
+/// name and the value. A handler that assembles its body before answering with
+/// it binds it through one of these.
+const BINDING_KINDS: &[(&str, &str, &str)] = &[
+    ("variable_declarator", "name", "value"),
+    ("let_declaration", "pattern", "value"),
+    ("assignment", "left", "right"),
+    ("assignment_expression", "left", "right"),
+    ("short_var_declaration", "left", "right"),
+    ("augmented_assignment", "left", "right"),
+];
+
+/// Walks for the response a handler produces. `inside` becomes true once the
 /// walk is within the named function, so an object literal elsewhere in the file
-/// is not read as this handler's response.
+/// is not read as this handler's response. Bindings are recorded as the walk
+/// passes them, so `const body = {…}` is already known by the time
+/// `res.json(body)` asks what `body` holds.
 fn collect_returned(
     node: &tree_sitter_language_pack::Node,
     source: &str,
     handler: &str,
     inside: bool,
+    locals: &mut BTreeMap<String, tree_sitter_language_pack::Node>,
     fields: &mut BTreeSet<String>,
 ) {
     let mut inside = inside;
@@ -538,7 +592,8 @@ fn collect_returned(
         inside = true;
     }
     if inside {
-        let interesting = matches!(
+        record_binding(node, source, locals);
+        let responded = matches!(
             node.kind().as_str(),
             "return_statement" | "return_expression"
         ) || matches!(
@@ -550,42 +605,166 @@ fn collect_returned(
             .and_then(|target| node_text(&target, source))
             .and_then(|text| text.rsplit(['.', ':']).next())
             .is_some_and(|tail| RESPONDERS.contains(&tail.trim().to_ascii_lowercase().as_str()));
-        if interesting {
-            collect_object_keys(node, source, fields);
+        if responded {
+            let mut seen = BTreeSet::new();
+            // The body is what a `return` holds, or what a responder is passed —
+            // never the responder's own name, so `res.json(body)` asks about
+            // `body` and not about `res`.
+            let carrier = ["arguments", "argument_list", "parameters"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .unwrap_or_else(|| node.clone());
+            for index in 0..u32::try_from(carrier.named_child_count()).unwrap_or(u32::MAX) {
+                if let Some(child) = carrier.named_child(index) {
+                    follow_value(&child, source, "", 0, locals, &mut seen, fields);
+                }
+            }
         }
     }
     for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
         if let Some(child) = node.named_child(index) {
-            collect_returned(&child, source, handler, inside, fields);
+            collect_returned(&child, source, handler, inside, locals, fields);
         }
     }
 }
 
-/// Keys of every object/dictionary/struct literal under `node`.
+/// Remembers `name = value` when the name is a plain identifier. A destructured
+/// or indexed target is skipped rather than guessed at.
+fn record_binding(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    locals: &mut BTreeMap<String, tree_sitter_language_pack::Node>,
+) {
+    let Some((_, name_field, value_field)) = BINDING_KINDS
+        .iter()
+        .find(|(kind, _, _)| *kind == node.kind())
+    else {
+        return;
+    };
+    let (Some(name), Some(value)) = (
+        node.child_by_field_name(name_field),
+        node.child_by_field_name(value_field),
+    ) else {
+        return;
+    };
+    let Some(name) = node_text(&name, source).map(str::trim) else {
+        return;
+    };
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return;
+    }
+    locals.insert(name.to_string(), value);
+}
+
+/// Dotted paths of every object/dictionary/struct literal under `node`.
+///
+/// A nested literal extends the path (`data.id`), which is what makes the
+/// comparison mean something beyond the top level, and a value that is a plain
+/// identifier is followed through the binding that produced it, once — a name
+/// that resolves to itself stops rather than looping.
 fn collect_object_keys(
     node: &tree_sitter_language_pack::Node,
     source: &str,
+    prefix: &str,
+    depth: usize,
+    locals: &BTreeMap<String, tree_sitter_language_pack::Node>,
+    seen: &mut BTreeSet<String>,
     fields: &mut BTreeSet<String>,
 ) {
+    if depth > SHAPE_DEPTH {
+        return;
+    }
     if matches!(
         node.kind().as_str(),
-        "pair" | "field_initializer" | "keyword_argument" | "shorthand_property_identifier"
+        "pair" | "field_initializer" | "keyword_argument"
     ) {
-        let key = node
-            .child_by_field_name("key")
-            .or_else(|| node.child_by_field_name("field"))
-            .or_else(|| node.child_by_field_name("name"))
+        let key = ["key", "field", "name"]
+            .into_iter()
+            .find_map(|field| node.child_by_field_name(field))
             .and_then(|key| node_text(&key, source))
-            .or_else(|| node_text(node, source))
-            .map(|text| text.trim().trim_matches(['"', '\'', '`']).to_string());
-        if let Some(key) = key.filter(|key| !key.is_empty() && !key.contains(char::is_whitespace)) {
-            fields.insert(key);
+            .map(clean_key);
+        if let Some(key) = key.filter(|key| is_field_name(key)) {
+            let path = join_path(prefix, &key);
+            fields.insert(path.clone());
+            if let Some(value) = ["value", "right", "expression"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+            {
+                follow_value(&value, source, &path, depth + 1, locals, seen, fields);
+            }
         }
+        return;
+    }
+    // `{ ...base, id }`: a spread merges the other object's fields at this
+    // level, so the binding behind it is walked with the same prefix.
+    if matches!(
+        node.kind().as_str(),
+        "spread_element" | "dictionary_splat" | "base_field_initializer"
+    ) {
+        if let Some(inner) = node.named_child(0) {
+            follow_value(&inner, source, prefix, depth, locals, seen, fields);
+        }
+        return;
+    }
+    // `{ id }` and Rust's `Pet { id }`: the key is the whole node, and the
+    // binding behind that name is what it carries.
+    if matches!(
+        node.kind().as_str(),
+        "shorthand_property_identifier" | "shorthand_field_initializer"
+    ) {
+        let key = node_text(node, source).map(clean_key);
+        if let Some(key) = key.filter(|key| is_field_name(key)) {
+            let path = join_path(prefix, &key);
+            fields.insert(path.clone());
+            if let Some(bound) = locals.get(&key).filter(|_| seen.insert(key.clone())) {
+                collect_object_keys(bound, source, &path, depth + 1, locals, seen, fields);
+            }
+        }
+        return;
     }
     for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
         if let Some(child) = node.named_child(index) {
-            collect_object_keys(&child, source, fields);
+            collect_object_keys(&child, source, prefix, depth, locals, seen, fields);
         }
+    }
+}
+
+/// A field's value: an identifier is resolved through its binding, anything
+/// else is walked for the literal it may contain.
+fn follow_value(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    prefix: &str,
+    depth: usize,
+    locals: &BTreeMap<String, tree_sitter_language_pack::Node>,
+    seen: &mut BTreeSet<String>,
+    fields: &mut BTreeSet<String>,
+) {
+    if node.kind() == "identifier" {
+        let Some(name) = node_text(node, source).map(str::to_string) else {
+            return;
+        };
+        if let Some(bound) = locals.get(&name).filter(|_| seen.insert(name.clone())) {
+            collect_object_keys(bound, source, prefix, depth, locals, seen, fields);
+        }
+        return;
+    }
+    collect_object_keys(node, source, prefix, depth, locals, seen, fields);
+}
+
+fn clean_key(text: &str) -> String {
+    text.trim().trim_matches(['"', '\'', '`']).to_string()
+}
+
+fn is_field_name(key: &str) -> bool {
+    !key.is_empty() && !key.contains(char::is_whitespace)
+}
+
+fn join_path(prefix: &str, key: &str) -> String {
+    if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
     }
 }
 
@@ -597,14 +776,15 @@ pub fn format_shape_check(root: &Path, filter: &str) -> Result<String> {
     let findings = shape_check(root, filter)?;
     if findings.is_empty() {
         return Ok(
-            "no response-shape differences found. The check is syntactic and compares \
-                   top-level fields only, so this is not proof the responses match."
+            "no response-shape differences found. The check is syntactic — a field \
+                   copied out of a call or a serializer is not read — so this is not \
+                   proof the responses match."
                 .to_string(),
         );
     }
     let mut out = vec![
-        "Declared response shapes against what the handler returns. Syntactic and \
-         top-level only: a finding is a place to look."
+        "Declared response shapes against what the handler returns, compared by \
+         field path. Syntactic: a finding is a place to look."
             .to_string(),
         String::new(),
     ];
@@ -697,7 +877,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join("openapi.yaml"),
-            "openapi: 3.0.0\ninfo:\n  title: Pets\n  version: '1'\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'\n  /pets/{id}:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: one pet\n  /archived:\n    get:\n      operationId: listArchived\n      responses:\n        '200':\n          description: never built\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [id, name]\n      properties:\n        id:\n          type: integer\n        name:\n          type: string\n        tag:\n          type: string\n",
+            "openapi: 3.0.0\ninfo:\n  title: Pets\n  version: '1'\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'\n  /pets/{id}:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: one pet\n  /archived:\n    get:\n      operationId: listArchived\n      responses:\n        '200':\n          description: never built\n  /orders:\n    get:\n      operationId: listOrders\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Order'\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [id, name]\n      properties:\n        id:\n          type: integer\n        name:\n          type: string\n        tag:\n          type: string\n    Order:\n      type: object\n      required: [id, customer]\n      properties:\n        id:\n          type: integer\n        customer:\n          type: object\n          required: [name]\n          properties:\n            name:\n              type: string\n            email:\n              type: string\n",
         )
         .unwrap();
         fs::write(
@@ -705,7 +885,8 @@ mod tests {
             "function listPets(req, res) { return res.json({ id: 1, colour: 'red' }); }\n\
              function getPet(req, res) { return res.json({ id: 1 }); }\n\
              function health(req, res) { return res.json({ ok: true }); }\n\
-             function wire(app) {\n  app.get('/pets', listPets);\n  app.get('/pets/:id', getPet);\n  app.get('/health', health);\n}\n",
+             function listOrders(req, res) {\n  const customer = { email: 'ada@example.com' };\n  const base = { id: 1 };\n  const body = { ...base, customer };\n  return res.json(body);\n}\n\
+             function wire(app) {\n  app.get('/pets', listPets);\n  app.get('/pets/:id', getPet);\n  app.get('/health', health);\n  app.get('/orders', listOrders);\n}\n",
         )
         .unwrap();
         fs::write(
@@ -826,6 +1007,38 @@ mod tests {
         assert!(
             !pets.missing.contains(&"id".to_string()),
             "`id` is returned, so it is not missing: {pets:?}"
+        );
+    }
+
+    #[test]
+    fn the_shape_check_follows_a_body_built_in_a_variable_and_compares_nested_fields() {
+        let root = indexed_root();
+
+        let findings = shape_check(&root, "").unwrap();
+
+        let orders = findings
+            .iter()
+            .find(|finding| finding.endpoint == "GET /orders")
+            .unwrap_or_else(|| panic!("a finding for GET /orders: {findings:?}"));
+        assert!(
+            orders.missing.contains(&"customer.name".to_string()),
+            "the nested required field is never set: {orders:?}"
+        );
+        assert!(
+            orders
+                .missing_required
+                .contains(&"customer.name".to_string()),
+            "and the contract marks it required: {orders:?}"
+        );
+        assert!(
+            !orders.missing.contains(&"id".to_string())
+                && !orders.missing.contains(&"customer".to_string()),
+            "`id` arrives by spread, `customer` through a variable of its own, \
+             and the body itself is a variable: {orders:?}"
+        );
+        assert!(
+            !orders.extra.contains(&"customer.email".to_string()),
+            "a declared nested field is not an extra one: {orders:?}"
         );
     }
 

@@ -205,14 +205,19 @@ P2 gates expand reach after the core is measurable and dependable.
    Outbound HTTP calls become `Calls` edges into the endpoint they request:
    EXTRACTED for a literal match, INFERRED once path parameters are flattened,
    AMBIGUOUS when several endpoints share that shape.
+   The shape check compares dotted field paths, not just the top level: the
+   declared schema is flattened through `$ref`s and array items, and the
+   handler's response is followed to where it was assembled — a body bound to a
+   local variable, a field holding another variable, an object spread — so
+   `customer.name` is a finding and no longer silence. Recursion stops at the
+   first name that resolves back to itself, and nesting is compared four levels
+   deep. A tool invocation is linked to the definition it names by priority 7.
    Not claimed: recognition is by name across a fixed set of frameworks and
    clients, so a house-built router or client is invisible until its shape is
-   added. A path built at runtime is skipped rather than guessed. The shape check
-   is syntactic and top-level — a handler that builds its response in a variable
-   reads as returning nothing and is skipped, a nested field is not compared, and
-   a finding is a place to look. Tool invocations are not linked to tool
-   definitions: a dispatcher matching a name to a branch is a link only the
-   string can make.
+   added. A path built at runtime is skipped rather than guessed. The shape
+   check is still syntactic — a field copied out of a call, a model, or a
+   serializer reads as missing, a key computed at runtime is not a name it can
+   read, and a finding is a place to look.
 - 7. **Closed.** Cross-repository protocol links without merging local
    databases: API producer to client, package export to import, event producer to
    consumer, schema to model, and MCP tool definition to invocation, as

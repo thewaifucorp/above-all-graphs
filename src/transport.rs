@@ -143,7 +143,18 @@ pub fn serve(root: &Path, options: &Options) -> Result<()> {
             context: "MCP HTTP bind failed",
             detail: format!("`{}` is not an address", options.bind),
         })?;
-    let server = Server::http(address).map_err(|error| Error::Protocol {
+    let listener = std::net::TcpListener::bind(address).map_err(|error| Error::Protocol {
+        context: "MCP HTTP bind failed",
+        detail: error.to_string(),
+    })?;
+    serve_on(listener, &root, options)
+}
+
+/// Serves on a listener that is already bound. Splitting this out is what lets
+/// a caller — a test, or a supervisor handing over a socket — own the bind, so
+/// there is no window between learning a port and listening on it.
+fn serve_on(listener: std::net::TcpListener, root: &Path, options: &Options) -> Result<()> {
+    let server = Server::from_listener(listener, None).map_err(|error| Error::Protocol {
         context: "MCP HTTP bind failed",
         detail: error.to_string(),
     })?;
@@ -164,7 +175,7 @@ pub fn serve(root: &Path, options: &Options) -> Result<()> {
 
     let state = Arc::new(Mutex::new(State::default()));
     for request in server.incoming_requests() {
-        dispatch(&root, options, &state, request);
+        dispatch(root, options, &state, request);
     }
     Ok(())
 }
@@ -331,11 +342,21 @@ fn admit(options: &Options, state: &Arc<Mutex<State>>, session: Option<&str>) ->
 }
 
 /// Reads a body, refusing one over the ceiling instead of allocating it.
+/// How much of an oversized body is read and thrown away before answering.
+/// Closing a socket with unread bytes still in it is a TCP reset, and a reset
+/// destroys the response already written — so the refusal has to be drained
+/// for the client to ever see it. Past this the client is the one misbehaving.
+const DRAIN_CEILING: u64 = 1 << 20;
+
 fn read_body(request: &mut Request, max_body: usize) -> Option<String> {
     if request
         .body_length()
         .is_some_and(|length| length > max_body)
     {
+        let _ = std::io::copy(
+            &mut request.as_reader().take(DRAIN_CEILING),
+            &mut std::io::sink(),
+        );
         return None;
     }
     let mut body = String::new();
@@ -477,23 +498,17 @@ mod tests {
         )
         .unwrap();
 
-        // Bind here to learn the port, then hand the listener's address to the
-        // server: asking for port 0 inside the thread would leave the test with
-        // nothing to connect to.
-        let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
+        // Bind here and hand the live listener to the server. Learning a port
+        // and then rebinding it leaves a window where a second test can take
+        // the same number, and one of the two servers then fails to start —
+        // which shows up as a connection reset in whichever test is unlucky.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
         let options = Options { port, ..options };
         let served_root = root.clone();
         std::thread::spawn(move || {
-            let _ = serve(&served_root, &options);
+            let _ = serve_on(listener, &served_root, &options);
         });
-        for _ in 0..100 {
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
         (port, root)
     }
 

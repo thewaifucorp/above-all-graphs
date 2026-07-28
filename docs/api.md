@@ -108,26 +108,38 @@ contract's spelling is the name that shows, since that is what was published.
 ## The shape check
 
 For each endpoint a contract declares with a success-response schema, the
-declared top-level field names are compared against the keys of the object
-literals its handler returns or hands to a JSON responder (`res.json`,
-`jsonify`, `send`, …). A `$ref` is followed into the schema it names, and an
-array schema is unwrapped to its items.
+declared field names are compared against the keys of the object literals its
+handler returns or hands to a JSON responder (`res.json`, `jsonify`, `send`, …).
+A `$ref` is followed into the schema it names, and an array schema is unwrapped
+to its items.
+
+Both sides are flattened to dotted paths, so nesting is compared rather than
+skipped:
 
 ```text
-GET /pets — listPets
-     declared but never returned: name, tag
-     of those, required by the contract: name
-     returned but not declared: colour
+GET /orders — listOrders
+     declared but never returned: customer.name
+     of those, required by the contract: customer.name
 ```
 
-It is syntactic and top-level, which means:
+A handler rarely writes its response as one literal in the `return`, so the
+body is followed to where it was assembled:
 
-- A handler that builds its response in a variable, spreads another object, or
-  returns a serialized model reads as returning nothing, and is skipped rather
-  than reported as missing everything.
-- A nested field is not compared. Only the top level of the declared schema is.
-- A field the handler copies from elsewhere reads as missing. That is a place to
-  look, not a defect.
+- A body bound to a local variable is followed through the binding
+  (`const body = {…}; res.json(body)`).
+- A field whose value is another local variable is followed too, and its keys
+  land under that field's path (`{ customer }` gives `customer.name`).
+- A spread merges the other object's fields at the same level
+  (`{ ...base, id }`).
+- Recursion stops at the first name that resolves back to itself, and nesting
+  is compared four levels deep — a contract that nests deeper is compared down
+  to the cut and no further.
+
+It is still syntactic, which means:
+
+- A field the handler copies from a call, a model, or a serializer reads as
+  missing. That is a place to look, not a defect.
+- A key computed at runtime (`{ [name]: value }`) is not a name this can read.
 
 An endpoint with no declared schema produces no finding at all — there is
 nothing to compare, and inventing a comparison would be worse than silence.
@@ -139,9 +151,10 @@ nothing to compare, and inventing a comparison would be worse than silence.
 - `api impact` reports the handler's blast radius through the existing symbol
   graph; it does not know about consumers outside this repository, and says so
   when a declared contract has no local caller.
-- Tool *invocations* are not linked to tool definitions. A dispatcher that
-  matches a name to a branch is a link only the string can make, and the graph
-  does not claim it.
+- A tool invocation is linked to the definition it names — `mcp.call_tool("x")`
+  gets a `Calls` edge into `TOOL x` (see [federation](federation.md)) — but the
+  link is the string agreeing. A dispatcher that builds the name at runtime
+  matches nothing, so a missing link is not evidence that no call exists.
 - Recognition is by name across a fixed set of frameworks and client libraries.
   A house-built router or client is invisible until its shape is added, and the
   route map saying "no HTTP endpoints found" means exactly that — not that the
