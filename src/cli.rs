@@ -183,6 +183,14 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// Live database catalogs: ingest one, and compare it with the DDL this
+    /// repository declares.
+    Db {
+        /// Which database operation.
+        #[command(subcommand)]
+        command: DbCommand,
+    },
+
     /// Outcome-backed work memory: record what was asked and answered, how it
     /// turned out, and review the lessons that repeat.
     Memory {
@@ -473,6 +481,35 @@ pub enum MemoryCommand {
     /// Review the lessons that repeated outcomes suggest.
     Lessons {
         /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Live database catalog operations.
+#[derive(Subcommand, Debug, Clone)]
+pub enum DbCommand {
+    /// Read a live `PostgreSQL` catalog into the graph: schemas, tables, views,
+    /// columns, constraints, indexes, and foreign keys.
+    ///
+    /// The connection string is used to connect and then dropped. Nodes are
+    /// filed under `postgres/<database>/<schema>`, which carries no host, user,
+    /// or password.
+    Scan {
+        /// `PostgreSQL` connection string. Defaults to `AAG_DATABASE_URL`, then
+        /// `DATABASE_URL`.
+        #[arg(long, default_value = "", env = "AAG_DATABASE_URL")]
+        url: String,
+
+        /// Repository root whose graph receives the catalog.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Compare the tables this repository's DDL declares with the ones an
+    /// ingested catalog actually has.
+    Drift {
+        /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },

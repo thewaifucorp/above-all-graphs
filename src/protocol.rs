@@ -526,6 +526,7 @@ const fn entity_type(kind: NodeKind) -> &'static str {
         NodeKind::DatabaseTable => "x-entity-database-table",
         NodeKind::InfraResource => "x-entity-infrastructure-resource",
         NodeKind::Component => "x-entity-component",
+        NodeKind::DatabaseColumn => "x-entity-database-column",
     }
 }
 

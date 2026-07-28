@@ -12,6 +12,7 @@ mod artifacts;
 pub mod bigbang;
 pub mod bindings;
 pub mod cli;
+pub mod database;
 pub mod docs;
 pub mod error;
 pub mod explore;

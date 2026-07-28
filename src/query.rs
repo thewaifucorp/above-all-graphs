@@ -339,13 +339,14 @@ fn label_kind(label: &str) -> Option<NodeKind> {
         "databasetable" | "database_table" | "table" => NodeKind::DatabaseTable,
         "infraresource" | "infra_resource" | "resource" => NodeKind::InfraResource,
         "component" => NodeKind::Component,
+        "databasecolumn" | "database_column" | "column" => NodeKind::DatabaseColumn,
         _ => return None,
     })
 }
 
 /// Every label the subset accepts, for an error message that teaches.
 const LABELS: &str = "File, Function, Struct, Method, Interface, Doc, Endpoint, Schema, \
-                      DatabaseTable, InfraResource, Component";
+                      DatabaseTable, InfraResource, Component, DatabaseColumn";
 
 /// Maps a relationship type onto an edge kind.
 fn relationship_kind(name: &str) -> Option<EdgeKind> {

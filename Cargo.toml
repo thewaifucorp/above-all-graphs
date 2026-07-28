@@ -32,6 +32,10 @@ notify = "8"
 notify-debouncer-mini = "0.7"
 tiny_http = "0.12"
 fastembed = { version = "5.17.3", optional = true }
+postgres = "0.19"
+tokio-postgres-rustls = "0.14.0"
+rustls = "0.23.42"
+webpki-roots = "1.0.9"
 
 [features]
 default = []

@@ -100,7 +100,7 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "cypher",
-        description: "Read-only pattern query over the graph, in a documented subset of Cypher: MATCH patterns (labels, relationship types, `*1..3` hops), WHERE, RETURN with count/DISTINCT/ORDER BY/SKIP/LIMIT. Anything outside the subset is an error that names what was expected. See docs/query.md.",
+        description: "Read-only pattern query over the graph, in a documented subset of Cypher: MATCH and OPTIONAL MATCH patterns (labels, relationship types, `*1..3` hops), WHERE, UNION, RETURN with count/collect/min/max/sum/avg, DISTINCT, ORDER BY, SKIP, LIMIT. Anything outside the subset is an error that names what was expected. See docs/query.md.",
         arg: "query",
         arg_description: "A query in the supported subset, e.g. MATCH (f:Function)-[:CALLS]->(g) WHERE f.file STARTS WITH 'src/' RETURN f.name, g.name LIMIT 20.",
         implemented: true,
@@ -121,7 +121,7 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "shape_check",
-        description: "Compares each declared response shape with the fields its handler actually returns. Syntactic and top-level only: a finding is a place to look, not a proven bug.",
+        description: "Compares each declared response shape with the fields its handler actually returns, by dotted field path (`customer.name`), following a body the handler assembled in a local variable. Syntactic: a finding is a place to look, not a proven bug.",
         arg: "endpoint",
         arg_description: "Optional substring to narrow which endpoints are checked; empty checks all.",
         implemented: true,
@@ -138,6 +138,13 @@ const TOOL_SPECS: &[ToolSpec] = &[
         description: "Cross-repository protocol links across a group: API producer to client, package export to import, event producer to consumer, schema to model, tool definition to invocation. Each graph is read separately and never merged; every link is a name agreeing across an ownership boundary and carries the evidence that produced it.",
         arg: "group",
         arg_description: "Group name, or `all` for every registered workspace.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "db_drift",
+        description: "Tables this repository's DDL declares against the tables an ingested live catalog actually has, both directions reported. Ingestion itself is CLI-only (`aag db scan --url`): a connection string passed through a tool call is a credential in a transcript.",
+        arg: "path",
+        arg_description: "Ignored; the drift report covers the indexed repository.",
         implemented: true,
     },
     ToolSpec {
@@ -600,6 +607,7 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "cypher" => crate::query::run_json(root, arg),
         "memory_recall" => crate::memory::recall_json(root, arg),
         "memory_lessons" => crate::memory::format_lessons(root, arg),
+        "db_drift" => crate::database::format_drift(root),
         "route_map" => crate::api::route_map(root, arg),
         "tool_map" => crate::api::tool_map(root, arg),
         "shape_check" => crate::api::format_shape_check(root, arg),

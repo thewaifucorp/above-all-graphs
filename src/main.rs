@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Api { command } => print_api(command)?,
+        Command::Db { command } => print_db(command)?,
         Command::Memory { command } => run_memory(command)?,
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
@@ -198,6 +199,15 @@ fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
         aag::cli::ApiView::Tools { filter, path } => aag::api::tool_map(&path, &filter)?,
         aag::cli::ApiView::Shapes { filter, path } => aag::api::format_shape_check(&path, &filter)?,
         aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn print_db(command: aag::cli::DbCommand) -> anyhow::Result<()> {
+    let text = match command {
+        aag::cli::DbCommand::Scan { url, path } => aag::database::scan(&path, &url)?,
+        aag::cli::DbCommand::Drift { path } => aag::database::format_drift(&path)?,
     };
     println!("{text}");
     Ok(())

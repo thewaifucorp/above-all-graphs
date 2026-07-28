@@ -249,9 +249,27 @@ P2 gates expand reach after the core is measurable and dependable.
    things, a declared `Order` and a class `Order` may be unrelated, and a path or
    event name built at runtime is never matched, so a missing link is not evidence
    that no call exists.
-- 8. Ingest live PostgreSQL catalogs, including schemas, tables, columns,
-   constraints, indexes, views, and foreign keys, with credentials kept out of
-   graph exports and logs.
+- 8. **Closed.** Live PostgreSQL catalog ingestion (`src/database.rs`):
+   schemas, tables, partitioned and foreign tables, views and materialized
+   views, columns with type/nullability/default, primary keys, unique
+   constraints, `CHECK` definitions, indexes with their column order, and
+   foreign keys — as `aag db scan --url <url>`, with `aag db drift` and the MCP
+   tool `db_drift` comparing the live schema against the DDL this repository
+   declares. See [database](database.md).
+   The vocabulary is the one already in the graph: a table is a
+   `DatabaseTable`, a column is a `DatabaseColumn`, a foreign key is a
+   `References` edge, DDL stays `Declared` and the catalog is `Observed`, so
+   both halves answer one query.
+   Credentials are kept out by construction rather than by filtering: nodes are
+   filed under `postgres/<database>/<schema>`, a path with no host, user, or
+   password, and a test greps the whole graph for every part of the connection
+   string. Every message about a connection is redacted, and ingestion is
+   CLI-only — a connection string passed through an MCP call is a credential in
+   a transcript.
+   Not claimed: PostgreSQL only, because the queries are `pg_catalog` queries.
+   A catalog is a snapshot taken when `scan` ran; nothing watches the database.
+   Drift is name-level — a table in both is "matched" even when its columns
+   differ — and row data is never read.
 - 9. Add native text and metadata extraction for PDF, DOCX, XLSX, presentations,
    images, audio/video transcripts, URLs, papers, and workspace documents.
    Host-agent descriptions remain valid additional evidence, not the only
