@@ -679,12 +679,18 @@ impl Graph {
     }
 
     /// Marks that a full index has populated the incremental reference cache.
+    ///
+    /// The value is the reference *format* version, not a boolean: raw
+    /// references now carry structured JSON (import source/name/alias, call
+    /// receiver, declared inheritance) that older databases do not have, so
+    /// bumping it makes a stale cache read as not-ready and forces one full
+    /// reindex instead of silently resolving against half a format.
     /// # Errors
     /// Returns a storage error if the metadata write fails.
     pub fn mark_incremental_ready(&self) -> Result<()> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('raw_references', '1')",
+                "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('raw_references', '2')",
                 (),
             )
             .map_err(|source| Error::Storage {
@@ -699,7 +705,7 @@ impl Graph {
     /// Returns a storage error if the metadata query fails.
     pub fn incremental_ready(&self) -> Result<bool> {
         self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM index_metadata WHERE key = 'raw_references' AND value = '1')",
+            "SELECT EXISTS(SELECT 1 FROM index_metadata WHERE key = 'raw_references' AND value = '2')",
             (),
             |row| row.get(0),
         ).map_err(|source| Error::Storage { context: "read incremental index state", source })

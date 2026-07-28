@@ -17,9 +17,20 @@ alone do not establish parity.
   JavaScript have dedicated extraction paths; the remaining languages use the
   tree-sitter language pack plus AAG declaration and call extraction.
 - Confidence-tagged calls, imports, inheritance, implementation,
-  documentation, contract, schema, and infrastructure relations.
+  documentation, contract, schema, and infrastructure relations. Imports and
+  declared type relations are resolved through language-aware module
+  resolution; calls are resolved through import bindings, receivers, module
+  qualifiers, and enclosing scope, and are tagged AMBIGUOUS when more than
+  one candidate survives.
+- Import aliases read from the repository's own manifests (`tsconfig`/
+  `jsconfig` `baseUrl` and `paths`, `package.json` workspace names and subpath
+  imports, the `go.mod` module prefix), with no toolchain invoked.
+- HTTP routes registered in code — Express family, Flask/FastAPI decorators,
+  axum, actix/rocket, Spring, ASP.NET — as observed endpoints linked to their
+  handlers, alongside the endpoints a contract file declares.
 - Graph-aware search, node context, neighbors, impact, affected tests,
-  shortest path, god nodes, communities, and execution processes.
+  shortest path, god nodes, communities, detected entrypoints, and execution
+  processes rooted at them.
 - Coordinated whole-word rename, a limited read-only Cypher-shaped query
   surface, diff change detection, wiki, report, GraphML, JSON, Cypher export,
   Obsidian export, and an offline WebGL graph.
@@ -55,10 +66,41 @@ P2 gates expand reach after the core is measurable and dependable.
    distinguish protocol conformance, engine extraction quality, agent utility,
    end-to-end economics, and scale. Protocol-only, LLM-only, simulated, and
    dogfood results cannot substantiate AboveAllGraphs Engine claims.
-- 2. Add language-aware resolution for TypeScript/JavaScript, Python, Java, C#,
-   Go, and Rust: aliases, named imports, re-exports, receiver types,
+- 2. **Closed.** Language-aware resolution for TypeScript/JavaScript, Python,
+   Java, C#, Go, and Rust: aliases, named imports, re-exports, receiver types,
    constructor inference, self/this resolution, inheritance, toolchain config,
-   framework patterns, and entrypoints.
+   framework patterns, and entrypoints. What that means concretely:
+   - Import sources map onto repository files by each language's own module
+     conventions — relative and package-relative paths, directory modules
+     (`index`/`mod`/`__init__`), Go package directories, Java and C#
+     namespaces, Rust module paths — producing a per-file table of local name
+     to target that resolves named imports, aliases, namespace imports,
+     wildcards, and re-exports.
+   - The repository's own build manifests are read for the aliases they
+     declare: `tsconfig`/`jsconfig` `baseUrl` and `paths`, workspace package
+     names and Node subpath imports from `package.json`, and the `go.mod`
+     module prefix. No toolchain is invoked and nothing is fetched.
+   - Calls resolve through a narrowing ladder: receiver type, import binding,
+     `self`/`this`, module qualifier, wildcard import, enclosing file, then an
+     AMBIGUOUS fan-out. A receiver is typed when the syntax states the type —
+     construction (`new Store()`, `Store::open()`, `Store{}`), an explicit
+     annotation, or the enclosing type of a method — and a call then resolves
+     only against members that type declares.
+   - Declared `extends`/`implements`/`impl … for …` relations become
+     `Inherits`/`Implements` edges.
+   - HTTP routes registered in code become observed `Endpoint` nodes linked to
+     their handler: the Express family, Python decorators (Flask/FastAPI),
+     axum's `.route`, actix/rocket attributes, Spring annotations, and ASP.NET
+     attributes.
+   - Entrypoints are detected (`main`, and any handler wired to an endpoint)
+     and used as the roots of process tracing, instead of "callable that
+     nothing calls".
+
+   Not claimed: this is syntactic typing, not a type checker. A receiver whose
+   type comes from a function's return value, a field, a generic parameter, or
+   a longer expression chain stays untyped and falls through to the weaker
+   rungs. An import specifier no manifest and no convention explains is
+   treated as external.
 - 3. Complete the graph experience redesign specified below. Preserve the
    fast offline renderer, but replace the single hairball-oriented interaction
    model with task-specific overview, explore, path, impact, and contract
@@ -453,6 +495,11 @@ repository.
   producer, consumer, engine build, protocol version, corpus, task, ground
   truth, and immutable raw result.
 - The current query surface is not full Cypher.
+- Receiver typing is syntactic — construction, annotation, and enclosing type.
+  It is not type inference, and must not be described as one. Call edges stay
+  INFERRED or AMBIGUOUS accordingly.
+- Detected routes are what the implementation registers, not what a contract
+  declares. An observed endpoint is evidence of code, not of a published API.
 - Binary Office/media files are graph nodes, but native content extraction is
   still a priority gate.
 - Group queries aggregate independent graphs; cross-repository symbol and

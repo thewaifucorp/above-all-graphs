@@ -9,6 +9,7 @@
 pub mod analysis;
 mod artifacts;
 pub mod bigbang;
+pub mod bindings;
 pub mod cli;
 pub mod docs;
 pub mod error;
@@ -30,6 +31,7 @@ pub mod resolve;
 pub mod semantic;
 pub mod storage;
 pub mod sync;
+pub mod toolchain;
 pub mod watch;
 pub mod workspaces;
 
