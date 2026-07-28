@@ -23,6 +23,10 @@ Per agent:
 - Crush: MCP in `.crush.json` (keyed `mcp`, `type: stdio`), fenced section in `AGENTS.md`
 - goose: stdio extension in the global `~/.config/goose/config.yaml`, fenced section in `.goosehints`
 
+Generated on top of the static pack: one `aag-area-*` skill per detected area
+of *this* repository, refreshed by every `bigbang` and `sync` — see
+[areas](areas.md).
+
 ## The skill pack
 
 Seven skills, embedded in the binary via `include_str!` from `assets/skills/`, written only if missing so user edits survive:

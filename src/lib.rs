@@ -8,6 +8,7 @@
 
 pub mod analysis;
 pub mod api;
+pub mod areas;
 mod artifacts;
 pub mod bigbang;
 pub mod bindings;

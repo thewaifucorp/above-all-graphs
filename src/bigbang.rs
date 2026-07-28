@@ -99,6 +99,19 @@ pub fn run(root: &Path, options: &Options) -> Result<()> {
 
     let graph = index(root, &aag_dir)?;
 
+    // Area skills describe *this* repository, so they can only be written once
+    // the graph exists — and, like install, a failure here must not take the
+    // index down with it.
+    if !options.no_install {
+        match crate::areas::refresh(root, &graph) {
+            Ok(changed) if changed > 0 => {
+                tracing::info!(changed, "refreshed generated area skills");
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "area skills not refreshed — index still usable"),
+        }
+    }
+
     if options.no_viz {
         tracing::info!("--no-viz: skipping export artifacts");
     } else {

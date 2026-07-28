@@ -388,8 +388,23 @@ P2 gates expand reach after the core is measurable and dependable.
     to Cline's own UI. Antigravity stays UI-managed for the same reason. An
     `extensions:` map that only ever held `aag` is left behind empty rather
     than deleted, matching how the JSON configs are treated.
-- 15. Generate repository-area skills from detected communities, entrypoints,
-    processes, contracts, and cross-area links, with deterministic refresh.
+- 15. **Closed.** Generated area skills (`src/areas.rs`): one `SKILL.md` per
+    detected area, built from communities, entrypoints, processes, endpoints,
+    and cross-area edges, written into every skill directory `install` uses and
+    refreshed by both `aag bigbang` and `aag sync`. `aag areas` prints what was
+    detected. See [areas](areas.md).
+    Refresh is deterministic and content-addressed: the same graph produces
+    byte-identical files, an unchanged graph rewrites nothing, and an area that
+    stops existing has its page pruned rather than left behind claiming it is
+    still there. `aag uninstall` removes every `aag-area-*` page.
+    Not claimed: the split is only as good as label propagation — a flat crate
+    whose modules all call each other comes back as one wide area (this
+    repository detects two, one of them 1147 symbols), while a structured tree
+    splits the way you would draw it (12 areas on a 1000-file monorepo, down to
+    `field-extractors/configs`). A community can also cross a meaningless
+    boundary — test fixtures in twelve languages cluster because they look
+    alike. Vendored bundles are excluded by path, clusters under 8 symbols are
+    not areas, and at most 12 pages are generated.
 - 16. Ship semantic search as an optional prebuilt distribution so npm users can
     enable embeddings without compiling Rust or packaging ONNX themselves.
 - 17. Add branch-aware indexes and explicit comparisons between workspace,

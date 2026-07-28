@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Api { command } => print_api(command)?,
+        Command::Areas { path } => aag::areas::run(&path)?,
         Command::Pr { command } => print_pr(command)?,
         Command::Db { command } => print_db(command)?,
         Command::Memory { command } => run_memory(command)?,

@@ -183,6 +183,14 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// The repository's areas, as detected from the graph — the same
+    /// clustering the generated area skills are built from.
+    Areas {
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
     /// Pull requests, ranked by what the graph says they reach.
     Pr {
         /// Which pull-request view.

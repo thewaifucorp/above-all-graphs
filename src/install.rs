@@ -375,6 +375,15 @@ pub fn uninstall_with_home(root: &Path, home: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Generated area skills are ours too — they exist only because `aag`
+    // wrote them, so `uninstall` takes them with the rest.
+    for skill_root in [
+        root.join(".claude").join("skills"),
+        root.join(".agents").join("skills"),
+    ] {
+        remove_generated_area_skills(&skill_root)?;
+    }
+
     unregister_claude_hooks(&root.join(".claude").join("settings.json"))?;
     unregister_cursor_hooks(&root.join(".cursor").join("hooks.json"))?;
 
@@ -970,6 +979,12 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     write_text(path, &(pretty + "\n"))
 }
 
+/// [`write_text`] for `crate::areas`, which writes generated skills into the
+/// same directories with the same parent-creating semantics.
+pub(crate) fn write_text_public(path: &Path, content: &str) -> Result<()> {
+    write_text(path, content)
+}
+
 fn write_text(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| Error::CreateDir {
@@ -981,6 +996,30 @@ fn write_text(path: &Path, content: &str) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Removes every `aag-area-*` directory under `skill_root`.
+fn remove_generated_area_skills(skill_root: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(skill_root) else {
+        return Ok(());
+    };
+    let mut stale: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(crate::areas::AREA_PREFIX))
+        })
+        .collect();
+    stale.sort();
+    for path in stale {
+        fs::remove_dir_all(&path).map_err(|source| Error::RemoveDir {
+            path: path.clone(),
+            source,
+        })?;
+    }
+    Ok(())
 }
 
 fn remove_file_if_present(path: &Path) -> Result<()> {

@@ -91,6 +91,13 @@ pub fn run(root: &Path, file: Option<&Path>, no_viz: bool) -> Result<()> {
     #[cfg(not(test))]
     crate::workspaces::register(root, &summary);
 
+    // Areas move when code moves, so the generated skills follow the same
+    // refresh the export does. Content-addressed, so a sync that changed
+    // nothing structural rewrites nothing.
+    if let Err(error) = crate::areas::refresh(root, &graph) {
+        tracing::warn!(%error, "area skills not refreshed");
+    }
+
     if !no_viz {
         export::write_default(root, &aag_dir, &graph)?;
     }
