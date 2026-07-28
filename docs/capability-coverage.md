@@ -248,11 +248,14 @@ P2 gates expand reach after the core is measurable and dependable.
     guidance in [transport](transport.md). Binding beyond loopback without a key
     refuses to start rather than exposing the repository, and the twelve HTTP
     behaviours are covered by tests that speak HTTP to a real socket.
-    Not claimed: the `GET` stream carries no server-initiated notifications — it
-    opens with one ready message and then keepalives, so a client that opens a
-    stream gets a valid one instead of a 405, and when the graph changes the
-    client asks again. Sessions live in the process that minted them, which is
-    what `--stateless` is for.
+    The `GET` stream is a real notification channel: the graph is published as
+    the resource `aag://graph` (`resources/list`, `resources/read`,
+    `subscribe: true`), and every reindex — watcher or reconcile — sends each
+    open stream a `notifications/resources/updated` carrying the revision the
+    client can read back, so a woken client can confirm which state it read.
+    Not claimed: stdio has no such channel, because there is no stream to push
+    into — a stdio client still asks again. Sessions live in the process that
+    minted them, which is what `--stateless` is for.
 - 11. Turn PR primitives into a full graph-backed workflow: dashboard, worktree
     mapping, conflict detection through shared communities, review queue,
     risk-ranked findings, and plan to work to review gates.

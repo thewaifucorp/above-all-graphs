@@ -57,15 +57,29 @@ The same JSON-RPC answer is framed by what the client asked for:
 | `POST /mcp`, `Accept: application/json` | `application/json`, the response object |
 | `POST /mcp`, `Accept: text/event-stream` | `text/event-stream`, one `event: message` |
 | `POST /mcp` for a notification | 202, empty body |
-| `GET /mcp`, `Accept: text/event-stream` | an open stream, keepalive comments |
+| `GET /mcp`, `Accept: text/event-stream` | an open stream: notifications and keepalives |
 | `GET /mcp` without that Accept | 405 — there is nothing to receive |
 
-**The `GET` stream carries no server-initiated notifications.** It opens with one
-`notifications/ready` message and then emits keepalive comments so a client that
-opens a stream gets a valid one instead of a 405. It is bounded: it closes after
-an hour of keepalives so a forgotten client cannot hold a thread. Saying this
-plainly is better than implying a push channel the server does not use — when
-the graph changes, the client asks again.
+**The `GET` stream carries server-initiated notifications.** It opens with one
+`notifications/ready`, and every time the index is rewritten — by the watcher,
+by a reconcile on connect — each open stream gets:
+
+```text
+event: message
+data: {"jsonrpc":"2.0","method":"notifications/resources/updated",
+       "params":{"uri":"aag://graph","revision":7}}
+```
+
+That is the MCP resource-update notification for the one resource this server
+publishes. `resources/list` names it, `resources/read` returns the current
+counts and the same revision number, so a client woken by a notification can
+confirm it read the revision it was told about. Between changes the stream
+emits keepalive comments, and it is bounded: it closes after an hour of them so
+a forgotten client cannot hold a thread.
+
+The stdio transport has no such channel — there is no stream to push into — so
+a stdio client still asks again. That is a property of the transport, not a
+choice about the notification.
 
 ## Container deployment
 

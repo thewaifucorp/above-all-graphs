@@ -66,12 +66,16 @@ const SESSION_IDLE: Duration = Duration::from_mins(30);
 /// Sessions one server will track at once.
 const MAX_SESSIONS: usize = 256;
 
-/// Keepalive comments an idle SSE stream emits before closing. The stream is a
-/// protocol affordance, not a notification channel — see the module docs.
+/// Keepalive comments an idle SSE stream emits before closing — an hour of
+/// them, after which a forgotten client is asked to reconnect.
 const SSE_KEEPALIVES: usize = 720;
 
 /// Gap between keepalive comments.
 const SSE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often a stream checks whether the index moved. Short enough that a
+/// reindex is announced promptly, long enough to be an atomic load per tick.
+const SSE_POLL: Duration = Duration::from_millis(50);
 
 /// One client's state.
 #[derive(Debug)]
@@ -407,13 +411,14 @@ fn respond_empty(request: Request, status: u16) {
     let _ = request.respond(Response::empty(StatusCode(status)));
 }
 
-/// Holds an SSE stream open with keepalive comments.
+/// Holds an SSE stream open, carrying server-initiated notifications.
 ///
-/// The stream exists so a client that opens one gets a valid response instead of
-/// a 405. This server sends no server-initiated notifications over it, and says
-/// so in `docs/mcp.md` rather than implying a channel it does not use. The
-/// stream is bounded: it closes after [`SSE_KEEPALIVES`] intervals so a
-/// forgotten client cannot hold a thread forever.
+/// The graph changes under the client — that is the whole point of the watcher
+/// — so the stream tells it: every time the index is rewritten, one
+/// `notifications/resources/updated` for `aag://graph` goes out, carrying the
+/// revision the client can read back. Between changes the stream sends
+/// keepalive comments. It is bounded: it closes after [`SSE_KEEPALIVES`]
+/// intervals so a forgotten client cannot hold a thread forever.
 fn stream_events(request: Request) {
     // The response head is written by hand because an SSE body has no length:
     // `Response` wants one, and the writer is what stays open.
@@ -429,8 +434,30 @@ fn stream_events(request: Request) {
         "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/ready\"}\n\n";
     let _ = writer.write_all(ready.as_bytes());
     let _ = writer.flush();
+    let mut seen = crate::watch::revision();
     for _ in 0..SSE_KEEPALIVES {
-        std::thread::sleep(SSE_INTERVAL);
+        // Polled in small steps so a change is announced promptly while a quiet
+        // stream still only writes one keepalive per interval.
+        let mut waited = Duration::ZERO;
+        while waited < SSE_INTERVAL {
+            std::thread::sleep(SSE_POLL);
+            waited += SSE_POLL;
+            let current = crate::watch::revision();
+            if current != seen {
+                seen = current;
+                let notification = format!(
+                    "event: message\ndata: {}\n\n",
+                    json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/resources/updated",
+                        "params": {"uri": crate::mcp::GRAPH_RESOURCE_URI, "revision": current},
+                    })
+                );
+                if writer.write_all(notification.as_bytes()).is_err() || writer.flush().is_err() {
+                    return;
+                }
+            }
+        }
         if writer.write_all(b": keepalive\n\n").is_err() || writer.flush().is_err() {
             return;
         }
@@ -799,6 +826,81 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("--api-key"), "{message}");
         assert!(message.contains("beyond this machine"), "{message}");
+    }
+
+    #[test]
+    fn a_reindex_reaches_an_open_stream() {
+        let (port, _root) = served(Options {
+            stateless: true,
+            ..Options::default()
+        });
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n")
+            .unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.contains("200"), "{line}");
+
+        // The stream is open; the index moves under it.
+        std::thread::sleep(Duration::from_millis(100));
+        crate::watch::mark_indexed();
+
+        let mut update = None;
+        for _ in 0..200 {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            if line.contains("notifications/resources/updated") {
+                update = Some(line);
+                break;
+            }
+        }
+        let update = update.expect("the stream carries the change the client did not ask for");
+        assert!(update.contains("aag://graph"), "{update}");
+        assert!(
+            update.contains("\"revision\""),
+            "the client is told which revision to read back: {update}"
+        );
+    }
+
+    #[test]
+    fn the_graph_is_a_readable_resource() {
+        let (port, _root) = served(Options {
+            stateless: true,
+            ..Options::default()
+        });
+
+        let (_, _, listed) = post(
+            port,
+            r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#,
+            "",
+        );
+        assert!(listed.contains("aag://graph"), "{listed}");
+
+        let (_, _, read) = post(
+            port,
+            r#"{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"aag://graph"}}"#,
+            "",
+        );
+        assert!(read.contains("\\\"files\\\""), "{read}");
+        assert!(read.contains("\\\"revision\\\""), "{read}");
+
+        let (_, _, unknown) = post(
+            port,
+            r#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"aag://nope"}}"#,
+            "",
+        );
+        assert!(
+            unknown.contains("unknown resource"),
+            "an unknown uri says so rather than answering with the graph: {unknown}"
+        );
     }
 
     #[test]

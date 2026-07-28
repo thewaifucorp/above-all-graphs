@@ -361,12 +361,23 @@ fn handle(root: &Path, request: &Value) -> Option<Value> {
     let result = match method {
         "initialize" => Ok(json!({
             "protocolVersion": "2025-11-25",
-            "capabilities": {"tools": {}},
+            "capabilities": {
+                "tools": {},
+                // The graph is one resource that changes under the client, so
+                // subscription is the capability that matters here, and the
+                // HTTP transport actually delivers on it.
+                "resources": {"subscribe": true, "listChanged": false},
+            },
             "serverInfo": {"name": "aag", "version": env!("CARGO_PKG_VERSION")},
         })),
-        "ping" => Ok(json!({})),
+        // `ping` has nothing to report, and subscription is per stream rather
+        // than per resource: there is one resource, and a client that opened a
+        // stream is already receiving its updates.
+        "ping" | "resources/subscribe" | "resources/unsubscribe" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": listed_tools(&enabled_tool_names()) })),
         "tools/call" => call_tool(root, params),
+        "resources/list" => Ok(json!({ "resources": [graph_resource()] })),
+        "resources/read" => read_resource(root, params),
         _ if id.is_none() => return None,
         _ => Err(format!("method not found: {method}")),
     };
@@ -378,6 +389,55 @@ fn handle(root: &Path, request: &Value) -> Option<Value> {
             json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}})
         }
     })
+}
+
+/// The URI of the one resource this server publishes: the indexed graph.
+pub const GRAPH_RESOURCE_URI: &str = "aag://graph";
+
+fn graph_resource() -> Value {
+    json!({
+        "uri": GRAPH_RESOURCE_URI,
+        "name": "code knowledge graph",
+        "description": "Counts and most-connected symbols for the indexed repository. \
+                        Changes whenever the index does; a client on an SSE stream is \
+                        told when.",
+        "mimeType": "application/json",
+    })
+}
+
+/// Reads the graph resource: what the index currently holds, not a dump of it.
+fn read_resource(root: &Path, params: Option<&Value>) -> std::result::Result<Value, String> {
+    let uri = params
+        .and_then(|params| params.get("uri"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if uri != GRAPH_RESOURCE_URI {
+        return Err(format!(
+            "unknown resource: {uri}. This server publishes {GRAPH_RESOURCE_URI}."
+        ));
+    }
+    let graph = crate::storage::Graph::open_existing(root).map_err(|error| error.to_string())?;
+    let nodes = graph.all_nodes().map_err(|error| error.to_string())?;
+    let edges = graph.all_edges().map_err(|error| error.to_string())?.len();
+    let files = nodes
+        .iter()
+        .filter(|node| node.kind == crate::storage::NodeKind::File)
+        .count();
+    let summary = json!({
+        "files": files,
+        "symbols": nodes.len() - files,
+        "edges": edges,
+        // The revision a reader can compare against the one carried by the
+        // `notifications/resources/updated` that woke them.
+        "revision": crate::watch::revision(),
+    });
+    Ok(json!({
+        "contents": [{
+            "uri": GRAPH_RESOURCE_URI,
+            "mimeType": "application/json",
+            "text": summary.to_string(),
+        }]
+    }))
 }
 
 fn enabled_tool_names() -> HashSet<String> {
