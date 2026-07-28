@@ -37,6 +37,43 @@ pub struct ParsedFile {
     pub locals: Vec<LocalTypeRef>,
     /// HTTP routes this file registers with a web framework.
     pub routes: Vec<RouteRef>,
+    /// RPC/MCP tools this file exposes by name.
+    pub tools: Vec<ToolRef>,
+    /// Outbound HTTP calls this file makes — endpoints it consumes.
+    pub consumers: Vec<ConsumerRef>,
+}
+
+/// An RPC or MCP tool a program exposes: `server.tool("search", handler)`,
+/// `@mcp.tool()`, or a `ToolSpec { name: "search", … }` table entry.
+///
+/// A tool is a callable contract in the same sense an HTTP route is — something
+/// outside the process invokes it by name — so it is modelled as an endpoint
+/// whose method is `TOOL` rather than as a second vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ToolRef {
+    /// Tool name as callers pass it.
+    pub name: String,
+    /// Symbol that serves it, when the definition names one.
+    pub handler: Option<String>,
+    /// 1-based line of the definition.
+    pub line: u32,
+    /// Whether an unknown handler should be read as the declaration below this
+    /// line, which is what a decorator or attribute means.
+    pub attach_below: bool,
+}
+
+/// An outbound HTTP call: this code *consumes* an endpoint something else
+/// serves. `fetch('/api/pets')`, `axios.get('/api/pets')`, `requests.post(url)`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ConsumerRef {
+    /// Uppercase HTTP method.
+    pub method: String,
+    /// Requested path, with any host stripped.
+    pub path: String,
+    /// Symbol the call sits in, when it sits in one.
+    pub owner: Option<String>,
+    /// 1-based line of the call.
+    pub line: u32,
 }
 
 /// An HTTP route a framework registers in code — `app.get('/pets', list)`,
@@ -134,6 +171,281 @@ fn handler_name(argument: &str) -> Option<&str> {
     last_callable_identifier(argument).filter(|name| !name.is_empty())
 }
 
+/// Routes and tools an attribute or a struct-literal table entry declares:
+/// `#[get("/x")]`, `#[tool]`, `ToolSpec { name: "x", … }`.
+fn collect_contract_markers(
+    node: TsNode<'_>,
+    source: &str,
+    current_owner: Option<&str>,
+    out: &mut ParsedFile,
+) {
+    let line = line_range(node).0;
+    if node.kind() == "attribute_item" {
+        out.routes
+            .extend(annotation_route(text(node, source), line, current_owner));
+        out.tools
+            .extend(annotation_tool(text(node, source), line, current_owner));
+        return;
+    }
+    if let Some((type_text, body)) = node
+        .child_by_field_name("name")
+        .zip(node.child_by_field_name("body"))
+    {
+        out.tools.extend(struct_tool(
+            text(type_text, source),
+            text(body, source),
+            line,
+        ));
+    }
+}
+
+/// Routes, tools, and consumed endpoints a single call site declares. Shared by
+/// the dedicated JavaScript and Rust walkers, which see the same three things.
+fn collect_contract_calls(
+    node: TsNode<'_>,
+    source: &str,
+    current_owner: Option<&str>,
+    out: &mut ParsedFile,
+) {
+    let Some((function, arguments)) = node
+        .child_by_field_name("function")
+        .zip(node.child_by_field_name("arguments"))
+    else {
+        return;
+    };
+    let (callee, args) = (text(function, source), text(arguments, source));
+    let line = line_range(node).0;
+    out.routes.extend(registration_route(callee, args, line));
+    out.tools.extend(registration_tool(callee, args, line));
+    out.consumers
+        .extend(consumer_call(callee, args, line, current_owner));
+}
+
+/// The contents of a quoted argument, or `None` when it is not a literal.
+fn quoted_argument(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let quote = trimmed
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '"' | '\'' | '`'))?;
+    Some(trimmed.trim_matches(quote).to_string())
+}
+
+/// Everything before the final identifier of a callee expression, which is what
+/// says whether a `.get(...)` is a server registering a route or a client
+/// fetching one.
+fn receiver_tail(callee_text: &str) -> String {
+    let trimmed = callee_text.trim();
+    let tail = trimmed
+        .rsplit(['.', ':', ' ', '>'])
+        .next()
+        .unwrap_or_default();
+    let head = trimmed.strip_suffix(tail).unwrap_or_default();
+    head.trim_end_matches(['.', ':', '>', '-', ' '])
+        .rsplit(['.', ':', ' ', '>', '(', ')'])
+        .find(|part| !part.is_empty())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Receivers that serve requests. `app.get("/x", handler)` is a route.
+const SERVER_RECEIVERS: &[&str] = &[
+    "app",
+    "router",
+    "server",
+    "route",
+    "blueprint",
+    "api_router",
+];
+
+/// Receivers that make requests. `client.get("/x", config)` is a consumer.
+const CLIENT_RECEIVERS: &[&str] = &[
+    "axios",
+    "client",
+    "http",
+    "https",
+    "requests",
+    "session",
+    "httpx",
+    "urllib",
+    "request",
+    "superagent",
+    "got",
+    "api",
+    "fetcher",
+    "reqwest",
+];
+
+/// Callee tails that fetch a URL without naming a method.
+const FETCHERS: &[&str] = &["fetch", "urlopen", "get_json", "getjson"];
+
+/// Callee tails that register a tool by name.
+const TOOL_REGISTRARS: &[&str] = &[
+    "tool",
+    "registertool",
+    "register_tool",
+    "addtool",
+    "add_tool",
+    "registermethod",
+    "register_method",
+];
+
+/// An RPC/MCP tool registered by a call: `server.tool("search", handler)`.
+fn registration_tool(callee_text: &str, args_text: &str, line: u32) -> Option<ToolRef> {
+    let callee = callee_text
+        .rsplit(['.', ':', ' ', '>'])
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
+    if !TOOL_REGISTRARS.contains(&callee.as_str()) {
+        return None;
+    }
+    let args = args_text
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')');
+    let parts = split_arguments(args);
+    let name = quoted_argument(parts.first()?)?;
+    // A path is a route, whatever the call is named.
+    if name.is_empty() || name.starts_with('/') {
+        return None;
+    }
+    Some(ToolRef {
+        name,
+        handler: parts
+            .get(1)
+            .and_then(|argument| handler_name(argument))
+            .map(str::to_string),
+        line,
+        attach_below: false,
+    })
+}
+
+/// A tool declared by a decorator or attribute on its handler: `@mcp.tool()`,
+/// `@tool("search")`, `#[tool]`. The name defaults to the handler's own.
+fn annotation_tool(raw: &str, line: u32, handler: Option<&str>) -> Option<ToolRef> {
+    let raw = raw
+        .trim()
+        .trim_start_matches(['#', '@', '[', ' '])
+        .trim_end_matches([']', ' ']);
+    let (head, rest) = raw.split_once('(').unwrap_or((raw, ""));
+    let marker = head
+        .rsplit(['.', ' ', ':'])
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
+    if marker != "tool" && marker != "mcp_tool" {
+        return None;
+    }
+    let name = split_arguments(rest.trim_end_matches([')', ']']))
+        .first()
+        .and_then(|argument| quoted_argument(argument))
+        .filter(|name| !name.is_empty())
+        .or_else(|| handler.map(str::to_string))?;
+    Some(ToolRef {
+        name,
+        handler: handler.map(str::to_string),
+        line,
+        attach_below: true,
+    })
+}
+
+/// A tool table entry: `ToolSpec { name: "explore", … }`, which is how a Rust
+/// or Go server usually declares its surface.
+fn struct_tool(type_text: &str, body_text: &str, line: u32) -> Option<ToolRef> {
+    let type_name = type_text
+        .trim()
+        .rsplit("::")
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
+    if !type_name.ends_with("tool") && !type_name.ends_with("toolspec") {
+        return None;
+    }
+    let body = body_text
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}');
+    let name = split_arguments(body).into_iter().find_map(|field| {
+        let (key, value) = field.split_once(':')?;
+        (key.trim() == "name").then(|| quoted_argument(value))?
+    })?;
+    (!name.is_empty()).then_some(ToolRef {
+        name,
+        handler: None,
+        line,
+        attach_below: false,
+    })
+}
+
+/// An outbound HTTP call, told apart from a route registration by its receiver
+/// first and its argument count second: `app.get("/x", handler)` serves, while
+/// `client.get("/x")` and `fetch("/x", {method: "POST"})` consume.
+fn consumer_call(
+    callee_text: &str,
+    args_text: &str,
+    line: u32,
+    owner: Option<&str>,
+) -> Option<ConsumerRef> {
+    let callee = callee_text.rsplit(['.', ':', ' ', '>']).next()?.trim();
+    let receiver = receiver_tail(callee_text);
+    if SERVER_RECEIVERS.contains(&receiver.as_str()) {
+        return None;
+    }
+    let args = args_text
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')');
+    let parts = split_arguments(args);
+    let path = request_path(&quoted_argument(parts.first()?)?)?;
+    let lowered = callee.to_ascii_lowercase();
+    let method = if let Some(method) = http_method(callee) {
+        // Two arguments are a route registration unless the receiver says
+        // otherwise — that ambiguity is why the receiver is checked first.
+        if parts.len() > 1 && !CLIENT_RECEIVERS.contains(&receiver.as_str()) {
+            return None;
+        }
+        method
+    } else if FETCHERS.contains(&lowered.as_str()) {
+        parts
+            .get(1)
+            .and_then(|options| method_option(options))
+            .unwrap_or_else(|| "GET".to_string())
+    } else {
+        return None;
+    };
+    Some(ConsumerRef {
+        method,
+        path,
+        owner: owner.map(str::to_string),
+        line,
+    })
+}
+
+/// The path part of a request target: `/pets` as written, or the path of an
+/// absolute URL. Anything else — a variable, a template with no leading path —
+/// is not a target this can name, and is skipped rather than guessed.
+fn request_path(target: &str) -> Option<String> {
+    if target.starts_with('/') {
+        return Some(target.to_string());
+    }
+    let rest = target
+        .strip_prefix("http://")
+        .or_else(|| target.strip_prefix("https://"))?;
+    let (_, path) = rest.split_once('/')?;
+    Some(format!("/{path}"))
+}
+
+/// The method inside a `fetch` options object: `{ method: "POST" }`.
+fn method_option(options: &str) -> Option<String> {
+    let (_, rest) = options.split_once("method")?;
+    let trimmed = rest.trim_start();
+    let value = trimmed
+        .strip_prefix(':')
+        .or_else(|| trimmed.strip_prefix('='))?;
+    http_method(&quoted_argument(value.split(',').next()?)?)
+}
+
 /// A framework route registered by a call: `app.get("/pets", list)` in the
 /// Express family, or axum's `.route("/pets", get(list))`.
 ///
@@ -205,9 +517,9 @@ fn marker_method(name: &str) -> Option<String> {
         .or_else(|| matches!(stem, "route" | "request" | "path" | "api").then(|| "GET".to_string()))
 }
 
-/// Attaches routes whose handler is unknown to the declaration that follows
-/// them, which is what an attribute or annotation means (`#[get("/x")] fn
-/// handler`). Runs once per file, after every declaration is known.
+/// Attaches routes and tools whose handler is unknown to the declaration that
+/// follows them, which is what an attribute or annotation means (`#[get("/x")]
+/// fn handler`). Runs once per file, after every declaration is known.
 fn attach_route_handlers(out: &mut ParsedFile) {
     let mut declarations: Vec<(u32, String)> = out
         .nodes
@@ -216,17 +528,32 @@ fn attach_route_handlers(out: &mut ParsedFile) {
         .map(|node| (node.start_line, node.name.clone()))
         .collect();
     declarations.sort_unstable();
+    let below = |line: u32| {
+        declarations
+            .iter()
+            .find(|(declared, _)| *declared >= line)
+            .map(|(_, name)| name.clone())
+    };
     for route in &mut out.routes {
         if route.handler.is_some() || !route.attach_below {
             continue;
         }
-        route.handler = declarations
-            .iter()
-            .find(|(line, _)| *line >= route.line)
-            .map(|(_, name)| name.clone());
+        route.handler = below(route.line);
     }
+    for tool in &mut out.tools {
+        if tool.handler.is_none() && tool.attach_below {
+            tool.handler = below(tool.line);
+        }
+    }
+    // A tool table entry names no handler, and the entry is not inside one
+    // either; the handler is whatever dispatch routes the name to, which only
+    // resolution can see.
     out.routes.sort_unstable();
     out.routes.dedup();
+    out.tools.sort_unstable();
+    out.tools.dedup();
+    out.consumers.sort_unstable();
+    out.consumers.dedup();
 }
 
 /// A method or field and the type that declares it. Without this, a call on
@@ -446,7 +773,7 @@ fn parse_polyglot(file_path: &str, source: &str, language: &str) -> Result<Parse
     out.locals.sort_unstable();
     out.locals.dedup();
     out.calls = collect_polyglot_calls_from(&root, source, &owners, &types);
-    collect_ast_routes(&root, source, &owners, &mut out.routes);
+    collect_ast_routes(&root, source, &owners, &mut out);
     attach_route_handlers(&mut out);
     Ok(out)
 }
@@ -676,12 +1003,12 @@ fn collect_ast_routes(
     node: &tree_sitter_language_pack::Node,
     source: &str,
     owners: &[(String, usize, usize)],
-    out: &mut Vec<RouteRef>,
+    out: &mut ParsedFile,
 ) {
     let line = u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX);
     match node.kind().as_str() {
         "call_expression" | "call" | "invocation_expression" => {
-            if let Some(route) = ["function", "callee", "name"]
+            if let Some((callee, args)) = ["function", "callee", "name"]
                 .into_iter()
                 .find_map(|field| node.child_by_field_name(field))
                 .and_then(|target| node_text(&target, source))
@@ -691,22 +1018,36 @@ fn collect_ast_routes(
                         .find_map(|field| node.child_by_field_name(field))
                         .and_then(|args| node_text(&args, source)),
                 )
-                .and_then(|(callee, args)| registration_route(callee, args, line))
             {
-                out.push(route);
+                let owner = innermost_owner(owners, node.start_byte(), node.end_byte());
+                out.routes.extend(registration_route(callee, args, line));
+                out.tools.extend(registration_tool(callee, args, line));
+                out.consumers
+                    .extend(consumer_call(callee, args, line, owner));
             }
         }
         "decorator" | "annotation" | "marker_annotation" | "attribute" | "attribute_item" => {
-            if let Some(text) = node_text(node, source)
-                && let Some(route) = annotation_route(
-                    text,
-                    line,
-                    innermost_owner(owners, node.start_byte(), node.end_byte()),
-                )
-            {
-                out.push(route);
+            if let Some(text) = node_text(node, source) {
+                let owner = innermost_owner(owners, node.start_byte(), node.end_byte());
+                out.routes.extend(annotation_route(text, line, owner));
+                out.tools.extend(annotation_tool(text, line, owner));
             }
             return;
+        }
+        "struct_expression" | "composite_literal" | "object_creation_expression" => {
+            if let Some((type_text, body)) = ["type", "name", "constructor"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .and_then(|target| node_text(&target, source))
+                .zip(
+                    ["body", "arguments", "literal_value"]
+                        .into_iter()
+                        .find_map(|field| node.child_by_field_name(field))
+                        .and_then(|body| node_text(&body, source)),
+                )
+            {
+                out.tools.extend(struct_tool(type_text, body, line));
+            }
         }
         _ => {}
     }
@@ -1762,19 +2103,7 @@ fn walk_javascript<'a>(
             javascript_imports(node, source, &mut out.imports);
         }
         "call_expression" => {
-            if let Some(route) = node
-                .child_by_field_name("function")
-                .zip(node.child_by_field_name("arguments"))
-                .and_then(|(function, arguments)| {
-                    registration_route(
-                        text(function, source),
-                        text(arguments, source),
-                        line_range(node).0,
-                    )
-                })
-            {
-                out.routes.push(route);
-            }
+            collect_contract_calls(node, source, current_owner, out);
             if let Some((caller, (receiver, callee))) = node
                 .child_by_field_name("function")
                 .and_then(|function| current_owner.zip(javascript_callee_name(function, source)))
@@ -1893,25 +2222,11 @@ fn walk<'a>(
                     .filter_map(|path| rust_import_ref(path)),
             );
         }
-        "attribute_item" => {
-            if let Some(route) = annotation_route(text(node, source), line_range(node).0, None) {
-                out.routes.push(route);
-            }
+        "attribute_item" | "struct_expression" => {
+            collect_contract_markers(node, source, current_owner, out);
         }
         "call_expression" => {
-            if let Some(route) = node
-                .child_by_field_name("function")
-                .zip(node.child_by_field_name("arguments"))
-                .and_then(|(function, arguments)| {
-                    registration_route(
-                        text(function, source),
-                        text(arguments, source),
-                        line_range(node).0,
-                    )
-                })
-            {
-                out.routes.push(route);
-            }
+            collect_contract_calls(node, source, current_owner, out);
             if let Some((caller, (receiver, callee))) = node
                 .child_by_field_name("function")
                 .and_then(|func| current_owner.zip(callee_name(func, source)))

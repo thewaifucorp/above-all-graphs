@@ -243,8 +243,12 @@ struct Pending {
     /// Import aliases declared by the repository's build manifests.
     aliases: Vec<crate::toolchain::Alias>,
     /// `(file, handler symbol, endpoint node name)` for routes registered
-    /// in code.
+    /// in code, and for tools exposed by name — the two link their handler the
+    /// same way.
     routes: Vec<(String, Option<String>, String)>,
+    /// `(file, calling symbol, method, path)` for outbound HTTP calls awaiting
+    /// an endpoint to point at.
+    consumers: Vec<(String, Option<String>, String, String)>,
     /// `(doc node id, doc text)`.
     doc_mentions: Vec<(i64, String)>,
     /// `OpenAPI` operations awaiting implementation matching.
@@ -325,6 +329,7 @@ fn resolve_pending(graph: &Graph, pending: &Pending, summary: &mut IndexSummary)
     resolve_calls(graph, &pending.calls, &index, summary)?;
     resolve_inheritance(graph, &pending.inherits, &index, summary)?;
     resolve_routes(graph, &pending.routes, &index, summary)?;
+    resolve_consumers(graph, &pending.consumers, &index, summary)?;
     resolve_openapi_operations(graph, &pending.operations, &index, summary)
 }
 
@@ -516,6 +521,8 @@ fn index_code_file(
         pending.members.push((relative.to_string(), member));
     }
     index_routes(graph, relative, &parsed.routes, pending, summary)?;
+    index_tools(graph, relative, &parsed.tools, pending, summary)?;
+    index_consumers(graph, relative, &parsed.consumers, pending)?;
     for local in parsed.locals {
         graph.insert_raw_reference(&RawReference {
             file_path: relative.to_string(),
@@ -575,6 +582,176 @@ fn index_routes(
             .push((relative.to_string(), route.handler.clone(), endpoint));
     }
     Ok(())
+}
+
+/// Inserts an endpoint node per RPC/MCP tool the file exposes.
+///
+/// A tool is a callable contract in the same sense a route is, so it lands in
+/// the same node kind with `TOOL` where a method would be. One vocabulary means
+/// impact, contracts, and the graph UI treat both without special cases.
+fn index_tools(
+    graph: &Graph,
+    relative: &str,
+    tools: &[crate::parse::ToolRef],
+    pending: &mut Pending,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    for tool in tools {
+        let endpoint = format!("TOOL {}", tool.name);
+        let endpoint_id = graph.insert_node_with_provenance(
+            &Node {
+                id: None,
+                kind: NodeKind::Endpoint,
+                name: endpoint.clone(),
+                file_path: relative.to_string(),
+                start_line: tool.line,
+                end_line: tool.line,
+                description: Some(
+                    serde_json::json!({ "method": "TOOL", "path": tool.name }).to_string(),
+                ),
+            },
+            &Provenance {
+                perspective: Perspective::Observed,
+                evidence_kind: EvidenceKind::AstDefinition,
+                evidence_source: Some(relative.to_string()),
+            },
+        )?;
+        pending
+            .by_file_name
+            .insert((relative.to_string(), endpoint.clone()), endpoint_id);
+        summary.contracts = summary.contracts.saturating_add(1);
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "tool".into(),
+            owner: tool.handler.clone().unwrap_or_default(),
+            target: endpoint.clone(),
+        })?;
+        pending
+            .routes
+            .push((relative.to_string(), tool.handler.clone(), endpoint));
+    }
+    Ok(())
+}
+
+/// Persists the outbound HTTP calls a file makes, so resolution can point each
+/// at the endpoint it consumes once every endpoint in the repository is known.
+fn index_consumers(
+    graph: &Graph,
+    relative: &str,
+    consumers: &[crate::parse::ConsumerRef],
+    pending: &mut Pending,
+) -> Result<()> {
+    for consumer in consumers {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "consumer".into(),
+            owner: consumer.owner.clone().unwrap_or_default(),
+            target: format!("{} {}", consumer.method, consumer.path),
+        })?;
+        pending.consumers.push((
+            relative.to_string(),
+            consumer.owner.clone(),
+            consumer.method.clone(),
+            consumer.path.clone(),
+        ));
+    }
+    Ok(())
+}
+
+/// Points each outbound call at the endpoint it requests.
+///
+/// An exact `METHOD /path` match is EXTRACTED — the call literally names it. A
+/// match that only holds once path parameters are treated as wildcards is
+/// INFERRED (`/pets/42` calling `/pets/{id}`). Several endpoints matching is
+/// AMBIGUOUS and every candidate is linked, the same fan-out a call with several
+/// candidate symbols gets.
+fn resolve_consumers(
+    graph: &Graph,
+    pending: &[(String, Option<String>, String, String)],
+    index: &SymbolIndex<'_>,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    for (file_path, owner, method, path) in pending {
+        let Some(owner) = owner else { continue };
+        let Some(&src) = index.by_file_name.get(&(file_path.clone(), owner.clone())) else {
+            continue;
+        };
+        let wanted = format!("{method} {path}");
+        // Endpoint nodes are registered per file rather than by bare name, so
+        // the lookup walks that table: an endpoint name contains a space, which
+        // no symbol name does.
+        let exact: Vec<i64> = index
+            .by_file_name
+            .iter()
+            .filter(|((_, name), _)| *name == wanted)
+            .map(|(_, id)| *id)
+            .collect();
+        let (candidates, confidence) = if exact.is_empty() {
+            let shape = endpoint_shape(&wanted);
+            let matched: Vec<i64> = index
+                .by_file_name
+                .iter()
+                .filter(|((_, name), _)| name.contains(' ') && endpoint_shape(name) == shape)
+                .map(|(_, id)| *id)
+                .collect();
+            let confidence = if matched.len() > 1 {
+                Confidence::Ambiguous
+            } else {
+                Confidence::Inferred
+            };
+            (matched, confidence)
+        } else {
+            (exact, Confidence::Extracted)
+        };
+        for dst in candidates {
+            if dst == src {
+                continue;
+            }
+            graph.insert_edge_with_provenance(
+                &Edge {
+                    src,
+                    dst,
+                    kind: EdgeKind::Calls,
+                    confidence,
+                },
+                &Provenance {
+                    perspective: Perspective::Observed,
+                    evidence_kind: EvidenceKind::AstCall,
+                    evidence_source: Some(file_path.clone()),
+                },
+            )?;
+            summary.edges += 1;
+        }
+    }
+    Ok(())
+}
+
+/// An endpoint name with its path parameters flattened, so the same route
+/// written three ways compares equal: `GET /pets/{id}`, `GET /pets/:id`, and
+/// `GET /pets/42` all become `GET /pets/*`.
+///
+/// Only a name that starts with a method and a `/` is a path — a tool name is
+/// returned as-is, since flattening it would make unrelated tools equal.
+fn endpoint_shape(name: &str) -> String {
+    let Some((method, path)) = name.split_once(' ') else {
+        return name.to_string();
+    };
+    if !path.starts_with('/') {
+        return name.to_string();
+    }
+    let flattened: Vec<&str> = path
+        .split('/')
+        .map(|segment| {
+            let parameter = segment.starts_with('{')
+                || segment.starts_with(':')
+                || segment.starts_with('<')
+                || segment.starts_with('$')
+                || segment == "*"
+                || (!segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()));
+            if parameter { "*" } else { segment }
+        })
+        .collect();
+    format!("{method} {}", flattened.join("/"))
 }
 
 /// Structured references are persisted as JSON in `raw_references.target` so
@@ -792,11 +969,21 @@ fn load_raw_references(graph: &Graph, pending: &mut Pending) -> Result<()> {
                     pending.locals.push((reference.file_path, local));
                 }
             }
-            "route" => pending.routes.push((
+            "route" | "tool" => pending.routes.push((
                 reference.file_path,
                 Some(reference.owner).filter(|owner| !owner.is_empty()),
                 reference.target,
             )),
+            "consumer" => {
+                if let Some((method, path)) = reference.target.split_once(' ') {
+                    pending.consumers.push((
+                        reference.file_path,
+                        Some(reference.owner).filter(|owner| !owner.is_empty()),
+                        method.to_string(),
+                        path.to_string(),
+                    ));
+                }
+            }
             "alias" => pending.aliases.push(crate::toolchain::Alias {
                 pattern: reference.owner,
                 targets: serde_json::from_str(&reference.target).unwrap_or_default(),
@@ -1847,6 +2034,153 @@ mod tests {
                 ("GET /pets".to_string(), "listPets".to_string()),
                 ("POST /pets".to_string(), "addPet".to_string())
             ]
+        );
+    }
+
+    #[test]
+    fn a_tool_definition_becomes_an_observed_endpoint_with_its_handler() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function searchDocs() {}\nfunction wire(server) { server.tool('search', searchDocs); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        assert_eq!(
+            observed_routes(&graph),
+            vec![("TOOL search".to_string(), "searchDocs".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_tool_table_entry_is_a_tool_even_without_a_handler() {
+        let root = scratch_root();
+        fs::write(
+            root.join("mcp.rs"),
+            "struct ToolSpec { name: &'static str }\nconst SPECS: &[ToolSpec] = &[ToolSpec { name: \"explore\" }];\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let tools: Vec<String> = graph
+            .all_nodes()
+            .unwrap()
+            .into_iter()
+            .filter(|node| node.kind == NodeKind::Endpoint)
+            .map(|node| node.name)
+            .collect();
+        assert_eq!(tools, vec!["TOOL explore".to_string()]);
+    }
+
+    #[test]
+    fn an_outbound_call_is_linked_to_the_endpoint_it_requests() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function listPets() {}\nfunction wire(app) { app.get('/pets', listPets); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("client.js"),
+            "function loadPets() { return fetch('/pets'); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let endpoint = graph.find_by_name("GET /pets").unwrap().unwrap();
+        let callers = graph.callers(endpoint.id.unwrap()).unwrap();
+        assert!(
+            callers
+                .iter()
+                .any(|(node, kind, confidence)| node.name == "loadPets"
+                    && *kind == EdgeKind::Calls
+                    && *confidence == Confidence::Extracted),
+            "the literal path matches the endpoint exactly: {callers:?}"
+        );
+    }
+
+    #[test]
+    fn a_parameterized_path_matches_the_route_that_declares_the_parameter() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function getPet() {}\nfunction wire(app) { app.get('/pets/:id', getPet); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("client.js"),
+            "function loadPet(client) { return client.get('/pets/42'); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let endpoint = graph.find_by_name("GET /pets/:id").unwrap().unwrap();
+        let callers = graph.callers(endpoint.id.unwrap()).unwrap();
+        assert!(
+            callers
+                .iter()
+                .any(|(node, _, confidence)| node.name == "loadPet"
+                    && *confidence == Confidence::Inferred),
+            "a match that needs the parameter flattened is INFERRED, not EXTRACTED: {callers:?}"
+        );
+    }
+
+    #[test]
+    fn an_incremental_file_sync_keeps_the_endpoints_that_file_registers() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function listPets() {}\nfunction wire(app) { app.get('/pets', listPets); }\n",
+        )
+        .unwrap();
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+        assert_eq!(observed_routes(&graph).len(), 1);
+
+        // The same file changes and is reindexed on its own, which is what the
+        // post-edit hook does on every keystroke-sized edit.
+        fs::write(
+            root.join("server.js"),
+            "function listPets() {}\nfunction addPet() {}\nfunction wire(app) { app.get('/pets', listPets); app.post('/pets', addPet); }\n",
+        )
+        .unwrap();
+        index_file(&graph, &root, &root.join("server.js")).unwrap();
+
+        assert_eq!(
+            observed_routes(&graph),
+            vec![
+                ("GET /pets".to_string(), "listPets".to_string()),
+                ("POST /pets".to_string(), "addPet".to_string())
+            ],
+            "an endpoint is not collateral damage of reindexing its own file"
+        );
+    }
+
+    #[test]
+    fn a_route_registration_is_not_mistaken_for_a_consumer() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function wire(app) { app.get('/pets', (req, res) => res.json([])); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let endpoint = graph.find_by_name("GET /pets").unwrap().unwrap();
+        assert!(
+            graph.callers(endpoint.id.unwrap()).unwrap().is_empty(),
+            "`app.get` with an inline handler serves the route, it does not consume it"
         );
     }
 

@@ -7,6 +7,7 @@
 //! for the full design contract.
 
 pub mod analysis;
+pub mod api;
 mod artifacts;
 pub mod bigbang;
 pub mod bindings;

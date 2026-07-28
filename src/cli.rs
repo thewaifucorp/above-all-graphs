@@ -175,6 +175,14 @@ pub enum Command {
         json: bool,
     },
 
+    /// Route, RPC, and tool intelligence: what this repository serves, what
+    /// serves it, and who consumes it.
+    Api {
+        /// Which view to print.
+        #[command(subcommand)]
+        command: ApiView,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.
@@ -360,6 +368,53 @@ pub enum HookEvent {
     /// `SessionStart` — reconcile the index and inject a graph digest.
     SessionStart {
         /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Which slice of the API surface to print.
+#[derive(Subcommand, Debug, Clone)]
+pub enum ApiView {
+    /// Every HTTP endpoint, declared and observed, with handler and consumers.
+    Routes {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Every RPC/MCP tool this repository exposes, with its handler.
+    Tools {
+        /// Only tools whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Compare declared response shapes with what the handlers return.
+    Shapes {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Who is on the other side of one endpoint, tool, or path.
+    Impact {
+        /// Endpoint name (`GET /pets`), tool name (`TOOL explore`), or path.
+        target: String,
+
+        /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },

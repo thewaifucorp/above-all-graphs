@@ -6,6 +6,9 @@ All notable changes to AboveAllGraphs are documented here.
 
 ### Added
 
+- Route, RPC, and tool intelligence (`src/api.rs`): `aag api routes|tools|shapes|impact` and the MCP tools `route_map`, `tool_map`, `shape_check`, `api_impact`. Declared and served endpoints pair by shape, both mismatch states are reported, and declared response shapes are compared with the fields handlers return. See `docs/api.md`.
+- RPC/MCP tools are indexed as endpoints whose method is `TOOL`, from a registration call, a `@tool`/`#[tool]` marker, or a `ToolSpec { name: … }` table entry.
+- Outbound HTTP calls (`fetch`, `axios.get`, `client.post`, …) become `Calls` edges into the endpoint they request — EXTRACTED for a literal match, INFERRED once path parameters are flattened, AMBIGUOUS when several endpoints share the shape.
 - A documented formal subset of Cypher with real pattern evaluation (`src/query.rs`): labels, relationship types and direction, variable-length hops (`*1..3`), `WHERE` with `=`/`<>`/`<`/`<=`/`>`/`>=`/`CONTAINS`/`STARTS WITH`/`ENDS WITH`/`IN`/`IS NULL`/`AND`/`OR`/`NOT`, `count` with grouping, `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT`. Anything outside the subset is an error naming what was expected, at the line and column it was found. See `docs/query.md`.
 - `aag cypher "<query>"`, printing a table or `--json` rows.
 - Taint flows that cross calls: each function is summarized (which parameter positions reach a sink, which reach a `return`, whether it returns an input of its own), and a caller reads that summary instead of re-analyzing the callee. Callees come from the indexed `calls` edges, so an ambiguous call is followed through every candidate and reported as one of them.

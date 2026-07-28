@@ -27,7 +27,10 @@ alone do not establish parity.
   imports, the `go.mod` module prefix), with no toolchain invoked.
 - HTTP routes registered in code — Express family, Flask/FastAPI decorators,
   axum, actix/rocket, Spring, ASP.NET — as observed endpoints linked to their
-  handlers, alongside the endpoints a contract file declares.
+  handlers, alongside the endpoints a contract file declares. RPC/MCP tools are
+  endpoints too, and outbound HTTP calls are edges into the endpoint they
+  request, so a route map, a tool map, a response-shape check, and API impact all
+  read from one graph.
 - Graph-aware search, node context, neighbors, impact, affected tests,
   shortest path, god nodes, communities, detected entrypoints, and execution
   processes rooted at them.
@@ -179,10 +182,28 @@ P2 gates expand reach after the core is measurable and dependable.
 
 ### P1 — complete workflows and heterogeneous graphs
 
-- 6. Build first-class route, RPC, and tool intelligence: route maps, MCP/RPC
-   tool maps, API consumer links, response-shape checks, and API impact. Use
-   OpenAPI declarations as evidence instead of replacing them with framework
-   inference.
+- 6. **Closed.** First-class route, RPC, and tool intelligence: route maps,
+   MCP/RPC tool maps, API consumer links, response-shape checks, and API impact,
+   as `aag api routes|tools|shapes|impact` and the MCP tools `route_map`,
+   `tool_map`, `shape_check`, and `api_impact`. See [api](api.md).
+   Declarations stay evidence rather than being replaced by inference: a declared
+   endpoint and a served one pair by shape (`/pets/{id}` and `/pets/:id` are one
+   endpoint, and the contract's spelling is the published name), and the two
+   mismatch states — declared-but-unimplemented, served-but-undeclared — are
+   reported rather than resolved. An RPC/MCP tool is an endpoint whose method is
+   `TOOL`, recognized from a registration call, a `@tool`/`#[tool]` marker, or a
+   `ToolSpec { name: … }` table, so one contract vocabulary covers both.
+   Outbound HTTP calls become `Calls` edges into the endpoint they request:
+   EXTRACTED for a literal match, INFERRED once path parameters are flattened,
+   AMBIGUOUS when several endpoints share that shape.
+   Not claimed: recognition is by name across a fixed set of frameworks and
+   clients, so a house-built router or client is invisible until its shape is
+   added. A path built at runtime is skipped rather than guessed. The shape check
+   is syntactic and top-level — a handler that builds its response in a variable
+   reads as returning nothing and is skipped, a nested field is not compared, and
+   a finding is a place to look. Tool invocations are not linked to tool
+   definitions: a dispatcher matching a name to a branch is a link only the
+   string can make.
 - 7. Resolve cross-repository protocol links without merging local databases:
    API producer to client, package export to import, event producer to
    consumer, schema to model, and MCP tool definition to invocation.
@@ -566,6 +587,9 @@ repository.
   INFERRED or AMBIGUOUS accordingly.
 - Detected routes are what the implementation registers, not what a contract
   declares. An observed endpoint is evidence of code, not of a published API.
+- Route, tool, and consumer detection is by name across a fixed set of
+  frameworks and client libraries. "No endpoints found" means none matched those
+  shapes, not that the repository serves none.
 - Taint findings are syntactic and line-granular, and crossing a call does not
   change that. A finding is a place to look, no findings is not evidence of
   safety, and neither `aag taint` nor the `taint` tool is a security scanner.

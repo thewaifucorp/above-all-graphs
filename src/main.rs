@@ -55,6 +55,7 @@ fn main() -> anyhow::Result<()> {
             println!("{}", aag::flow::format_taint(&file, depth)?);
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
+        Command::Api { command } => print_api(command)?,
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }
@@ -125,6 +126,17 @@ fn hook_target(event: aag::cli::HookEvent) -> (std::path::PathBuf, aag::hook::Ev
         aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
         aag::cli::HookEvent::SessionStart { path } => (path, aag::hook::Event::SessionStart),
     }
+}
+
+fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
+    let text = match view {
+        aag::cli::ApiView::Routes { filter, path } => aag::api::route_map(&path, &filter)?,
+        aag::cli::ApiView::Tools { filter, path } => aag::api::tool_map(&path, &filter)?,
+        aag::cli::ApiView::Shapes { filter, path } => aag::api::format_shape_check(&path, &filter)?,
+        aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
+    };
+    println!("{text}");
+    Ok(())
 }
 
 fn print_query(path: &std::path::Path, query: &str, json: bool) -> anyhow::Result<()> {

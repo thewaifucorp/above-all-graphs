@@ -1095,7 +1095,9 @@ const DEFINITION_KINDS: &[(&str, &str)] = &[
     ("typed_parameter", "name"),
 ];
 
-fn language_of(file_path: &str) -> Option<&'static str> {
+/// The tree-sitter grammar for a path, or `None` when no flow frontend covers
+/// it. Shared with `crate::api`, which reads handler bodies the same way.
+pub(crate) fn language_of(file_path: &str) -> Option<&'static str> {
     let extension = file_path.rsplit('.').next()?.to_ascii_lowercase();
     Some(match extension.as_str() {
         "rs" => "rust",
