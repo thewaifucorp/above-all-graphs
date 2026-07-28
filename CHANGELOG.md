@@ -6,6 +6,7 @@ All notable changes to AboveAllGraphs are documented here.
 
 ### Added
 
+- Nineteen more languages, each validated by a test that extracts a declaration from it: Vue, Svelte, Astro, Zig, PowerShell, Julia, Groovy, Verilog, SystemVerilog, Fortran, Pascal/Delphi, Apex, Haskell, OCaml, Erlang, Clojure, Nim, Perl, and Solidity — 20 languages to 39. Vue/Svelte/Astro script blocks are handed to the JavaScript frontend with line numbers shifted; Clojure declarations are matched as forms; Groovy on its keyword.
 - MCP Streamable HTTP (`src/transport.rs`): `Mcp-Session-Id` sessions with `DELETE` termination and idle expiry, JSON or SSE framing chosen by `Accept`, a keepalive `GET` stream, and `--bind`, `--stateless`, `--max-body`, `--rate-limit` on `aag mcp --transport http`. Binding beyond loopback without `--api-key` refuses to start. Container guidance in `docs/transport.md`.
 - Cross-repository protocol links: `aag group links <group>` and the MCP tool `group_links` pair API producer to client, package export to import, event producer to consumer, schema to model, and tool definition to invocation. Each member's graph is read separately and never merged, and every link carries the evidence that produced it. See `docs/federation.md`.
 - Events and tool invocations are indexed: a publisher gets a `References` edge to every listener of that event name, and `call_tool('x')` gets a `Calls` edge into the tool `x` was defined as.

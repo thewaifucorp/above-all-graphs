@@ -13,9 +13,11 @@ alone do not establish parity.
 
 - One static Rust binary distributed for Linux, macOS, and Windows on x64 and
   arm64, with no compile step during npm installation.
-- Twenty structural language frontends sharing one graph model. Rust and
-  JavaScript have dedicated extraction paths; the remaining languages use the
-  tree-sitter language pack plus AAG declaration and call extraction.
+- Thirty-nine structural language frontends sharing one graph model. Rust and
+  JavaScript have dedicated extraction paths; Vue, Svelte, and Astro hand their
+  script block to the JavaScript one; the rest use the tree-sitter language pack
+  plus AAG declaration and call extraction. Every listed language is covered by a
+  test that extracts a declaration from it.
 - Confidence-tagged calls, imports, inheritance, implementation,
   documentation, contract, schema, and infrastructure relations. Imports and
   declared type relations are resolved through language-aware module
@@ -250,9 +252,24 @@ P2 gates expand reach after the core is measurable and dependable.
 
 ### P2 — ecosystem breadth and distribution
 
-- 13. Expand and validate structural coverage to the wider language set used by
-    Graphify, prioritizing Vue, Svelte, Astro, Zig, PowerShell, Julia, Groovy,
-    Verilog/SystemVerilog, Fortran, Pascal/Delphi, and Salesforce Apex.
+- 13. **Closed.** Structural coverage extended and validated across the
+    prioritized set — Vue, Svelte, Astro, Zig, PowerShell, Julia, Groovy,
+    Verilog/SystemVerilog, Fortran, Pascal/Delphi, Salesforce Apex — plus
+    Haskell, OCaml, Erlang, Clojure, Nim, Perl, and Solidity, taking the surface
+    from 20 languages to 39.
+    Validated is the operative word: a language is listed only once a test in
+    `src/parse.rs` shows a snippet of it yields a declaration. A grammar existing
+    in the pack is not coverage. Four grammars needed real work rather than a
+    table entry: Vue/Svelte/Astro hand their script block back as one opaque
+    node, so the block is extracted and handed to the JavaScript frontend with
+    line numbers shifted; Clojure declares with a form (`(defn greet …)`) rather
+    than a node kind; Groovy parses as a loose command soup and is matched on the
+    `def`/`class`/`interface`/`trait` keyword; the rest declare with their own
+    node kinds (Zig's `FnProto`, Fortran's `subroutine`, Perl's
+    `subroutine_declaration_statement`, …) and their own name nodes.
+    Not claimed: structural coverage, as the claim discipline below already says.
+    A component file's markup is not indexed — a template is not a declaration.
+    Groovy recognition covers the keyword forms and nothing more.
 - 14. Expand agent installers and uninstallers from seven integrations to the
     broader cross-framework surface, while keeping every edit additive,
     idempotent, and reversible.
@@ -593,8 +610,10 @@ repository.
 
 ## Claim discipline
 
-- Twenty frontends means structural coverage, not equal semantic depth in all
-  twenty languages.
+- Thirty-nine frontends means structural coverage, not equal semantic depth in
+  all thirty-nine languages. Rust and JavaScript have the deepest extraction;
+  flow analysis covers seven; the rest are declarations, calls, imports, and
+  heritage.
 - Protocol conformance or protocol utility does not prove AboveAllGraphs Engine
   extraction quality, performance, or scale.
 - LLM-only manifests and simulated runs cannot substantiate engine claims.

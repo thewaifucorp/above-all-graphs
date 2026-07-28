@@ -848,11 +848,40 @@ pub fn supports_file(file_path: &str) -> bool {
     ) || polyglot_language(file_path).is_some()
 }
 
-/// The 18 pack-backed languages plus native Rust and JavaScript frontends
-/// make the default top-20 language surface.
+/// Every pack-backed language, keyed by extension. With the native Rust and
+/// JavaScript frontends this is the whole language surface.
+///
+/// A language is listed here only once a test shows the pack extracts
+/// declarations from it — the list is a claim about what works, not about which
+/// grammars exist. See the `pack_languages_extract_declarations` test, which is
+/// the validation half of P2.13.
 fn polyglot_language(file_path: &str) -> Option<&'static str> {
     let extension = file_path.rsplit('.').next()?.to_ascii_lowercase();
     match extension.as_str() {
+        // Component frameworks: one file holding markup, style, and script.
+        "vue" => Some("vue"),
+        "svelte" => Some("svelte"),
+        "astro" => Some("astro"),
+        // Systems and scientific languages.
+        "zig" => Some("zig"),
+        "jl" => Some("julia"),
+        "f" | "f90" | "f95" | "f03" | "for" => Some("fortran"),
+        "nim" => Some("nim"),
+        "hs" => Some("haskell"),
+        "ml" | "mli" => Some("ocaml"),
+        "erl" | "hrl" => Some("erlang"),
+        "clj" | "cljs" | "cljc" => Some("clojure"),
+        // JVM and .NET adjacent.
+        "groovy" | "gradle" => Some("groovy"),
+        "cls" | "trigger" => Some("apex"),
+        // Hardware description.
+        "v" | "vh" => Some("verilog"),
+        "sv" | "svh" => Some("systemverilog"),
+        // Scripting and legacy.
+        "ps1" | "psm1" | "psd1" => Some("powershell"),
+        "pas" | "pp" | "dpr" => Some("pascal"),
+        "pl" | "pm" => Some("perl"),
+        "sol" => Some("solidity"),
         "ts" => Some("typescript"),
         "tsx" => Some("tsx"),
         "py" | "pyw" => Some("python"),
@@ -876,8 +905,191 @@ fn polyglot_language(file_path: &str) -> Option<&'static str> {
     }
 }
 
+/// Single-file component languages, where the code lives inside a `<script>`
+/// block and the rest of the file is markup.
+const EMBEDDED_SCRIPT: &[&str] = &["vue", "svelte", "astro"];
+
+/// Parses a component file by handing its script block to the JavaScript
+/// frontend.
+///
+/// The markup half is not indexed: a template is not a declaration, and the
+/// grammar hands the script back as one opaque `raw_text` node anyway. Line
+/// numbers are shifted so a symbol still points at the right line of the
+/// component.
+fn parse_embedded_script(file_path: &str, source: &str, language: &str) -> Result<ParsedFile> {
+    let mut parser =
+        tree_sitter_language_pack::get_parser(language).map_err(|error| Error::Parse {
+            file: file_path.to_string(),
+            reason: error.to_string(),
+        })?;
+    let Some(tree) = parser.parse(source) else {
+        return Ok(ParsedFile::default());
+    };
+    let mut blocks = Vec::new();
+    collect_script_blocks(&tree.root_node(), source, &mut blocks);
+    let mut out = ParsedFile::default();
+    for (script, offset) in blocks {
+        let Ok(mut parsed) = JavaScriptParser.parse(file_path, script) else {
+            continue;
+        };
+        for node in &mut parsed.nodes {
+            node.start_line += offset;
+            node.end_line += offset;
+        }
+        for route in &mut parsed.routes {
+            route.line += offset;
+        }
+        out.nodes.append(&mut parsed.nodes);
+        out.imports.append(&mut parsed.imports);
+        out.calls.append(&mut parsed.calls);
+        out.inherits.append(&mut parsed.inherits);
+        out.members.append(&mut parsed.members);
+        out.locals.append(&mut parsed.locals);
+        out.routes.append(&mut parsed.routes);
+        out.tools.append(&mut parsed.tools);
+        out.consumers.append(&mut parsed.consumers);
+        out.events.append(&mut parsed.events);
+        out.tool_calls.append(&mut parsed.tool_calls);
+    }
+    Ok(out)
+}
+
+/// `(script text, line offset)` for every script block in a component file.
+fn collect_script_blocks<'a>(
+    node: &tree_sitter_language_pack::Node,
+    source: &'a str,
+    out: &mut Vec<(&'a str, u32)>,
+) {
+    if matches!(node.kind().as_str(), "raw_text" | "frontmatter_js_block") {
+        let range = node.byte_range();
+        if let Some(text) = source.get(range.start..range.end) {
+            out.push((
+                text,
+                u32::try_from(node.start_position().row).unwrap_or_default(),
+            ));
+        }
+        return;
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_script_blocks(&child, source, out);
+        }
+    }
+}
+
+/// Groovy's grammar is a loose command soup: `def greet() { … }` parses as a
+/// `command` whose first `unit` is the keyword and whose block starts with the
+/// name. So the keyword is matched and the next word taken, which covers `def`
+/// and `class` declarations and nothing more — see the limits in
+/// `docs/parse.md`.
+fn collect_groovy_declarations(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    file_path: &str,
+    out: &mut ParsedFile,
+    owners: &mut Vec<(String, usize, usize)>,
+) {
+    if node.kind() == "command" {
+        let words: Vec<&str> = (0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX))
+            .filter_map(|index| node.named_child(index))
+            .filter_map(|child| {
+                let range = child.byte_range();
+                source.get(range.start..range.end)
+            })
+            .collect();
+        if let [keyword, rest, ..] = words.as_slice()
+            && matches!(keyword.trim(), "def" | "class" | "interface" | "trait")
+        {
+            let name = rest
+                .trim()
+                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .find(|part| !part.is_empty())
+                .unwrap_or_default();
+            let kind = match keyword.trim() {
+                "class" => NodeKind::Struct,
+                "interface" | "trait" => NodeKind::Interface,
+                _ => NodeKind::Function,
+            };
+            if !name.is_empty() && !out.nodes.iter().any(|existing| existing.name == name) {
+                out.nodes.push(Node {
+                    id: None,
+                    kind,
+                    name: name.to_string(),
+                    file_path: file_path.to_string(),
+                    start_line: u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX),
+                    end_line: u32::try_from(node.end_position().row + 1).unwrap_or(u32::MAX),
+                    description: None,
+                });
+                if kind == NodeKind::Function {
+                    owners.push((name.to_string(), node.start_byte(), node.end_byte()));
+                }
+            }
+        }
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_groovy_declarations(&child, source, file_path, out, owners);
+        }
+    }
+}
+
+/// Clojure declares with a form, not a node kind: `(defn greet [] …)` is a list
+/// whose first symbol says what the second one is.
+fn collect_clojure_declarations(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    file_path: &str,
+    out: &mut ParsedFile,
+    owners: &mut Vec<(String, usize, usize)>,
+) {
+    if node.kind() == "list_lit" {
+        let symbols: Vec<&str> = (0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX))
+            .filter_map(|index| node.named_child(index))
+            .filter(|child| child.kind() == "sym_lit")
+            .filter_map(|child| {
+                let range = child.byte_range();
+                source.get(range.start..range.end)
+            })
+            .collect();
+        if let [form, name, ..] = symbols.as_slice()
+            && matches!(
+                *form,
+                "defn" | "defn-" | "defmacro" | "def" | "defrecord" | "defprotocol"
+            )
+        {
+            let kind = match *form {
+                "defrecord" => NodeKind::Struct,
+                "defprotocol" => NodeKind::Interface,
+                _ => NodeKind::Function,
+            };
+            if !out.nodes.iter().any(|existing| existing.name == *name) {
+                out.nodes.push(Node {
+                    id: None,
+                    kind,
+                    name: (*name).to_string(),
+                    file_path: file_path.to_string(),
+                    start_line: u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX),
+                    end_line: u32::try_from(node.end_position().row + 1).unwrap_or(u32::MAX),
+                    description: None,
+                });
+                if kind == NodeKind::Function {
+                    owners.push(((*name).to_string(), node.start_byte(), node.end_byte()));
+                }
+            }
+        }
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_clojure_declarations(&child, source, file_path, out, owners);
+        }
+    }
+}
+
 #[allow(clippy::items_after_statements)]
 fn parse_polyglot(file_path: &str, source: &str, language: &str) -> Result<ParsedFile> {
+    if EMBEDDED_SCRIPT.contains(&language) {
+        return parse_embedded_script(file_path, source, language);
+    }
     let mut out = ParsedFile::default();
     let mut owners = Vec::new();
     append_pack_symbols(file_path, source, language, &mut out, &mut owners)?;
@@ -896,6 +1108,12 @@ fn parse_polyglot(file_path: &str, source: &str, language: &str) -> Result<Parse
     let root = tree.root_node();
 
     collect_ast_declarations(&root, source, file_path, &mut out, &mut owners);
+    if language == "groovy" {
+        collect_groovy_declarations(&root, source, file_path, &mut out, &mut owners);
+    }
+    if language == "clojure" {
+        collect_clojure_declarations(&root, source, file_path, &mut out, &mut owners);
+    }
     collect_ast_inheritance(&root, source, &mut out.inherits);
     collect_ast_imports(&root, source, &mut out.imports);
     out.inherits.sort_unstable();
@@ -1638,6 +1856,18 @@ fn collect_ast_declarations(
             | "function_item"
             | "constructor_declaration"
             | "function_signature"
+            // Grammars whose declaration node is spelled its own way. Each one
+            // is here because a test in this file shows it extracts a symbol.
+            | "FnProto"              // Zig
+            | "subroutine"           // Fortran
+            | "function_statement"   // PowerShell
+            | "routine"              // Nim
+            | "let_binding"          // OCaml
+            | "fun_decl"             // Erlang
+            | "declProc"             // Pascal/Delphi
+            | "declFunc"
+            | "subroutine_declaration_statement" // Perl
+            | "bind" // Haskell
     ) {
         Some(
             if syntax.contains("method") || syntax.contains("constructor") {
@@ -1654,6 +1884,8 @@ fn collect_ast_declarations(
             | "struct_declaration"
             | "object_declaration"
             | "enum_declaration"
+            | "module_declaration"   // Verilog/SystemVerilog: a module is the unit
+            | "contract_declaration" // Solidity
     ) {
         Some(NodeKind::Struct)
     } else if matches!(
@@ -1699,14 +1931,32 @@ fn collect_ast_declarations(
     }
 }
 
+/// Node kinds that *are* a name in one grammar or another. A declaration whose
+/// name is not in a `name` field is found by looking for one of these among its
+/// nearest children — nearest, so a body identifier is never mistaken for the
+/// declaration's own name.
+const NAME_KINDS: &[&str] = &[
+    "identifier",
+    "type_identifier",
+    "field_identifier",
+    "simple_identifier",
+    "IDENTIFIER",
+    "name",
+    "symbol",
+    "value_name",
+    "atom",
+    "variable",
+    "function_name",
+    "moduleName",
+    "sym_name",
+    "bareword",
+];
+
 fn declaration_identifier<'a>(
     node: &tree_sitter_language_pack::Node,
     source: &'a str,
 ) -> Option<&'a str> {
-    if matches!(
-        node.kind().as_str(),
-        "identifier" | "type_identifier" | "field_identifier" | "simple_identifier"
-    ) {
+    if NAME_KINDS.contains(&node.kind().as_str()) {
         return source.get(node.byte_range().start..node.byte_range().end);
     }
     (0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX))
@@ -2657,6 +2907,96 @@ mod tests {
                 callee: "insert_node".into(),
                 receiver: Some("graph".into()),
             }]
+        );
+    }
+
+    /// The validation half of P2.13: a language is only listed once a snippet
+    /// from it yields a declaration. A grammar existing in the pack is not
+    /// coverage — extracting a symbol is.
+    #[test]
+    fn pack_languages_extract_declarations() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "app.vue",
+                "<script>\nexport default { methods: { greet() { return 1; } } }\n</script>\n<template><p/></template>",
+                "greet",
+            ),
+            (
+                "app.svelte",
+                "<script>\n  function greet() { return 1; }\n</script>\n<p>hi</p>",
+                "greet",
+            ),
+            (
+                "page.astro",
+                "---\nfunction greet() { return 1; }\n---\n<p>hi</p>",
+                "greet",
+            ),
+            (
+                "main.zig",
+                "pub fn greet() u8 {\n    return 1;\n}\n",
+                "greet",
+            ),
+            ("main.jl", "function greet()\n    return 1\nend\n", "greet"),
+            (
+                "main.f90",
+                "subroutine greet()\nend subroutine greet\n",
+                "greet",
+            ),
+            ("main.nim", "proc greet(): int =\n  1\n", "greet"),
+            ("main.hs", "greet :: Int\ngreet = 1\n", "greet"),
+            ("main.ml", "let greet () = 1\n", "greet"),
+            ("main.erl", "-module(main).\ngreet() -> 1.\n", "greet"),
+            ("main.clj", "(defn greet [] 1)\n", "greet"),
+            (
+                "Main.groovy",
+                "class Main {\n  def greet() { return 1 }\n}\n",
+                "greet",
+            ),
+            (
+                "Main.cls",
+                "public class Main {\n  public Integer greet() { return 1; }\n}\n",
+                "greet",
+            ),
+            ("main.v", "module greet;\nendmodule\n", "greet"),
+            ("main.sv", "module greet;\nendmodule\n", "greet"),
+            ("main.ps1", "function Greet {\n  return 1\n}\n", "Greet"),
+            (
+                "main.pas",
+                "program Main;\nprocedure Greet;\nbegin\nend;\nbegin\nend.\n",
+                "Greet",
+            ),
+            ("main.pl", "sub greet {\n  return 1;\n}\n", "greet"),
+            (
+                "main.sol",
+                "contract Greeter {\n  function greet() public pure returns (uint) { return 1; }\n}\n",
+                "greet",
+            ),
+            ("build.gradle", "def greet() { return 1 }\n", "greet"),
+        ];
+        let mut silent = Vec::new();
+        for (path, source, expected) in cases {
+            assert!(
+                supports_file(path),
+                "{path} must be recognized as a source file"
+            );
+            let parsed = parse_file(path, source)
+                .unwrap_or_else(|error| panic!("{path} failed to parse: {error}"))
+                .unwrap_or_else(|| panic!("{path} has no parser"));
+            if !parsed.nodes.iter().any(|node| node.name == *expected) {
+                silent.push(format!(
+                    "{path}: expected `{expected}`, got {:?}",
+                    parsed
+                        .nodes
+                        .iter()
+                        .map(|node| node.name.as_str())
+                        .collect::<Vec<_>>()
+                ));
+            }
+        }
+        assert!(
+            silent.is_empty(),
+            "every listed language must extract a declaration:\n{}",
+            silent.join("\n")
         );
     }
 
