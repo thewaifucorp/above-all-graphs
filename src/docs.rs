@@ -122,7 +122,14 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("widget.rs"), "struct Widget;").unwrap();
         fs::write(dir.join("diagram.png"), [0x89, 0x50, 0x4e, 0x47]).unwrap();
-        crate::bigbang::run(&dir, &crate::bigbang::Options::default()).unwrap();
+        crate::bigbang::run(
+            &dir,
+            &crate::bigbang::Options {
+                no_install: true,
+                ..crate::bigbang::Options::default()
+            },
+        )
+        .unwrap();
         dir
     }
 
@@ -164,6 +171,58 @@ mod tests {
         );
     }
 
+    /// P1.9: a binary document that carries text does not wait for a vision
+    /// pass. It is read, indexed, and linked in the same pass as a `.md`.
+    #[test]
+    fn a_pdf_is_read_and_linked_without_a_vision_pass() {
+        let root = indexed_root();
+        fs::write(
+            root.join("design.pdf"),
+            include_bytes!("../assets/tests/note.pdf"),
+        )
+        .unwrap();
+        crate::bigbang::run(
+            &root,
+            &crate::bigbang::Options {
+                force: true,
+                no_install: true,
+                ..crate::bigbang::Options::default()
+            },
+        )
+        .unwrap();
+
+        let graph = Graph::open_existing(&root).unwrap();
+        let doc = graph.find_by_name("design.pdf").unwrap().unwrap();
+        assert!(
+            doc.description
+                .as_deref()
+                .is_some_and(|text| text.contains("build_widget")),
+            "the text layer is the description: {:?}",
+            doc.description
+        );
+        let widget = graph.find_by_name("Widget").unwrap().unwrap();
+        assert!(
+            graph
+                .callers(widget.id.unwrap())
+                .unwrap()
+                .iter()
+                .any(|(node, kind, _)| node.name == "design.pdf" && *kind == EdgeKind::Explains),
+            "and it links to what it names, like any other doc"
+        );
+    }
+
+    /// The other half of the same rule: a file with no readable text keeps the
+    /// empty description `aag describe` expects to find.
+    #[test]
+    fn an_image_with_nothing_to_read_still_waits_for_a_description() {
+        let root = indexed_root();
+        let graph = Graph::open_existing(&root).unwrap();
+
+        let doc = graph.find_by_name("diagram.png").unwrap().unwrap();
+
+        assert_eq!(doc.description, None);
+    }
+
     #[test]
     fn describe_non_doc_node_errors() {
         let root = indexed_root();
@@ -185,6 +244,7 @@ mod tests {
             &root,
             &crate::bigbang::Options {
                 force: true,
+                no_install: true,
                 ..crate::bigbang::Options::default()
             },
         )

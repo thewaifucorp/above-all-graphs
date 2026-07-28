@@ -65,13 +65,15 @@ pub(crate) const SKIP_DIRS: &[&str] = &[
 pub(crate) const SKIP_FILES: &[&str] = &[".aag.lock"];
 
 /// Text doc extensions, indexed immediately (no vision pass needed).
-const TEXT_DOC_EXTENSIONS: &[&str] = &["md", "txt"];
+const TEXT_DOC_EXTENSIONS: &[&str] = &["md", "txt", "rst", "adoc", "srt", "vtt"];
 
-/// Binary/image doc extensions — inserted unprocessed, described later by
-/// the host agent via `crate::docs::describe`.
+/// Binary/image doc extensions. Text is extracted natively where the format
+/// carries it (`crate::extract`); what has none — a scan, an unlabelled
+/// screenshot, a video with no transcript beside it — is inserted unprocessed
+/// and described later by the host agent via `crate::docs::describe`.
 const BINARY_DOC_EXTENSIONS: &[&str] = &[
-    "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "docx", "pptx", "xlsx", "odt", "ods", "odp",
-    "mp4", "mov", "avi", "mkv", "webm",
+    "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "docx", "pptx", "xlsx", "xlsm", "xls",
+    "odt", "ods", "odp", "mp4", "mov", "avi", "mkv", "webm",
 ];
 
 /// Counts from one `index_repo` pass — used for logging and tests.
@@ -400,9 +402,13 @@ fn index_doc_file(
     pending: &mut Pending,
     summary: &mut IndexSummary,
 ) -> Result<()> {
+    // A binary doc is read natively when its format carries text; what comes
+    // back is indexed exactly like a text doc's contents, so it links to the
+    // symbols it names without waiting for a vision pass. Nothing readable is
+    // still `None`, which is what `aag describe` expects to find.
     let description = match kind {
         DocKind::Text => fs::read_to_string(path).ok(),
-        DocKind::Binary => None,
+        DocKind::Binary => crate::extract::text(path),
     };
     let doc_id = graph.insert_node(&Node {
         id: None,

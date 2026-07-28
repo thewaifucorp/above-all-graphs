@@ -270,10 +270,23 @@ P2 gates expand reach after the core is measurable and dependable.
    A catalog is a snapshot taken when `scan` ran; nothing watches the database.
    Drift is name-level — a table in both is "matched" even when its columns
    differ — and row data is never read.
-- 9. Add native text and metadata extraction for PDF, DOCX, XLSX, presentations,
-   images, audio/video transcripts, URLs, papers, and workspace documents.
-   Host-agent descriptions remain valid additional evidence, not the only
-   extraction path.
+- 9. **Closed.** Native text and metadata extraction (`src/extract.rs`), run by
+   indexing before any agent is involved: PDF text layers, `.docx`, `.pptx`
+   slide by slide, `.odt`/`.odp`, `.xlsx`/`.xlsm`/`.xls`/`.ods` sheet by sheet,
+   `.csv`, `.svg` labels, image dimensions and authoring EXIF, and the
+   `.srt`/`.vtt` transcript sitting beside a video. `.srt`, `.vtt`, `.rst`, and
+   `.adoc` are indexed as text documents too. See [extract](extract.md).
+   What comes back is the doc's description and goes through the same linking a
+   `.md` file gets, so a design PDF naming `build_widget` gets an `Explains`
+   edge into it in the first pass. Host-agent descriptions remain exactly what
+   they were: `aag describe` still overwrites, because what a diagram *shows*
+   beats the words printed on it.
+   Not claimed: no OCR and no speech recognition. A scanned PDF, an unlabelled
+   screenshot, and a video with no transcript beside it read as nothing — which
+   leaves the empty description the host-agent path expects — and an image's
+   metadata says where it came from, not what it depicts. Extraction is bounded
+   at 40 000 characters and says so where it cuts, and a malformed document is
+   skipped rather than fatal.
 - 10. **Closed.** Shared MCP Streamable HTTP (`src/transport.rs`): sessions with
     `Mcp-Session-Id`, `DELETE` termination, and idle expiry; the same JSON-RPC
     answer framed as JSON or as one SSE `event: message` by `Accept`; a `GET`
