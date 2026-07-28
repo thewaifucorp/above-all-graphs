@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Api { command } => print_api(command)?,
+        Command::Pr { command } => print_pr(command)?,
         Command::Db { command } => print_db(command)?,
         Command::Memory { command } => run_memory(command)?,
         Command::Communities { query, path } => {
@@ -199,6 +200,17 @@ fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
         aag::cli::ApiView::Tools { filter, path } => aag::api::tool_map(&path, &filter)?,
         aag::cli::ApiView::Shapes { filter, path } => aag::api::format_shape_check(&path, &filter)?,
         aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn print_pr(command: aag::cli::PrView) -> anyhow::Result<()> {
+    let text = match command {
+        aag::cli::PrView::Dashboard { base, path } => aag::pr::dashboard(&path, &base)?,
+        aag::cli::PrView::Conflicts { base, path } => aag::pr::conflicts(&path, &base)?,
+        aag::cli::PrView::Worktrees { base, path } => aag::pr::worktrees(&path, &base)?,
+        aag::cli::PrView::Impact { number, path } => aag::pr::impact(&path, &number)?,
     };
     println!("{text}");
     Ok(())

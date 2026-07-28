@@ -303,9 +303,23 @@ P2 gates expand reach after the core is measurable and dependable.
     Not claimed: stdio has no such channel, because there is no stream to push
     into — a stdio client still asks again. Sessions live in the process that
     minted them, which is what `--stateless` is for.
-- 11. Turn PR primitives into a full graph-backed workflow: dashboard, worktree
-    mapping, conflict detection through shared communities, review queue,
-    risk-ranked findings, and plan to work to review gates.
+- 11. **Closed.** Graph-backed pull-request workflow (`src/pr.rs`):
+    `aag pr dashboard` ranks every open PR by what it reaches, `aag pr
+    conflicts` reports the pairs about to collide, `aag pr worktrees` maps each
+    local worktree to the PR on its branch, and `aag pr impact <n>` answers for
+    one. MCP gained `pr_dashboard` and `pr_conflicts`. See [pr](pr.md).
+    Risk is a stated table, not a judgement — +3 per touched hub symbol (10+
+    dependents), +1 per 25 symbols of blast radius, +4 when affected tests exist
+    and the PR changes none, +3 for failing checks, +2 for overlapping another
+    open PR — and every point prints next to the rule that produced it.
+    Overlap has three grades: same file (a merge conflict on the way), same
+    symbol without the same file (the branches merge cleanly and still
+    disagree — the one no diff shows), and same community (proximity, reported
+    but not called a conflict).
+    Not claimed: one `gh pr diff` per pull request, so 37 open PRs cost 37 round
+    trips (~38s measured); attribution is by changed file rather than changed
+    hunk, which over-reports on large files; and the graph describes the base
+    tree, not each PR's head.
 - 12. **Closed.** Outcome-backed work memory (`src/memory.rs`): question,
     answer, supporting nodes, outcome (`worked`/`wrong`/`open`), correction, and
     revision, as `aag memory save|correct|recall|lessons` and the MCP tools

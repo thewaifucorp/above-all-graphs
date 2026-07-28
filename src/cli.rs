@@ -183,6 +183,13 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// Pull requests, ranked by what the graph says they reach.
+    Pr {
+        /// Which pull-request view.
+        #[command(subcommand)]
+        command: PrView,
+    },
+
     /// Live database catalogs: ingest one, and compare it with the DDL this
     /// repository declares.
     Db {
@@ -481,6 +488,54 @@ pub enum MemoryCommand {
     /// Review the lessons that repeated outcomes suggest.
     Lessons {
         /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Which pull-request view to print.
+#[derive(Subcommand, Debug, Clone)]
+pub enum PrView {
+    /// Every open pull request, highest risk first, with the rules that
+    /// produced each score and the overlaps between them.
+    Dashboard {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Open pull requests that share a file or a symbol.
+    Conflicts {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Local git worktrees, mapped to the pull request on each branch.
+    Worktrees {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// One pull request's blast radius, risk score, and reasons, as JSON.
+    Impact {
+        /// Pull request number.
+        number: String,
+
+        /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },

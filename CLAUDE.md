@@ -23,6 +23,7 @@ CI (`.github/workflows/ci.yml`) enforces fmt + clippy `-D warnings` + tests. Rel
 - `sync.rs` — hook-driven refresh: full pass + per-file relevance short-circuit
 - `workspaces.rs` — global registry + hub.html (multi-repo = selection, not unification)
 - `database.rs` — live PostgreSQL catalog into the graph; credentials never stored
+- `pr.rs` — pull requests ranked by what the graph says they reach; `gh` only at the edges
 - `export.rs` — the offline site (graph.html/wiki/report) + GraphML/Cypher/Obsidian
 - `mcp.rs` — stdio JSON-RPC; `explore` listed by default, rest via `AAG_MCP_TOOLS`
 - Skill templates live in `assets/skills/`, embedded via `include_str!`

@@ -285,7 +285,9 @@ pub fn affected(root: &Path, changed_files: &[String]) -> Result<Vec<String>> {
     Ok(affected)
 }
 
-fn looks_like_test_file(path: &str) -> bool {
+/// Whether a path looks like a test file. Shared with `crate::pr`, which asks
+/// the same question about a pull request's own diff.
+pub(crate) fn looks_like_test_file(path: &str) -> bool {
     let lower = path.to_lowercase();
     lower.contains("/tests/")
         || lower.starts_with("tests/")
