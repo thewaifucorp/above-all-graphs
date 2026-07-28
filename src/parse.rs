@@ -41,6 +41,39 @@ pub struct ParsedFile {
     pub tools: Vec<ToolRef>,
     /// Outbound HTTP calls this file makes — endpoints it consumes.
     pub consumers: Vec<ConsumerRef>,
+    /// Events this file publishes or listens for, by name.
+    pub events: Vec<EventRef>,
+    /// RPC/MCP tools this file invokes by name.
+    pub tool_calls: Vec<ToolCallRef>,
+}
+
+/// An event published or listened for by name: `emit('order.created')`,
+/// `bus.subscribe('order.created', handle)`.
+///
+/// The two halves are usually in different files, and across a group of
+/// repositories they are usually in different repositories — which is the point
+/// of recording them separately rather than as a call.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EventRef {
+    /// Event or topic name as written.
+    pub name: String,
+    /// True for a publisher, false for a listener.
+    pub emitted: bool,
+    /// Symbol the call sits in, when it sits in one.
+    pub owner: Option<String>,
+    /// 1-based line.
+    pub line: u32,
+}
+
+/// An RPC/MCP tool invoked by name: `callTool('search')`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ToolCallRef {
+    /// Tool name as written.
+    pub name: String,
+    /// Symbol the call sits in, when it sits in one.
+    pub owner: Option<String>,
+    /// 1-based line.
+    pub line: u32,
 }
 
 /// An RPC or MCP tool a program exposes: `server.tool("search", handler)`,
@@ -219,6 +252,10 @@ fn collect_contract_calls(
     out.tools.extend(registration_tool(callee, args, line));
     out.consumers
         .extend(consumer_call(callee, args, line, current_owner));
+    out.events
+        .extend(event_call(callee, args, line, current_owner));
+    out.tool_calls
+        .extend(tool_call(callee, args, line, current_owner));
 }
 
 /// The contents of a quoted argument, or `None` when it is not a literal.
@@ -375,6 +412,109 @@ fn struct_tool(type_text: &str, body_text: &str, line: u32) -> Option<ToolRef> {
         handler: None,
         line,
         attach_below: false,
+    })
+}
+
+/// Callee tails that publish an event.
+const EMITTERS: &[&str] = &[
+    "emit",
+    "publish",
+    "dispatch",
+    "send_event",
+    "sendevent",
+    "post_message",
+    "postmessage",
+    "produce",
+    "notify",
+];
+
+/// Callee tails that listen for one.
+const LISTENERS: &[&str] = &[
+    "on",
+    "once",
+    "addeventlistener",
+    "addlistener",
+    "subscribe",
+    "consume",
+    "handle_event",
+    "handleevent",
+];
+
+/// Callee tails that invoke a tool by name.
+const TOOL_CALLERS: &[&str] = &[
+    "call_tool",
+    "calltool",
+    "invoke_tool",
+    "invoketool",
+    "run_tool",
+    "runtool",
+    "use_tool",
+    "usetool",
+];
+
+/// An event published or listened for at this call site.
+///
+/// The name has to be a literal: an event whose name is computed is a link this
+/// cannot make, and guessing one would pair unrelated producers and consumers.
+fn event_call(
+    callee_text: &str,
+    args_text: &str,
+    line: u32,
+    owner: Option<&str>,
+) -> Option<EventRef> {
+    let callee = callee_text
+        .rsplit(['.', ':', ' ', '>'])
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
+    let emitted = if EMITTERS.contains(&callee.as_str()) {
+        true
+    } else if LISTENERS.contains(&callee.as_str()) {
+        false
+    } else {
+        return None;
+    };
+    let args = args_text
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')');
+    let name = quoted_argument(split_arguments(args).first()?)?;
+    // A path is an HTTP route; a bare identifier is not an event name.
+    if name.is_empty() || name.starts_with('/') {
+        return None;
+    }
+    Some(EventRef {
+        name,
+        emitted,
+        owner: owner.map(str::to_string),
+        line,
+    })
+}
+
+/// A tool invoked by name at this call site.
+fn tool_call(
+    callee_text: &str,
+    args_text: &str,
+    line: u32,
+    owner: Option<&str>,
+) -> Option<ToolCallRef> {
+    let callee = callee_text
+        .rsplit(['.', ':', ' ', '>'])
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
+    if !TOOL_CALLERS.contains(&callee.as_str()) {
+        return None;
+    }
+    let args = args_text
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')');
+    let name = quoted_argument(split_arguments(args).first()?)?;
+    (!name.is_empty()).then_some(ToolCallRef {
+        name,
+        owner: owner.map(str::to_string),
+        line,
     })
 }
 
@@ -554,6 +694,10 @@ fn attach_route_handlers(out: &mut ParsedFile) {
     out.tools.dedup();
     out.consumers.sort_unstable();
     out.consumers.dedup();
+    out.events.sort_unstable();
+    out.events.dedup();
+    out.tool_calls.sort_unstable();
+    out.tool_calls.dedup();
 }
 
 /// A method or field and the type that declares it. Without this, a call on
@@ -1024,6 +1168,8 @@ fn collect_ast_routes(
                 out.tools.extend(registration_tool(callee, args, line));
                 out.consumers
                     .extend(consumer_call(callee, args, line, owner));
+                out.events.extend(event_call(callee, args, line, owner));
+                out.tool_calls.extend(tool_call(callee, args, line, owner));
             }
         }
         "decorator" | "annotation" | "marker_annotation" | "attribute" | "attribute_item" => {

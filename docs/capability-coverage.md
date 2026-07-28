@@ -51,7 +51,8 @@ alone do not establish parity.
 - Basic PR listing, filtering, and graph impact through the read-only GitHub
   CLI.
 - Multi-workspace query and named slash-hierarchical repository groups while
-  keeping each repository graph independent.
+  keeping each repository graph independent, plus cross-repository protocol links
+  (API, package, event, schema, tool) computed by reading each graph separately.
 - AAG Protocol compilation, structural and semantic validation, provenance,
   declared/observed separation, uncertainty preservation, and automatic
   SQLite migration.
@@ -204,9 +205,21 @@ P2 gates expand reach after the core is measurable and dependable.
    a finding is a place to look. Tool invocations are not linked to tool
    definitions: a dispatcher matching a name to a branch is a link only the
    string can make.
-- 7. Resolve cross-repository protocol links without merging local databases:
-   API producer to client, package export to import, event producer to
-   consumer, schema to model, and MCP tool definition to invocation.
+- 7. **Closed.** Cross-repository protocol links without merging local
+   databases: API producer to client, package export to import, event producer to
+   consumer, schema to model, and MCP tool definition to invocation, as
+   `aag group links <group>` and the MCP tool `group_links`. Each member's graph
+   is opened read-only and matched by name across the boundary; nothing is
+   unified, and every link carries the evidence that produced it. Package names
+   come from the repository's own manifests, with no registry consulted. Inside
+   one repository the same relations are ordinary edges: a publisher gets a
+   `References` edge to every listener of that event name, and a tool invocation
+   gets a `Calls` edge into the definition it names. See [federation](federation.md).
+   Not claimed: a link is a name agreeing across an ownership boundary, which is
+   evidence and not proof — two repositories can name one event and mean two
+   things, a declared `Order` and a class `Order` may be unrelated, and a path or
+   event name built at runtime is never matched, so a missing link is not evidence
+   that no call exists.
 - 8. Ingest live PostgreSQL catalogs, including schemas, tables, columns,
    constraints, indexes, views, and foreign keys, with credentials kept out of
    graph exports and logs.
@@ -595,8 +608,9 @@ repository.
   safety, and neither `aag taint` nor the `taint` tool is a security scanner.
 - Binary Office/media files are graph nodes, but native content extraction is
   still a priority gate.
-- Group queries aggregate independent graphs; cross-repository symbol and
-  contract resolution is not complete until priority 7 lands.
+- Group queries aggregate independent graphs. Cross-repository links are name
+  agreement across an ownership boundary — API, package, event, schema, and tool
+  — not unified symbol resolution, and each link says what evidence produced it.
 - Optional source-build embeddings must not be presented as part of the
   standard npm binary.
 - The current graph UI is usable, not finished. Visual quality, navigation,

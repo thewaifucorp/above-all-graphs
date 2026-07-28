@@ -324,6 +324,14 @@ pub enum GroupCommand {
         /// Optional group; omitted lists group definitions.
         name: Option<String>,
     },
+    /// Cross-repository protocol links: API producer to client, package export
+    /// to import, event producer to consumer, schema to model, tool definition
+    /// to invocation. Graphs stay separate.
+    Links {
+        /// Group name, or `all` for every registered workspace.
+        #[arg(default_value = "all")]
+        name: String,
+    },
     /// Query one group and all of its descendants.
     Query {
         /// Group name.

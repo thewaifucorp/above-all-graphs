@@ -249,6 +249,12 @@ struct Pending {
     /// `(file, calling symbol, method, path)` for outbound HTTP calls awaiting
     /// an endpoint to point at.
     consumers: Vec<(String, Option<String>, String, String)>,
+    /// `(file, publishing symbol, event name)`.
+    emitters: Vec<(String, Option<String>, String)>,
+    /// `(file, listening symbol, event name)`.
+    listeners: Vec<(String, Option<String>, String)>,
+    /// `(file, calling symbol, tool name)`.
+    tool_calls: Vec<(String, Option<String>, String)>,
     /// `(doc node id, doc text)`.
     doc_mentions: Vec<(i64, String)>,
     /// `OpenAPI` operations awaiting implementation matching.
@@ -330,6 +336,8 @@ fn resolve_pending(graph: &Graph, pending: &Pending, summary: &mut IndexSummary)
     resolve_inheritance(graph, &pending.inherits, &index, summary)?;
     resolve_routes(graph, &pending.routes, &index, summary)?;
     resolve_consumers(graph, &pending.consumers, &index, summary)?;
+    resolve_events(graph, pending, &index, summary)?;
+    resolve_tool_calls(graph, &pending.tool_calls, &index, summary)?;
     resolve_openapi_operations(graph, &pending.operations, &index, summary)
 }
 
@@ -523,6 +531,7 @@ fn index_code_file(
     index_routes(graph, relative, &parsed.routes, pending, summary)?;
     index_tools(graph, relative, &parsed.tools, pending, summary)?;
     index_consumers(graph, relative, &parsed.consumers, pending)?;
+    index_events(graph, relative, &parsed.events, &parsed.tool_calls, pending)?;
     for local in parsed.locals {
         graph.insert_raw_reference(&RawReference {
             file_path: relative.to_string(),
@@ -654,6 +663,149 @@ fn index_consumers(
             consumer.method.clone(),
             consumer.path.clone(),
         ));
+    }
+    Ok(())
+}
+
+/// Persists the events a file publishes or listens for, and the tools it
+/// invokes by name. All three are name-keyed links whose other half is usually in
+/// another file, and across a group of repositories in another repository.
+fn index_events(
+    graph: &Graph,
+    relative: &str,
+    events: &[crate::parse::EventRef],
+    tool_calls: &[crate::parse::ToolCallRef],
+    pending: &mut Pending,
+) -> Result<()> {
+    for event in events {
+        let kind = if event.emitted {
+            "event_emit"
+        } else {
+            "event_listen"
+        };
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: kind.into(),
+            owner: event.owner.clone().unwrap_or_default(),
+            target: event.name.clone(),
+        })?;
+        let slot = if event.emitted {
+            &mut pending.emitters
+        } else {
+            &mut pending.listeners
+        };
+        slot.push((
+            relative.to_string(),
+            event.owner.clone(),
+            event.name.clone(),
+        ));
+    }
+    for call in tool_calls {
+        graph.insert_raw_reference(&RawReference {
+            file_path: relative.to_string(),
+            kind: "tool_call".into(),
+            owner: call.owner.clone().unwrap_or_default(),
+            target: call.name.clone(),
+        })?;
+        pending
+            .tool_calls
+            .push((relative.to_string(), call.owner.clone(), call.name.clone()));
+    }
+    Ok(())
+}
+
+/// Links a publisher to every listener of the same event name.
+///
+/// INFERRED, never EXTRACTED: the two sides agree on a string, and a string
+/// match is evidence that they are talking about the same event, not proof. An
+/// event with several listeners is normal, so every one is linked rather than the
+/// link being dropped as ambiguous.
+fn resolve_events(
+    graph: &Graph,
+    pending: &Pending,
+    index: &SymbolIndex<'_>,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    for (emit_file, emitter, name) in &pending.emitters {
+        let Some(emitter) = emitter else { continue };
+        let Some(&src) = index
+            .by_file_name
+            .get(&(emit_file.clone(), emitter.clone()))
+        else {
+            continue;
+        };
+        for (listen_file, listener, listened) in &pending.listeners {
+            if listened != name {
+                continue;
+            }
+            let Some(listener) = listener else { continue };
+            let Some(&dst) = index
+                .by_file_name
+                .get(&(listen_file.clone(), listener.clone()))
+            else {
+                continue;
+            };
+            if src == dst {
+                continue;
+            }
+            graph.insert_edge_with_provenance(
+                &Edge {
+                    src,
+                    dst,
+                    kind: EdgeKind::References,
+                    confidence: Confidence::Inferred,
+                },
+                &Provenance {
+                    perspective: Perspective::Observed,
+                    evidence_kind: EvidenceKind::AstCall,
+                    evidence_source: Some(emit_file.clone()),
+                },
+            )?;
+            summary.edges += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Links a tool invocation to the tool definition it names.
+///
+/// This is the half of tool intelligence that a dispatcher hides: a definition
+/// table says a tool exists, and only a call site naming it says who uses it.
+fn resolve_tool_calls(
+    graph: &Graph,
+    pending: &[(String, Option<String>, String)],
+    index: &SymbolIndex<'_>,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    for (file_path, owner, name) in pending {
+        let Some(owner) = owner else { continue };
+        let Some(&src) = index.by_file_name.get(&(file_path.clone(), owner.clone())) else {
+            continue;
+        };
+        let wanted = format!("TOOL {name}");
+        for (_, &dst) in index
+            .by_file_name
+            .iter()
+            .filter(|((_, node_name), _)| *node_name == wanted)
+        {
+            if src == dst {
+                continue;
+            }
+            graph.insert_edge_with_provenance(
+                &Edge {
+                    src,
+                    dst,
+                    kind: EdgeKind::Calls,
+                    confidence: Confidence::Extracted,
+                },
+                &Provenance {
+                    perspective: Perspective::Observed,
+                    evidence_kind: EvidenceKind::AstCall,
+                    evidence_source: Some(file_path.clone()),
+                },
+            )?;
+            summary.edges += 1;
+        }
     }
     Ok(())
 }
@@ -970,6 +1122,21 @@ fn load_raw_references(graph: &Graph, pending: &mut Pending) -> Result<()> {
                 }
             }
             "route" | "tool" => pending.routes.push((
+                reference.file_path,
+                Some(reference.owner).filter(|owner| !owner.is_empty()),
+                reference.target,
+            )),
+            "event_emit" => pending.emitters.push((
+                reference.file_path,
+                Some(reference.owner).filter(|owner| !owner.is_empty()),
+                reference.target,
+            )),
+            "event_listen" => pending.listeners.push((
+                reference.file_path,
+                Some(reference.owner).filter(|owner| !owner.is_empty()),
+                reference.target,
+            )),
+            "tool_call" => pending.tool_calls.push((
                 reference.file_path,
                 Some(reference.owner).filter(|owner| !owner.is_empty()),
                 reference.target,
@@ -2131,6 +2298,75 @@ mod tests {
                 .any(|(node, _, confidence)| node.name == "loadPet"
                     && *confidence == Confidence::Inferred),
             "a match that needs the parameter flattened is INFERRED, not EXTRACTED: {callers:?}"
+        );
+    }
+
+    #[test]
+    fn an_event_publisher_is_linked_to_every_listener_of_that_name() {
+        let root = scratch_root();
+        fs::write(
+            root.join("producer.js"),
+            "function placeOrder(bus) { bus.emit('order.created', {}); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("consumer.js"),
+            "function sendReceipt(bus) { bus.on('order.created', () => {}); }\n             function updateStock(bus) { bus.subscribe('order.created', () => {}); }\n             function unrelated(bus) { bus.on('user.created', () => {}); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let publisher = graph.find_by_name("placeOrder").unwrap().unwrap();
+        let listeners: Vec<(String, Confidence)> = graph
+            .callees(publisher.id.unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|(_, kind, _)| *kind == EdgeKind::References)
+            .map(|(node, _, confidence)| (node.name, confidence))
+            .collect();
+        assert!(
+            listeners
+                .iter()
+                .any(|(name, confidence)| name == "sendReceipt"
+                    && *confidence == Confidence::Inferred),
+            "{listeners:?}"
+        );
+        assert!(
+            listeners.iter().any(|(name, _)| name == "updateStock"),
+            "an event with two listeners has two links: {listeners:?}"
+        );
+        assert!(
+            !listeners.iter().any(|(name, _)| name == "unrelated"),
+            "a different event name is a different event: {listeners:?}"
+        );
+    }
+
+    #[test]
+    fn a_tool_invocation_is_linked_to_the_tool_it_names() {
+        let root = scratch_root();
+        fs::write(
+            root.join("server.js"),
+            "function searchDocs() {}\nfunction wire(server) { server.tool('search', searchDocs); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("agent.js"),
+            "function ask(mcp) { return mcp.call_tool('search'); }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::open_in_memory().unwrap();
+        index_repo(&graph, &root).unwrap();
+
+        let tool = graph.find_by_name("TOOL search").unwrap().unwrap();
+        let callers = graph.callers(tool.id.unwrap()).unwrap();
+        assert!(
+            callers
+                .iter()
+                .any(|(node, kind, _)| node.name == "ask" && *kind == EdgeKind::Calls),
+            "a dispatcher hides this link; the call site is what reveals it: {callers:?}"
         );
     }
 

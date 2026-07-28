@@ -134,6 +134,13 @@ const TOOL_SPECS: &[ToolSpec] = &[
         implemented: true,
     },
     ToolSpec {
+        name: "group_links",
+        description: "Cross-repository protocol links across a group: API producer to client, package export to import, event producer to consumer, schema to model, tool definition to invocation. Each graph is read separately and never merged; every link is a name agreeing across an ownership boundary and carries the evidence that produced it.",
+        arg: "group",
+        arg_description: "Group name, or `all` for every registered workspace.",
+        implemented: true,
+    },
+    ToolSpec {
         name: "detect_changes",
         description: "Pre-commit risk analysis via git diff.",
         arg: "diff",
@@ -609,6 +616,7 @@ fn call_group(params: &Value, name: &str) -> std::result::Result<Value, String> 
         "group_status" => crate::federation::status_group(group),
         "group_contracts" => crate::federation::contracts_group(group),
         "group_sync" => crate::federation::sync_group(group),
+        "group_links" => crate::federation::links_group(group),
         _ => unreachable!("group dispatcher called with non-group tool"),
     };
     let (text, is_error) = match result {

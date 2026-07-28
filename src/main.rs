@@ -172,6 +172,7 @@ fn handle_group(command: GroupCommand) -> anyhow::Result<()> {
         GroupCommand::Add { name, repository } => aag::federation::add(&name, &repository)?,
         GroupCommand::Remove { name, repository } => aag::federation::remove(&name, &repository)?,
         GroupCommand::List { name } => aag::federation::list_group(name.as_deref())?,
+        GroupCommand::Links { name } => aag::federation::links_group(&name)?,
         GroupCommand::Query { name, query } => aag::federation::query_group(&name, &query)?,
         GroupCommand::Status { name } => aag::federation::status_group(&name)?,
         GroupCommand::Contracts { name } => aag::federation::contracts_group(&name)?,
