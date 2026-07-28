@@ -202,6 +202,7 @@
   #modes button[aria-selected="true"] { background: var(--accent, #ffc600); border-color: var(--accent, #ffc600); color: #0a0a0a; }
   #modes button:focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
   body[data-mode="overview"] #view { right: 268px; }
+  #grammar-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
   #empty-state {
     position: absolute; inset: 44px 0 22px 0; display: flex; align-items: center; justify-content: center;
     color: var(--text-dim, #9a978f); font-size: 12px; text-align: center; padding: 0 18%; z-index: 4;
@@ -1365,9 +1366,135 @@ function renderScene(spec) {
     applySemanticZoom();
     scheduleCameraWrite();
   });
+  renderer.on("afterRender", drawGrammar);
   fitScene();
   applySemanticZoom();
   renderSceneStatus(spec);
+}
+
+// --- Visual grammar overlay --------------------------------------------------
+// Sigma's default programs draw circles and solid lines, so node kind and
+// relation kind had nowhere to live except a label glyph and a hue. This layer
+// draws the missing channels — an outline shape per node kind, a dash pattern
+// per relation kind — on a 2D canvas pinned over the WebGL layers and redrawn
+// after each sigma frame. A custom WebGL program would avoid the second pass;
+// at the scene sizes these modes produce (hundreds of nodes, not thousands)
+// the pass is cheaper than the shader work it would replace.
+//
+// Shapes are outlines around the node sigma already drew, not replacements, so
+// a small radius error degrades to a slightly loose ring rather than a wrong
+// picture.
+const KIND_SHAPE = {
+  file: "square",
+  doc: "diamond",
+  endpoint: "hexagon",
+  schema: "square",
+  database_table: "square",
+  infra_resource: "triangle",
+  struct: "diamond",
+  interface: "triangle",
+};
+// `calls` is the common case and stays solid; everything else is
+// distinguishable without reading a legend.
+const REL_DASH = {
+  imports: [5, 4],
+  inherits: [9, 3],
+  implements: [2, 3],
+  explains: [1, 4],
+  references: [1, 6],
+};
+
+let overlayCanvas = null;
+
+function ensureOverlay() {
+  if (overlayCanvas && overlayCanvas.isConnected) return overlayCanvas;
+  overlayCanvas = document.createElement("canvas");
+  overlayCanvas.id = "grammar-overlay";
+  overlayCanvas.setAttribute("aria-hidden", "true");
+  document.getElementById("view").append(overlayCanvas);
+  return overlayCanvas;
+}
+
+function drawShape(context, shape, x, y, radius) {
+  context.beginPath();
+  if (shape === "square") {
+    context.rect(x - radius, y - radius, radius * 2, radius * 2);
+  } else if (shape === "diamond") {
+    context.moveTo(x, y - radius);
+    context.lineTo(x + radius, y);
+    context.lineTo(x, y + radius);
+    context.lineTo(x - radius, y);
+    context.closePath();
+  } else if (shape === "triangle") {
+    context.moveTo(x, y - radius);
+    context.lineTo(x + radius, y + radius * 0.8);
+    context.lineTo(x - radius, y + radius * 0.8);
+    context.closePath();
+  } else {
+    for (let corner = 0; corner < 6; corner++) {
+      const angle = (Math.PI / 3) * corner - Math.PI / 2;
+      const point = [x + Math.cos(angle) * radius, y + Math.sin(angle) * radius];
+      corner === 0 ? context.moveTo(point[0], point[1]) : context.lineTo(point[0], point[1]);
+    }
+    context.closePath();
+  }
+  context.stroke();
+}
+
+function drawGrammar() {
+  if (!renderer || !scene) return;
+  const host = document.getElementById("view");
+  if (!host.offsetWidth || !host.offsetHeight) return;
+  const canvas = ensureOverlay();
+  const scale = window.devicePixelRatio || 1;
+  if (canvas.width !== host.offsetWidth * scale || canvas.height !== host.offsetHeight * scale) {
+    canvas.width = host.offsetWidth * scale;
+    canvas.height = host.offsetHeight * scale;
+    canvas.style.width = `${host.offsetWidth}px`;
+    canvas.style.height = `${host.offsetHeight}px`;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(scale, 0, 0, scale, 0, 0);
+  context.clearRect(0, 0, host.offsetWidth, host.offsetHeight);
+  const ratio = renderer.getCamera().getState().ratio;
+
+  context.lineWidth = 1;
+  for (const key of scene.edges()) {
+    const attributes = scene.getEdgeAttributes(key);
+    const dash = REL_DASH[attributes._edge && attributes._edge.kind];
+    if (!dash) continue;
+    const reduced = edgeReducer(key, attributes);
+    if (reduced.hidden) continue;
+    const [from, to] = scene.extremities(key);
+    const start = renderer.getNodeDisplayData(from);
+    const end = renderer.getNodeDisplayData(to);
+    if (!start || !end) continue;
+    const a = renderer.graphToViewport(start);
+    const b = renderer.graphToViewport(end);
+    context.setLineDash(dash);
+    context.strokeStyle = reduced.color || attributes.color;
+    context.beginPath();
+    context.moveTo(a.x, a.y);
+    context.lineTo(b.x, b.y);
+    context.stroke();
+  }
+
+  context.setLineDash([]);
+  context.lineWidth = 1.4;
+  for (const key of scene.nodes()) {
+    const attributes = scene.getNodeAttributes(key);
+    const kind = attributes._node && attributes._node.kind;
+    const shape = KIND_SHAPE[kind];
+    if (!shape) continue;
+    const reduced = nodeReducer(key, attributes);
+    if (reduced.hidden) continue;
+    const display = renderer.getNodeDisplayData(key);
+    if (!display) continue;
+    const point = renderer.graphToViewport(display);
+    const radius = Math.max(3, (display.size / ratio) * 0.6) + 3;
+    context.strokeStyle = reduced.color || attributes.color;
+    drawShape(context, shape, point.x, point.y, radius);
+  }
 }
 
 function fitScene() {

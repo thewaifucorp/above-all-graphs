@@ -111,9 +111,8 @@ P2 gates expand reach after the core is measurable and dependable.
    initial scene 5971 nodes / 87 928 edges to 146 / 151. Payload and page-size
    budgets are enforced by `cargo test`. Still open, and recorded as such in
    [graph experience](graph-experience.md): visual regression baselines and
-   browser-side budget enforcement, the shape-and-dash visual grammar (which
-   needs custom WebGL programs), aggregation of Explore's dropped neighbours,
-   and alternative equal-length paths.
+   browser-side budget enforcement, and browser-side budget
+   enforcement.
    Original scope, for the record:
    Complete the graph experience redesign specified below. Preserve the
    fast offline renderer, but replace the single hairball-oriented interaction

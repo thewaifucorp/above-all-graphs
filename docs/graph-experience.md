@@ -403,6 +403,15 @@ screen, so none of them asks for that.
   find: two equally short routes are two different answers, and showing one
   silently is showing half the truth. The primary route is drawn heavier so the
   alternatives are distinguishable without a legend.
+- **The visual grammar has its missing channels.** Sigma's default programs
+  draw circles and solid lines, so node kind lived only in a label glyph and
+  relation kind only in a hue. A 2D canvas pinned over the WebGL layers, redrawn
+  after each sigma frame, now adds an outline shape per node kind (file and
+  table square, doc and struct diamond, endpoint hexagon, interface and infra
+  triangle) and a dash pattern per relation kind (`calls` stays solid;
+  imports, inherits, implements, explains, and references each get their own).
+  Measured with the overlay redrawing every frame while panning: 60.7 fps on a
+  31-node scene and 60.7 fps on a 423-node one, worst frame 17 ms in both.
 - **Layout cache** in `localStorage`, keyed by scene shape and force settings,
   so a reload or a return from another mode lands on the same picture. A
   changed node set invalidates rather than partially reusing.
@@ -448,9 +457,10 @@ CI with everything else.
 - Node kind is carried by a label glyph and relation kind by hue plus width,
   because sigma's default programs draw circles and plain lines. The shape and
   dash grammar in the specification above needs custom WebGL programs.
-- Node kind is still carried by a label glyph rather than a shape, and relation
-  kind by hue plus width rather than a dash pattern. Both need custom sigma
-  programs or an overlay pass.
+- The grammar overlay draws an outline ring around the node sigma already drew,
+  sized from `size / camera ratio`. That is an approximation: a small error
+  reads as a slightly loose ring rather than a wrong shape, but it is not a
+  replacement for a custom node program.
 
 ### Definition of done
 
