@@ -310,21 +310,76 @@ Re-measured on the same medium fixture, same browser and viewport:
 | inter-community bundles precomputed | 0 | 136 | — |
 | embedded files / omitted | 1675 / 0 | 1410 / 265 | — |
 
+### Landed: mode state, URL state, and Overview
+
+Community detection had been happening twice — once in the exporter and again
+in the page, with its own label propagation and its own renumbering. The page
+therefore coloured by one numbering while the payload's aggregates and bundles
+used another. It is now computed once, in the exporter, including the two
+things the page used to do on its own: folding communities below
+`MIN_COMMUNITY_MEMBERS` into the dominant community of their own file, and
+renumbering by size so id 0 is the largest. The page consumes the result.
+
+- **State store.** One writer for mode, focus, isolated community, expanded
+  communities, relation/confidence/node-kind filters, pins, and camera. Every
+  field round-trips through the query string per the schema above. A mode or
+  focus change pushes history; a filter tweak replaces it, so the back button
+  does not walk one checkbox at a time. `popstate` restores state, and a URL
+  naming a node that no longer exists shows a notice and falls back to the
+  whole graph rather than a blank canvas.
+- **Mode switcher.** Overview and Explore, keyboard `1`/`2`, `Esc` back to
+  Overview. Path, Impact, and Contracts are deliberately absent from the
+  switcher until they work — a dead button is worse than a missing one.
+- **Overview.** Opens on collapsed community aggregates and the bundles
+  between them. Aggregate size encodes member count, colour encodes the
+  module, and edge width encodes bundle volume. Clicking an aggregate opens an
+  inspector with symbol count, internal and external edge counts, cohesion,
+  entrypoint count, worst contained confidence, its most connected members,
+  and what it connects to — every fact a collapsed thing owes its reader.
+  Three actions: expand in place, isolate, explore. A named legend lists the
+  40 largest modules and isolates on click.
+- **Deferred detail.** The force layout over every symbol runs on first entry
+  into Explore, not on load, so opening the page costs the Overview only.
+- **Overview layout.** Deterministic seeded ring, size-aware repulsion, then a
+  no-overlap pass — two aggregates drawn on top of each other read as one
+  module, which is a wrong answer rather than a cosmetic one.
+
+Measured on the medium fixture, 1440×900:
+
+| measurement | baseline | payload slice | now | budget |
+|---|---|---|---|---|
+| document transferred | 12.97 MB | 5.35 MB | 5.36 MB | ≤ 6 MB |
+| `DOMContentLoaded` | 1373 ms | 892 ms | 449 ms | ≤ 1200 ms |
+| peak JS heap | 271.8 MB | 152.8 MB | 84.4 MB | ≤ 300 MB |
+| nodes in the initial scene | 5971 | 5971 | 146 | ≤ 800 |
+| edges in the initial scene | 87 928 | 87 928 | 151 | ≤ 3000 |
+| sustained fps while panning | 60.7 | — | 61.0 | ≥ 50 |
+| labels drawn at rest | 5971 attached, colliding | — | 54 | legible |
+| console errors | 0 | 0 | 0 | 0 |
+
+Three real defects were found and fixed by looking at the rendered page rather
+than at the code: a hidden container made sigma throw "container has no width"
+on every refresh after a mode switch; the "organizing graph" overlay was
+dismissed only by the full-graph layout, so it covered the Overview forever
+once that layout stopped running on load; and `community_label` fell back to an
+arbitrary member file, naming an 867-symbol module after `language-config.ts`.
+
 ### Still open
 
-Everything the payload was blocking. The scene still receives all 5971 nodes
-and all 87 928 edges, because the modes that would consume the aggregates do
-not exist yet:
-
-- mode state machine, URL schema, and navigation history as specified above
-- Overview drawing collapsed communities and bundles by default
-- Explore, Path, Impact, and Contracts views
-- unified inspector, command palette, legend
-- semantic zoom bands, label collision, edge suppression
-- layout caching by fingerprint
-- keyboard and screen-reader coverage, reduced motion
-- budgets enforced in CI against the three fixtures, and visual regression
-  baselines
+- Explore is still the old full-graph view wearing a mode label. It has no
+  independent upstream/downstream depth, no neighbour ranking, no breadcrumb,
+  and its hover still hides every other edge.
+- Path, Impact, and Contracts views.
+- Command palette, semantic-zoom bands, edge aggregation inside Explore.
+- Layout caching by fingerprint; the Overview layout is recomputed per build
+  of the scene.
+- Keyboard and screen-reader coverage beyond mode switching; reduced motion.
+- Budgets enforced in CI against the three fixtures, and visual regression
+  baselines.
+- Overview polish: two labels can still overlap near dense centres, the fit
+  leaves the outermost aggregate partly off-screen, and 146 modules is a lot
+  of small aggregates — the fold threshold and an "others" bucket both want
+  revisiting.
 
 ### Definition of done
 

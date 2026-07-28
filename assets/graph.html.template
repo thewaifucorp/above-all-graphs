@@ -118,7 +118,7 @@
   body.sidebar-closed #view { left: 0; }
 
   /* ---- progress ---- */
-  #progress { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 30; background: var(--bg-0); flex-direction: column; gap: 14px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.03em; }
+  #progress { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 30; background: var(--bg-0); flex-direction: column; gap: 14px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.03em; }
   #progress .bar { width: 240px; height: 3px; background: var(--bg-2); border-radius: 2px; overflow: hidden; }
   #progress .bar i { display: block; height: 100%; width: 0; background: var(--spectrum); border-radius: 2px; transition: width 0.1s; }
 
@@ -193,6 +193,42 @@
   #filemodal .fm-line.hl { background: var(--accent-dim); }
   #filemodal .fm-no { width: 48px; text-align: right; padding-right: 12px; color: var(--text-dim); user-select: none; flex-shrink: 0; }
   #filemodal .fm-code { white-space: pre; padding-right: 16px; color: #c4c9d4; }
+  #modes { display: flex; gap: 2px; margin-left: 10px; }
+  #modes button {
+    background: transparent; border: 1px solid var(--line, #262624); color: var(--text-dim, #9a978f);
+    font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 3px;
+  }
+  #modes button[aria-selected="true"] { background: var(--accent, #ffc600); border-color: var(--accent, #ffc600); color: #0a0a0a; }
+  #modes button:focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
+  #view-overview { position: absolute; inset: 44px 268px 22px 0; display: none; }
+  body.mode-overview #view-overview { display: block; }
+  body.mode-overview #view { display: none; }
+  #legend {
+    position: absolute; right: 12px; top: 56px; width: 240px; max-height: calc(100vh - 140px);
+    overflow: auto; background: var(--bg-1, #121212); border: 1px solid var(--line, #262624);
+    border-radius: 4px; padding: 10px 12px; font-size: 11px; z-index: 5;
+  }
+  #legend h4 { margin: 0 0 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim, #9a978f); }
+  #legend .row { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; }
+  #legend .row:hover .name { color: var(--accent, #ffc600); }
+  #legend .row.on .name { color: var(--accent, #ffc600); }
+  #legend .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  #legend .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #legend .n { color: var(--text-dim, #9a978f); }
+  #notice {
+    position: absolute; left: 50%; transform: translateX(-50%); top: 56px; z-index: 20;
+    background: var(--bg-1, #121212); border: 1px solid var(--accent, #ffc600);
+    color: var(--text, #f2f2ee); font-size: 11px; padding: 7px 12px; border-radius: 3px;
+    max-width: 60ch;
+  }
+  .agg-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 10px 0; font-size: 11px; }
+  .agg-facts dt { color: var(--text-dim, #9a978f); }
+  .agg-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .agg-actions button {
+    background: transparent; border: 1px solid var(--line, #262624); color: var(--text, #f2f2ee);
+    font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+  }
+  .agg-actions button:hover { border-color: var(--accent, #ffc600); color: var(--accent, #ffc600); }
   .fm-missing { padding: 28px; color: var(--text-dim, #9a978f); line-height: 1.7; }
   .fm-missing code { color: var(--accent, #ffc600); }
   .tk-k { color: #c792ea; }
@@ -215,6 +251,7 @@
     <span><span class="word">aag</span><span class="sub">above all graphs</span></span>
   </a>
   <span id="repo-pill"></span>
+  <div id="modes" role="tablist" aria-label="Graph mode"></div>
   <div id="search-wrap"><input id="search" type="text" placeholder="Search nodes&hellip;"></div>
   <span class="counts"><b id="c-nodes"></b> nodes &middot; <b id="c-edges"></b> edges</span>
   <button id="sidebar-btn" title="Toggle sidebar">&#9707;</button>
@@ -241,6 +278,9 @@
 </div>
 
 <div id="view"></div>
+<div id="view-overview"></div>
+<div id="legend" hidden><h4>Modules</h4><div id="legend-list"></div></div>
+<div id="notice" role="status" aria-live="polite" hidden></div>
 <div id="progress"><div>organizing graph&hellip;</div><div class="bar"><i id="progress-fill"></i></div></div>
 
 <div id="settings-panel" class="fpanel">
@@ -370,81 +410,56 @@ for (const n of nodes) {
   n.mass = n.degree + 1;
 }
 
-// --- Community detection: deterministic label propagation ------------------
-// Each node starts as its own community and repeatedly adopts the most
-// common label among its neighbors (ties broken by smallest label, iteration
-// in id order — fully deterministic). Tiny leftover communities are folded
-// into the dominant community of their own file so stray helpers don't get
-// their own color. Surfaced in the UI as "Modules".
-function detectCommunities() {
-  const adj = new Map(nodes.map((n) => [n.id, []]));
-  for (const e of links) {
-    adj.get(e.source).push(e.target);
-    adj.get(e.target).push(e.source);
-  }
-  const label = new Map(nodes.map((n) => [n.id, n.id]));
-  const order = nodes.map((n) => n.id).sort((a, b) => a - b);
-  for (let round = 0; round < 30; round++) {
-    let changed = false;
-    for (const id of order) {
-      const counts = new Map();
-      for (const nb of adj.get(id)) {
-        const l = label.get(nb);
-        counts.set(l, (counts.get(l) || 0) + 1);
-      }
-      if (counts.size === 0) continue;
-      let best = label.get(id);
-      let bestCount = counts.get(best) || 0;
-      for (const [l, c] of counts) {
-        if (c > bestCount || (c === bestCount && l < best)) { best = l; bestCount = c; }
-      }
-      if (best !== label.get(id)) { label.set(id, best); changed = true; }
-    }
-    if (!changed) break;
-  }
+// --- Communities: taken from the payload, not recomputed -------------------
+// The exporter already detected communities, folded strays into the dominant
+// community of their own file, renumbered so id 0 is the largest, and shipped
+// a label plus cohesion/entrypoint/confidence facts per community (see
+// `docs/graph-experience.md`). The page used to redo all of that with its own
+// label propagation, which meant this page coloured by one numbering while the
+// payload's aggregates and bundles used another. One source of truth.
+const COMMUNITIES = DATA.communities || [];
+const BUNDLES = DATA.bundles || [];
+const ENTRYPOINTS = new Set(DATA.entrypoints || []);
+const communityCount = COMMUNITIES.length;
+// A symbol nothing connects to belongs to no community. Give them all one
+// shared neutral bucket instead of letting `null` reach every lookup that
+// indexes by community id.
+const UNGROUPED = communityCount;
+for (const n of nodes) if (n.community === null || n.community === undefined) n.community = UNGROUPED;
+const communityColor = (c) => (c === UNGROUPED ? "#3a3a36" : PALETTE[c % PALETTE.length]);
+const communityById = new Map(COMMUNITIES.map((c) => [c.id, c]));
 
-  const sizes = new Map();
-  for (const n of nodes) sizes.set(label.get(n.id), (sizes.get(label.get(n.id)) || 0) + 1);
-
-  const dominantByFile = new Map();
-  for (const n of nodes) {
-    const l = label.get(n.id);
-    const cur = dominantByFile.get(n.file);
-    if (!cur || sizes.get(l) > sizes.get(cur)) dominantByFile.set(n.file, l);
-  }
-  for (const n of nodes) {
-    if (sizes.get(label.get(n.id)) < 3) {
-      const dom = dominantByFile.get(n.file);
-      if (dom !== undefined && sizes.get(dom) >= 3) label.set(n.id, dom);
-    }
-  }
-
-  // Renumber by community size so index 0 = biggest = first palette color.
-  const finalSizes = new Map();
-  for (const n of nodes) finalSizes.set(label.get(n.id), (finalSizes.get(label.get(n.id)) || 0) + 1);
-  const ranked = [...finalSizes.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([l]) => l);
-  const indexOf = new Map(ranked.map((l, i) => [l, i]));
-  for (const n of nodes) n.community = indexOf.get(label.get(n.id));
-  return ranked.length;
-}
-
-const communityCount = detectCommunities();
-const communityColor = (c) => PALETTE[c % PALETTE.length];
-
-// Human-readable module names: the most common directory among members
-// plus the highest-degree symbol, e.g. "src/ · resolve_calls".
-const communityMeta = [];
-for (let c = 0; c < communityCount; c++) {
-  const members = nodes.filter((n) => n.community === c);
-  const dirCount = new Map();
-  for (const m of members) {
-    const dir = m.file.includes("/") ? m.file.slice(0, m.file.lastIndexOf("/") + 1) : "./";
-    dirCount.set(dir, (dirCount.get(dir) || 0) + 1);
-  }
-  const topDir = [...dirCount.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
-  const top = members.slice().sort((a, b) => b.degree - a.degree || a.id - b.id)[0];
-  communityMeta.push({ id: c, size: members.length, name: `${topDir} · ${top.name}` });
-}
+// Human-readable module names: the exporter's label (the deepest directory
+// every member shares) plus the highest-degree member, e.g.
+// "src/ · resolve_calls".
+const communityMeta = COMMUNITIES.map((community) => {
+  const top = community.representatives
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.degree - a.degree || a.id - b.id)[0];
+  return {
+    id: community.id,
+    size: community.members.length,
+    name: top ? `${community.label || "./"} · ${top.name}` : community.label || `#${community.id}`,
+    label: community.label || `#${community.id}`,
+    internalEdges: community.internalEdges,
+    externalEdges: community.externalEdges,
+    entrypoints: community.entrypoints,
+    worstConfidence: community.worstConfidence,
+    representatives: community.representatives,
+  };
+});
+communityMeta.push({
+  id: UNGROUPED,
+  size: nodes.filter((n) => n.community === UNGROUPED).length,
+  name: "unconnected",
+  label: "unconnected",
+  internalEdges: 0,
+  externalEdges: 0,
+  entrypoints: 0,
+  worstConfidence: "EXTRACTED",
+  representatives: [],
+});
 
 // --- Layout: ForceAtlas2 (Barnes-Hut via d3.quadtree) + noverlap -----------
 // Per SPEC section 6: GitNexus and Graphify independently converged on
@@ -463,8 +478,8 @@ const radiusOf = (d) =>
 const seeds = [];
 {
   const R = 160 + 26 * Math.sqrt(nodes.length);
-  for (let c = 0; c < communityCount; c++) {
-    const angle = (2 * Math.PI * c) / communityCount;
+  for (let c = 0; c < communityMeta.length; c++) {
+    const angle = (2 * Math.PI * c) / communityMeta.length;
     seeds.push({ x: Math.cos(angle) * R, y: Math.sin(angle) * R });
   }
   for (const n of nodes) {
@@ -604,6 +619,9 @@ const container = document.getElementById("view");
 let selected = null;
 let hoveredNode = null;
 let isolatedCommunity = null;
+// Relation kinds filtered out; kept beside the other filter sets because the
+// reducers below read it before the state block runs.
+let hiddenRel = new Set();
 let searchQuery = "";
 const hiddenKinds = new Set();
 const hiddenConf = new Set();
@@ -665,7 +683,7 @@ function nodeReducer(key, data) {
 function edgeReducer(key, data) {
   const e = data._e;
   const res = { ...data };
-  if (hiddenConf.has(e.confidence)) { res.hidden = true; return res; }
+  if (hiddenConf.has(e.confidence) || hiddenRel.has(e.kind)) { res.hidden = true; return res; }
   res.color = edgeShade();
   if (hoveredNode) {
     if (e.source === hoveredNode.id || e.target === hoveredNode.id) { res.color = EDGE_HL; res.size = 1.6; }
@@ -691,6 +709,9 @@ function labelThreshold() {
 
 function initRenderer() {
   renderer = new Sigma(graph, container, {
+    // The layout's settle simulation can still be ticking after a mode
+    // switch hid this container; that is not an error either.
+    allowInvalidContainer: true,
     minCameraRatio: 0.03,
     maxCameraRatio: 20,
     labelFont: '"JetBrains Mono", ui-monospace, monospace',
@@ -1118,6 +1139,7 @@ function buildFilters() {
   fm.insertAdjacentHTML(
     "beforeend",
     communityMeta
+      .filter((m) => m.id !== UNGROUPED || m.size > 0)
       .map(
         (m) =>
           `<div class="mod" data-c="${m.id}"><span class="dot" style="background:${communityColor(m.id)}"></span><span class="name">${escapeHtml(m.name)}</span><span class="n">${m.size}</span></div>`
@@ -1597,6 +1619,8 @@ function runLayout(isRerun) {
   const noverlapIters = 60;
   const progress = document.getElementById("progress");
   const fill = document.getElementById("progress-fill");
+  // Only a real layout pass raises the overlay; the Overview needs no layout
+  // of the full graph and must not sit behind a spinner that never clears.
   if (!isRerun) progress.style.display = "flex";
   let iter = 0;
 
@@ -1614,23 +1638,522 @@ function runLayout(isRerun) {
     syncGraph();
     fitView(isRerun ? 500 : 0);
     refresh();
-    if (!isRerun) applyFocusParam();
+    if (!isRerun) {
+      const target = resolveFocus(State.focus);
+      if (target) focusNode(target);
+      else if (State.focus) notice(`No node named "${State.focus}" in this graph — showing everything instead.`);
+    }
     // Small settle kick; decays to sleep unless liveSim keeps a floor.
     startSim(0.03);
   }
   setTimeout(batch, 0);
 }
 
-// Deep links: graph.html?focus=<file-or-symbol> (the wiki links back here).
-function applyFocusParam() {
-  const focus = new URLSearchParams(location.search).get("focus");
-  if (!focus) return;
-  const target =
-    nodes.find((n) => n.file === focus && n.kind === "file") ||
-    nodes.find((n) => n.name === focus) ||
-    nodes.find((n) => n.file === focus);
-  if (target) focusNode(target);
+// --- Mode + URL state --------------------------------------------------------
+// One store, one writer. Every state worth sharing lives in the query string,
+// so any view can be pasted into a review — see the URL schema in
+// `docs/graph-experience.md`. Modes not built yet are simply absent from the
+// switcher; a dead button is worse than a missing one.
+const MODE_LIST = [
+  { id: "overview", label: "Overview", hint: "Modules and how they connect" },
+  { id: "explore", label: "Explore", hint: "One symbol and its neighbourhood" },
+];
+const MODE_IDS = MODE_LIST.map((m) => m.id);
+
+const State = {
+  mode: "overview",
+  focus: null,
+  community: null,
+  expanded: new Set(),
+  rel: null,
+  conf: null,
+  kind: null,
+  pins: new Set(),
+  cam: null,
+};
+
+const ALL_REL = [...new Set(links.map((e) => e.kind))];
+const ALL_CONF = [...new Set(links.map((e) => e.confidence))];
+const ALL_KIND = [...new Set(nodes.map((n) => n.kind))];
+
+function parseSet(value, cast) {
+  if (!value) return null;
+  const parts = value.split(",").map((p) => p.trim()).filter(Boolean);
+  return parts.length ? new Set(cast ? parts.map(cast) : parts) : null;
 }
+
+function readUrl() {
+  const q = new URLSearchParams(location.search);
+  const mode = q.get("mode");
+  State.mode = MODE_IDS.includes(mode) ? mode : q.get("focus") ? "explore" : "overview";
+  State.focus = q.get("focus") || null;
+  State.community = q.has("community") ? Number(q.get("community")) : null;
+  State.expanded = parseSet(q.get("expanded"), Number) || new Set();
+  State.rel = parseSet(q.get("rel"));
+  State.conf = parseSet(q.get("conf"), (c) => c.toUpperCase());
+  State.kind = parseSet(q.get("kind"));
+  State.pins = parseSet(q.get("pin"), Number) || new Set();
+  const cam = q.get("cam");
+  if (cam) {
+    const [x, y, ratio] = cam.split(",").map(Number);
+    State.cam = Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(ratio) ? { x, y, ratio } : null;
+  } else {
+    State.cam = null;
+  }
+}
+
+function writeUrl(push) {
+  const q = new URLSearchParams();
+  q.set("mode", State.mode);
+  if (State.focus) q.set("focus", State.focus);
+  if (State.community !== null) q.set("community", String(State.community));
+  if (State.expanded.size) q.set("expanded", [...State.expanded].sort((a, b) => a - b).join(","));
+  if (State.rel) q.set("rel", [...State.rel].join(","));
+  if (State.conf) q.set("conf", [...State.conf].join(","));
+  if (State.kind) q.set("kind", [...State.kind].join(","));
+  if (State.pins.size) q.set("pin", [...State.pins].join(","));
+  if (State.cam) q.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
+  const url = `${location.pathname}?${q.toString()}`;
+  // A mode or focus change is a navigation; a filter tweak is not, or the
+  // back button would walk one checkbox at a time.
+  if (push) history.pushState(null, "", url);
+  else history.replaceState(null, "", url);
+}
+
+function setState(patch, options) {
+  Object.assign(State, patch);
+  writeUrl(options && options.push);
+  applyState();
+}
+
+// Filters are stored as what is *allowed*; the reducers work on what is
+// hidden. Translate once, here, so both stay in sync.
+function syncFilterSets() {
+  hiddenKinds.clear();
+  if (State.kind) for (const kind of ALL_KIND) if (!State.kind.has(kind)) hiddenKinds.add(kind);
+  hiddenConf.clear();
+  if (State.conf) for (const conf of ALL_CONF) if (!State.conf.has(conf)) hiddenConf.add(conf);
+  hiddenRel = new Set();
+  if (State.rel) for (const rel of ALL_REL) if (!State.rel.has(rel)) hiddenRel.add(rel);
+  isolatedCommunity = State.community;
+}
+
+function buildModeSwitcher() {
+  const host = document.getElementById("modes");
+  host.innerHTML = MODE_LIST.map(
+    (m, i) =>
+      `<button role="tab" data-mode="${m.id}" aria-selected="false" title="${escapeHtml(m.hint)} (${i + 1})">${m.label}</button>`
+  ).join("");
+  for (const button of host.querySelectorAll("button")) {
+    button.addEventListener("click", () => enterMode(button.dataset.mode));
+  }
+}
+
+function enterMode(mode) {
+  if (!MODE_IDS.includes(mode) || mode === State.mode) return;
+  setState({ mode }, { push: true });
+}
+
+// --- Overview: collapsed communities and the bundles between them ------------
+// Opens on ~200 aggregates instead of ~6000 symbols. Every aggregate expands
+// to its members, and every bundle reports the relations it stands for, so
+// nothing is hidden without saying so.
+let ovGraph = null;
+let ovRenderer = null;
+let ovFingerprint = null;
+let ovSelected = null;
+
+function overviewFingerprint() {
+  return `${[...State.expanded].sort((a, b) => a - b).join(",")}|${State.community}`;
+}
+
+function overviewAnchor(community) {
+  return State.expanded.has(community.id) && community.representatives.length
+    ? `n${community.representatives[0]}`
+    : `c${community.id}`;
+}
+
+function overviewLayout(keys, edges, sizeOf) {
+  // Deterministic: seeded ring by rank, then a few hundred rounds of
+  // attract-along-bundles and repel-all-pairs, then a short no-overlap pass.
+  // At ~200 aggregates the naive all-pairs pass is cheaper than setting up a
+  // quadtree. Repulsion scales with size, or the few large modules pile on
+  // top of each other in the middle while the small ones spread out.
+  const positions = new Map();
+  const radius = 120 + 22 * Math.sqrt(keys.length);
+  keys.forEach((key, index) => {
+    const angle = (2 * Math.PI * index) / keys.length;
+    positions.set(key, {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      dx: 0,
+      dy: 0,
+      r: sizeOf ? sizeOf(key) : 6,
+    });
+  });
+  for (let round = 0; round < 240; round++) {
+    const cooling = 1 - round / 240;
+    for (const key of keys) {
+      const point = positions.get(key);
+      point.dx = 0;
+      point.dy = 0;
+    }
+    for (let i = 0; i < keys.length; i++) {
+      const a = positions.get(keys[i]);
+      for (let j = i + 1; j < keys.length; j++) {
+        const b = positions.get(keys[j]);
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        let distanceSquared = dx * dx + dy * dy;
+        if (distanceSquared < 1) {
+          dx = (i - j) || 1;
+          dy = 1;
+          distanceSquared = 2;
+        }
+        const force = (9000 + 900 * (a.r + b.r)) / distanceSquared;
+        const distance = Math.sqrt(distanceSquared);
+        a.dx += (dx / distance) * force;
+        a.dy += (dy / distance) * force;
+        b.dx -= (dx / distance) * force;
+        b.dy -= (dy / distance) * force;
+      }
+    }
+    for (const edge of edges) {
+      const a = positions.get(edge.a);
+      const b = positions.get(edge.b);
+      if (!a || !b) continue;
+      const pull = 0.006 * Math.log(1 + edge.count);
+      a.dx += (b.x - a.x) * pull;
+      a.dy += (b.y - a.y) * pull;
+      b.dx += (a.x - b.x) * pull;
+      b.dy += (a.y - b.y) * pull;
+    }
+    for (const key of keys) {
+      const point = positions.get(key);
+      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 - point.x * 0.0015;
+      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 - point.y * 0.0015;
+    }
+  }
+  // Separate whatever still overlaps. Two aggregates drawn on top of each
+  // other read as one module, which is a wrong answer, not a cosmetic one.
+  const scale = 3.2;
+  for (let round = 0; round < 40; round++) {
+    let moved = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const a = positions.get(keys[i]);
+      for (let j = i + 1; j < keys.length; j++) {
+        const b = positions.get(keys[j]);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const wanted = (a.r + b.r) * scale;
+        if (distance >= wanted) continue;
+        const push = (wanted - distance) / 2;
+        const ux = dx / distance;
+        const uy = dy / distance;
+        a.x -= ux * push;
+        a.y -= uy * push;
+        b.x += ux * push;
+        b.y += uy * push;
+        moved++;
+      }
+    }
+    if (moved === 0) break;
+  }
+  return positions;
+}
+
+function buildOverview() {
+  const fingerprint = overviewFingerprint();
+  if (ovGraph && ovFingerprint === fingerprint) return;
+  ovFingerprint = fingerprint;
+
+  ovGraph = new graphology.Graph({ multi: true, type: "undirected" });
+  const shown = COMMUNITIES.filter((c) => State.community === null || c.id === State.community);
+  const anchorOf = new Map();
+
+  for (const community of shown) {
+    const meta = communityMeta[community.id] || {};
+    if (State.expanded.has(community.id)) {
+      for (const id of community.members) {
+        const node = byId.get(id);
+        if (!node) continue;
+        ovGraph.addNode(`n${id}`, {
+          label: node.name,
+          size: 3 + Math.min(Math.sqrt(node.degree || 0) * 1.6, 9),
+          color: communityColor(community.id),
+          _member: node,
+          _community: community,
+        });
+      }
+    } else {
+      ovGraph.addNode(`c${community.id}`, {
+        label: `${meta.label || community.label || "#" + community.id} (${community.members.length})`,
+        size: 6 + Math.min(Math.sqrt(community.members.length) * 3.2, 26),
+        color: communityColor(community.id),
+        _aggregate: community,
+      });
+    }
+    anchorOf.set(community.id, overviewAnchor(community));
+  }
+
+  // Internal edges only for expanded communities — that is what expanding
+  // means. Collapsed communities carry their internal count as a fact.
+  if (State.expanded.size) {
+    let internal = 0;
+    for (const edge of links) {
+      const left = edge.s.community;
+      if (left !== edge.t.community || !State.expanded.has(left)) continue;
+      if (!ovGraph.hasNode(`n${edge.source}`) || !ovGraph.hasNode(`n${edge.target}`)) continue;
+      ovGraph.addEdgeWithKey(`i${internal++}`, `n${edge.source}`, `n${edge.target}`, {
+        size: 0.6,
+        color: EDGE_COLOR,
+        _internal: edge,
+      });
+    }
+  }
+
+  let bundleIndex = 0;
+  for (const bundle of BUNDLES) {
+    const from = anchorOf.get(bundle.a);
+    const to = anchorOf.get(bundle.b);
+    if (!from || !to || !ovGraph.hasNode(from) || !ovGraph.hasNode(to)) continue;
+    ovGraph.addEdgeWithKey(`b${bundleIndex++}`, from, to, {
+      size: Math.min(0.6 + Math.log(1 + bundle.count) * 0.9, 6),
+      color: bundle.ambiguous > bundle.extracted + bundle.inferred ? "#4a4238" : EDGE_COLOR,
+      _bundle: bundle,
+    });
+  }
+
+  const keys = ovGraph.nodes();
+  const bundleEdges = BUNDLES.map((b) => ({ a: anchorOf.get(b.a), b: anchorOf.get(b.b), count: b.count })).filter(
+    (e) => e.a && e.b && ovGraph.hasNode(e.a) && ovGraph.hasNode(e.b)
+  );
+  const positions = overviewLayout(keys, bundleEdges, (key) => ovGraph.getNodeAttribute(key, "size") || 6);
+  for (const key of keys) {
+    const point = positions.get(key);
+    ovGraph.mergeNodeAttributes(key, { x: point.x, y: point.y });
+  }
+
+  if (ovRenderer) {
+    ovRenderer.kill();
+    ovRenderer = null;
+  }
+  ovRenderer = new Sigma(ovGraph, document.getElementById("view-overview"), {
+    // Switching modes hides this container. A hidden container is a normal
+    // state here, not a misconfiguration, so sigma must not treat zero width
+    // as an error.
+    allowInvalidContainer: true,
+    renderEdgeLabels: false,
+    defaultEdgeColor: EDGE_COLOR,
+    labelColor: { color: "#f2f2ee" },
+    labelSize: 11,
+    labelWeight: "400",
+    labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    // Label the aggregates worth reading, not all of them: a wider grid cell
+    // and a higher size floor keep the overview legible instead of overprinted.
+    labelRenderedSizeThreshold: 13,
+    labelGridCellSize: 170,
+    labelDensity: 0.6,
+    minCameraRatio: 0.05,
+    maxCameraRatio: 12,
+  });
+  ovRenderer.on("clickNode", ({ node }) => showAggregate(node));
+  ovRenderer.on("clickStage", () => {
+    ovSelected = null;
+    document.getElementById("panel").classList.remove("open");
+  });
+  ovRenderer.getCamera().animatedReset({ duration: 0 });
+  fitOverview();
+  buildLegend();
+}
+
+function fitOverview() {
+  if (!ovGraph || !ovRenderer || !ovGraph.order) return;
+  // Sigma frames the graph's own extent at ratio 1. Labels and node radii sit
+  // outside that extent, so the fit needs headroom or the outer ring of
+  // aggregates is clipped.
+  ovRenderer.getCamera().setState({ x: 0.5, y: 0.5, angle: 0, ratio: 1.22 });
+}
+
+function confidenceWord(value) {
+  return String(value || "").toLowerCase();
+}
+
+function showAggregate(key) {
+  ovSelected = key;
+  const attributes = ovGraph.getNodeAttributes(key);
+  const panel = document.getElementById("panel");
+  if (attributes._member) {
+    showPanel(attributes._member);
+    return;
+  }
+  const community = attributes._aggregate;
+  const meta = communityMeta[community.id] || {};
+  const cohesion = community.internalEdges + community.externalEdges
+    ? Math.round((community.internalEdges / (community.internalEdges + community.externalEdges)) * 100)
+    : 0;
+  const representatives = community.representatives
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(
+      (node) =>
+        `<div class="callrow" data-node="${node.id}"><span class="cname">${escapeHtml(node.name)}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
+    )
+    .join("");
+  const bundles = BUNDLES.filter((b) => b.a === community.id || b.b === community.id)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 6)
+    .map((bundle) => {
+      const other = bundle.a === community.id ? bundle.b : bundle.a;
+      const otherMeta = communityMeta[other] || {};
+      return `<div class="callrow"><span class="cname">${bundle.kind} &times;${bundle.count}</span><span class="cfile">${escapeHtml(otherMeta.label || "#" + other)}</span></div>`;
+    })
+    .join("");
+  panel.innerHTML = `
+    <h3>${escapeHtml(meta.label || community.label || "#" + community.id)}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(community.id)}"></span>module aggregate</p>
+    <dl class="agg-facts">
+      <dt>symbols</dt><dd>${community.members.length}</dd>
+      <dt>internal edges</dt><dd>${community.internalEdges}</dd>
+      <dt>external edges</dt><dd>${community.externalEdges}</dd>
+      <dt>cohesion</dt><dd>${cohesion}%</dd>
+      <dt>entrypoints</dt><dd>${community.entrypoints}</dd>
+      <dt>worst confidence</dt><dd>${confidenceWord(community.worstConfidence)}</dd>
+    </dl>
+    <div class="agg-actions">
+      <button data-act="toggle">${State.expanded.has(community.id) ? "Collapse" : "Expand"} in place</button>
+      <button data-act="isolate">${State.community === community.id ? "Show all modules" : "Isolate"}</button>
+      <button data-act="explore">Explore this module</button>
+    </div>
+    ${representatives ? `<h4>Most connected</h4>${representatives}` : ""}
+    ${bundles ? `<h4>Connects to</h4>${bundles}` : ""}
+  `;
+  panel.classList.add("open");
+  panel.querySelector('[data-act="toggle"]').addEventListener("click", () => {
+    const expanded = new Set(State.expanded);
+    expanded.has(community.id) ? expanded.delete(community.id) : expanded.add(community.id);
+    setState({ expanded });
+  });
+  panel.querySelector('[data-act="isolate"]').addEventListener("click", () => {
+    setState({ community: State.community === community.id ? null : community.id });
+  });
+  panel.querySelector('[data-act="explore"]').addEventListener("click", () => {
+    const target = byId.get(community.representatives[0]);
+    setState({ mode: "explore", focus: target ? target.name : null, community: community.id }, { push: true });
+  });
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    row.addEventListener("click", () => {
+      const node = byId.get(Number(row.dataset.node));
+      if (node) setState({ mode: "explore", focus: node.name, community: community.id }, { push: true });
+    });
+  }
+}
+
+function buildLegend() {
+  const host = document.getElementById("legend-list");
+  const ranked = communityMeta
+    .filter((m) => m.id !== UNGROUPED && m.size > 0)
+    .slice()
+    .sort((left, right) => right.size - left.size)
+    .slice(0, 40);
+  host.innerHTML = ranked
+    .map(
+      (m) =>
+        `<div class="row${State.community === m.id ? " on" : ""}" data-c="${m.id}" title="${escapeHtml(m.name)}">` +
+        `<span class="swatch" style="background:${communityColor(m.id)}"></span>` +
+        `<span class="name">${escapeHtml(m.label)}</span><span class="n">${m.size}</span></div>`
+    )
+    .join("");
+  for (const row of host.querySelectorAll(".row")) {
+    row.addEventListener("click", () => {
+      const id = Number(row.dataset.c);
+      setState({ community: State.community === id ? null : id });
+    });
+  }
+}
+
+// --- Detail scene: built on first use ---------------------------------------
+// The force layout over every symbol is the expensive part of this page. It
+// runs when a mode actually needs it, so opening the page costs the Overview
+// only.
+let detailReady = false;
+function ensureDetail() {
+  if (detailReady) return;
+  detailReady = true;
+  initRenderer();
+  buildTree();
+  buildFilters();
+  selectTab("explorer");
+  runLayout(false);
+}
+
+let noticeTimer = null;
+// A shared link can name a symbol that has since been renamed or deleted. Say
+// so — degrading to a blank canvas silently is how a reader concludes the tool
+// is broken.
+function notice(message) {
+  const host = document.getElementById("notice");
+  if (!message) {
+    host.hidden = true;
+    return;
+  }
+  host.textContent = message;
+  host.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { host.hidden = true; }, 6000);
+}
+
+function resolveFocus(value) {
+  if (value === null || value === undefined) return null;
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && byId.has(numeric)) return byId.get(numeric);
+  return (
+    nodes.find((n) => n.file === value && n.kind === "file") ||
+    nodes.find((n) => n.name === value) ||
+    nodes.find((n) => n.file === value) ||
+    null
+  );
+}
+
+function applyState() {
+  syncFilterSets();
+  document.body.classList.toggle("mode-overview", State.mode === "overview");
+  document.getElementById("legend").hidden = State.mode !== "overview";
+  for (const button of document.querySelectorAll("#modes button")) {
+    button.setAttribute("aria-selected", String(button.dataset.mode === State.mode));
+  }
+  if (State.mode === "overview") {
+    buildOverview();
+    buildLegend();
+    if (ovRenderer) ovRenderer.refresh();
+    return;
+  }
+  ensureDetail();
+  const target = resolveFocus(State.focus);
+  if (target) {
+    notice(null);
+    focusNode(target);
+  } else if (State.focus) {
+    notice(`No node named "${State.focus}" in this graph — showing everything instead.`);
+  }
+  refresh();
+}
+
+window.addEventListener("popstate", () => {
+  readUrl();
+  applyState();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.matches("input, textarea")) return;
+  const index = Number(event.key);
+  if (Number.isInteger(index) && index >= 1 && index <= MODE_IDS.length) {
+    enterMode(MODE_IDS[index - 1]);
+    return;
+  }
+  if (event.key === "Escape" && State.mode !== "overview") enterMode("overview");
+});
 
 // --- Bootstrap ----------------------------------------------------------------
 {
@@ -1641,12 +2164,21 @@ function applyFocusParam() {
   document.getElementById("c-edges").textContent = links.length;
   document.getElementById("status-counts").textContent = `${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
 }
-window.addEventListener("resize", () => { if (renderer) renderer.resize(); });
-initRenderer();
-buildTree();
-buildFilters();
-selectTab("explorer");
-runLayout(false);
+function visible(element) {
+  return !!(element && element.offsetWidth && element.offsetHeight);
+}
+window.addEventListener("resize", () => {
+  if (renderer && visible(document.getElementById("view"))) renderer.resize();
+  if (ovRenderer && visible(document.getElementById("view-overview"))) ovRenderer.resize();
+});
+readUrl();
+// A page opened with ?focus= (the wiki links back that way) means Explore.
+if (!new URLSearchParams(location.search).has("mode") && new URLSearchParams(location.search).has("focus")) {
+  State.mode = "explore";
+}
+buildModeSwitcher();
+applyState();
+writeUrl(false);
 </script>
 </body>
 </html>

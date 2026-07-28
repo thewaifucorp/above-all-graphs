@@ -253,8 +253,14 @@ struct CommunitySummary {
 }
 
 /// A human-meaningful name for a community: the deepest directory every
-/// member file shares, else the most common file, else the numeric id. An
-/// opaque `community 41` tells a reader nothing.
+/// member file shares, else the directory most members live in, else the most
+/// common file, else the numeric id. An opaque `community 41` tells a reader
+/// nothing.
+///
+/// The middle rung matters at real scale. A community spanning
+/// `gitnexus/src/…` and `gitnexus-web/…` shares no prefix at all, and naming
+/// it after one arbitrary member file — `language-config.ts` for 867 symbols —
+/// is worse than naming it after where most of it lives.
 fn community_label(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
     let files: Vec<&str> = members
         .iter()
@@ -280,6 +286,20 @@ fn community_label(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
     if !shared.is_empty() {
         return format!("{}/", shared.join("/"));
     }
+    // No common prefix: name it after the directory holding the most members.
+    let mut directories: HashMap<&str, usize> = HashMap::new();
+    for file in &files {
+        if let Some((directory, _)) = file.rsplit_once('/') {
+            *directories.entry(directory).or_default() += 1;
+        }
+    }
+    if let Some((directory, _)) = directories
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+    {
+        return format!("{directory}/");
+    }
+    // Everything is at the repository root, so a file name is the best there is.
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for file in &files {
         *counts.entry(file).or_default() += 1;
@@ -295,11 +315,106 @@ fn community_label(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
 /// how many edges of each confidence it stands for.
 type Bundle = (i64, i64, usize, [u32; 3]);
 
+/// A community with fewer members than this is not a module — it is a stray
+/// helper or two. Folding it into the dominant community of its own file
+/// keeps the palette meaningful instead of spending a colour on noise.
+const MIN_COMMUNITY_MEMBERS: usize = 3;
+
+/// Folds tiny communities into the dominant community of their own file, then
+/// renumbers by size so id 0 is the largest.
+///
+/// The page used to redo community detection client-side and renumber there,
+/// which meant the ids in this payload and the ids the page coloured by were
+/// different numbers for the same thing. One source of truth, computed here,
+/// where it can be tested.
+fn normalize_communities(
+    nodes: &[Node],
+    communities: &[crate::analysis::Community],
+) -> Vec<crate::analysis::Community> {
+    let node_files: HashMap<i64, &str> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node.file_path.as_str())))
+        .collect();
+    let mut assigned: HashMap<i64, i64> = communities
+        .iter()
+        .flat_map(|community| {
+            community
+                .members
+                .iter()
+                .map(|member| (*member, community.id))
+        })
+        .collect();
+    let sizes: HashMap<i64, usize> = communities
+        .iter()
+        .map(|community| (community.id, community.members.len()))
+        .collect();
+
+    // Which community dominates each file, among the communities its symbols
+    // belong to.
+    let mut dominant_by_file: HashMap<&str, i64> = HashMap::new();
+    for (member, community) in &assigned {
+        let Some(file) = node_files.get(member) else {
+            continue;
+        };
+        let size = sizes.get(community).copied().unwrap_or(0);
+        dominant_by_file
+            .entry(file)
+            .and_modify(|current| {
+                let current_size = sizes.get(current).copied().unwrap_or(0);
+                if size > current_size || (size == current_size && *community < *current) {
+                    *current = *community;
+                }
+            })
+            .or_insert(*community);
+    }
+
+    let members: Vec<i64> = assigned.keys().copied().collect();
+    for member in members {
+        let community = assigned[&member];
+        if sizes.get(&community).copied().unwrap_or(0) >= MIN_COMMUNITY_MEMBERS {
+            continue;
+        }
+        let Some(dominant) = node_files
+            .get(&member)
+            .and_then(|file| dominant_by_file.get(file))
+            .copied()
+            .filter(|dominant| sizes.get(dominant).copied().unwrap_or(0) >= MIN_COMMUNITY_MEMBERS)
+        else {
+            continue;
+        };
+        assigned.insert(member, dominant);
+    }
+
+    let mut grouped: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+    for (member, community) in assigned {
+        grouped.entry(community).or_default().push(member);
+    }
+    let mut ranked: Vec<(i64, Vec<i64>)> = grouped.into_iter().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .len()
+            .cmp(&left.1.len())
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    ranked
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, mut members))| {
+            members.sort_unstable();
+            crate::analysis::Community {
+                id: i64::try_from(index).unwrap_or(i64::MAX),
+                members,
+            }
+        })
+        .collect()
+}
+
 /// Summarizes each community and the bundles between them, so the Overview
 /// mode can open on ~500 aggregates instead of ~6000 raw nodes and every
 /// aggregate can still be expanded to its parts.
 fn summarize_communities(nodes: &[Node], edges: &[Edge]) -> (Vec<CommunitySummary>, Vec<Bundle>) {
-    let communities = crate::analysis::communities(nodes, edges);
+    let communities = normalize_communities(nodes, &crate::analysis::communities(nodes, edges));
     let entrypoints = crate::analysis::entrypoints(nodes, edges);
     let community_by_node: HashMap<i64, i64> = communities
         .iter()
@@ -1492,13 +1607,138 @@ mod tests {
     }
 
     #[test]
+    fn normalized_communities_are_ranked_largest_first() {
+        let nodes: Vec<Node> = (1..=6)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: format!("f{id}.rs"),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 40,
+                members: vec![1, 2, 3],
+            },
+            crate::analysis::Community {
+                id: 7,
+                members: vec![4, 5, 6, 1],
+            },
+        ];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(normalized[0].id, 0);
+        assert!(
+            normalized[0].members.len() >= normalized[1].members.len(),
+            "id 0 must be the largest community"
+        );
+        assert_eq!(
+            normalized.iter().map(|c| c.id).collect::<Vec<_>>(),
+            vec![0, 1],
+            "ids are renumbered densely, not carried over"
+        );
+    }
+
+    #[test]
+    fn tiny_community_folds_into_the_dominant_community_of_its_file() {
+        // Three symbols share `main.rs`; two of them are in a real community,
+        // the third is alone. Alone-in-its-own-community is not a module.
+        let nodes: Vec<Node> = (1..=5)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: if id <= 4 { "main.rs" } else { "other.rs" }.into(),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 1,
+                members: vec![1, 2, 3],
+            },
+            crate::analysis::Community {
+                id: 2,
+                members: vec![4],
+            },
+        ];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(
+            normalized.len(),
+            1,
+            "the stray helper got no colour of its own"
+        );
+        assert_eq!(normalized[0].members, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn tiny_community_with_no_dominant_neighbour_survives() {
+        let nodes: Vec<Node> = (1..=2)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: format!("f{id}.rs"),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![crate::analysis::Community {
+            id: 9,
+            members: vec![1, 2],
+        }];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(normalized.len(), 1, "nothing to fold into, so it stays");
+        assert_eq!(normalized[0].members, vec![1, 2]);
+    }
+
+    #[test]
+    fn payload_node_community_matches_a_shipped_community_id() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges);
+        let ids: HashSet<i64> = payload["communities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|community| community["id"].as_i64().unwrap())
+            .collect();
+        for value in payload["nodes"]["community"].as_array().unwrap() {
+            if let Some(id) = value.as_i64() {
+                assert!(
+                    ids.contains(&id),
+                    "node community {id} is not one of the shipped communities"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn community_label_prefers_the_shared_directory() {
         let files: HashMap<i64, &str> = HashMap::from([(1, "src/core/a.rs"), (2, "src/core/b.rs")]);
         assert_eq!(community_label(&[1, 2], &files), "src/core/");
     }
 
     #[test]
-    fn community_label_falls_back_to_the_dominant_file() {
+    fn community_label_falls_back_to_the_dominant_directory() {
+        // No shared prefix across `app/` and `web/`, so the directory holding
+        // most members wins — never one arbitrary member file.
+        let files: HashMap<i64, &str> =
+            HashMap::from([(1, "app/src/a.ts"), (2, "app/src/b.ts"), (3, "web/c.ts")]);
+        assert_eq!(community_label(&[1, 2, 3], &files), "app/src/");
+    }
+
+    #[test]
+    fn community_label_falls_back_to_the_dominant_file_at_the_root() {
         let files: HashMap<i64, &str> = HashMap::from([(1, "a.rs"), (2, "a.rs"), (3, "b.rs")]);
         assert_eq!(community_label(&[1, 2, 3], &files), "a.rs");
     }
