@@ -71,10 +71,24 @@ pub fn run(root: &Path, options: &Options) -> Result<()> {
 
     if already_indexed {
         tracing::info!(path = %aag_dir.display(), "removing existing index for rebuild");
+        // Work memory is not derived from the repository, so a rebuild must not
+        // take it: the index can be recomputed from source and what a session
+        // learned cannot. See `crate::memory`.
+        let memory = crate::memory::location(root);
+        let preserved = memory.is_file().then(|| fs::read(&memory).ok()).flatten();
         fs::remove_dir_all(&aag_dir).map_err(|source| Error::RemoveDir {
             path: aag_dir.clone(),
             source,
         })?;
+        fs::create_dir_all(&aag_dir).map_err(|source| Error::CreateDir {
+            path: aag_dir.clone(),
+            source,
+        })?;
+        if let Some(bytes) = preserved
+            && let Err(error) = fs::write(&memory, bytes)
+        {
+            tracing::warn!(%error, "could not preserve work memory across the rebuild");
+        }
     }
 
     fs::create_dir_all(&aag_dir).map_err(|source| Error::CreateDir {

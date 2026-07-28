@@ -68,6 +68,8 @@ alone do not establish parity.
   size/rate limits.
 - Integrations for Claude Code, Cursor, Codex, Gemini CLI, Kiro, OpenCode, and
   Antigravity.
+- Outcome-backed work memory: recorded questions, answers, outcomes, and
+  corrections, recalled with a staleness check against the current graph.
 
 ## Priority gates
 
@@ -246,9 +248,22 @@ P2 gates expand reach after the core is measurable and dependable.
 - 11. Turn PR primitives into a full graph-backed workflow: dashboard, worktree
     mapping, conflict detection through shared communities, review queue,
     risk-ranked findings, and plan to work to review gates.
-- 12. Add outcome-backed work memory: save a question, answer, supporting nodes,
-    result, correction, and code revision; derive reviewable lessons without
-    allowing stale experience to override current source evidence.
+- 12. **Closed.** Outcome-backed work memory (`src/memory.rs`): question,
+    answer, supporting nodes, outcome (`worked`/`wrong`/`open`), correction, and
+    revision, as `aag memory save|correct|recall|lessons` and the MCP tools
+    `memory_save`, `memory_recall`, `memory_lessons`. See [memory](memory.md).
+    The gate's constraint is enforced rather than documented: every recalled entry
+    is checked against the current graph and marked `stale` when the symbols it
+    rested on are gone, an entry naming no symbols is stale because nothing can
+    check it, an unrecognized outcome parses as `open` rather than as a success,
+    and a lesson carries its entry count, how many the graph still supports, and
+    its ids — a lesson about deleted code is labelled history. Both outputs open
+    by saying memory is recorded experience and the graph wins any disagreement.
+    Memory lives beside the graph and survives `--force`, because an index can be
+    recomputed from source and what a session learned cannot.
+    Not claimed: nothing is inferred beyond counting outcomes per symbol — no
+    clustering, no embeddings, no model in the loop. A lesson needs two entries
+    because one outcome is an anecdote, and memory is per repository.
 
 ### P2 — ecosystem breadth and distribution
 

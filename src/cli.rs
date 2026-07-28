@@ -183,6 +183,14 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// Outcome-backed work memory: record what was asked and answered, how it
+    /// turned out, and review the lessons that repeat.
+    Memory {
+        /// Which memory operation.
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.
@@ -394,6 +402,76 @@ pub enum HookEvent {
 
     /// `SessionStart` — reconcile the index and inject a graph digest.
     SessionStart {
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Work-memory operations.
+#[derive(Subcommand, Debug, Clone)]
+pub enum MemoryCommand {
+    /// Record a question, its answer, and the symbols it rested on.
+    Save {
+        /// What was asked.
+        #[arg(long)]
+        question: String,
+
+        /// What was answered.
+        #[arg(long)]
+        answer: String,
+
+        /// Comma-separated symbols the answer rested on.
+        #[arg(long, default_value = "")]
+        nodes: String,
+
+        /// How it turned out: `worked`, `wrong`, or `open`.
+        #[arg(long, default_value = "open")]
+        outcome: String,
+
+        /// What replaced a wrong answer.
+        #[arg(long)]
+        correction: Option<String>,
+
+        /// The commit the work landed in.
+        #[arg(long)]
+        revision: Option<String>,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Record how an earlier answer turned out.
+    Correct {
+        /// Entry id, as printed by `save` and `recall`.
+        id: i64,
+
+        /// `worked`, `wrong`, or `open`.
+        #[arg(long, default_value = "wrong")]
+        outcome: String,
+
+        /// What replaced it.
+        #[arg(long)]
+        correction: Option<String>,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Recall entries relevant to a question, checked against the current graph.
+    Recall {
+        /// The question to match.
+        question: String,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Review the lessons that repeated outcomes suggest.
+    Lessons {
         /// Repository root. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,

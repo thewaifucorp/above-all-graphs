@@ -141,6 +141,27 @@ const TOOL_SPECS: &[ToolSpec] = &[
         implemented: true,
     },
     ToolSpec {
+        name: "memory_save",
+        description: "Record work: pass `question`, `answer`, and optionally `nodes` (comma-separated symbols the answer rested on), `outcome` (worked|wrong|open), `correction`, and `revision`. Recording the supporting symbols is what lets a later recall tell you the answer is stale.",
+        arg: "question",
+        arg_description: "What was asked. Pass `answer` alongside it.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "memory_recall",
+        description: "Recall earlier work on a question: what was answered, how it turned out, and what corrected it. Every entry is checked against the current graph and marked `stale` when the symbols it rested on are gone. This is recorded experience, not extracted evidence — where it disagrees with the graph, the graph is right.",
+        arg: "question",
+        arg_description: "The question to match against remembered work.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "memory_lessons",
+        description: "Review candidates derived from repeated outcomes: what kinds of answer held up and what kept being wrong, with the entry ids behind each one and how many are still supported by the graph. A lesson is a pattern in what was recorded, not a fact about the code.",
+        arg: "subject",
+        arg_description: "Optional symbol substring to narrow the lessons; empty returns all.",
+        implemented: true,
+    },
+    ToolSpec {
         name: "detect_changes",
         description: "Pre-commit risk analysis via git diff.",
         arg: "diff",
@@ -457,6 +478,9 @@ fn call_tool(root: &Path, params: Option<&Value>) -> std::result::Result<Value, 
     if name == "rename" {
         return call_rename(root, params);
     }
+    if name == "memory_save" {
+        return call_memory_save(root, params);
+    }
     if name.starts_with("group_") {
         return call_group(params, name);
     }
@@ -514,6 +538,8 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "affected" => affected_text(root, arg),
         "detect_changes" => detect_changes_text(root, arg),
         "cypher" => crate::query::run_json(root, arg),
+        "memory_recall" => crate::memory::recall_json(root, arg),
+        "memory_lessons" => crate::memory::format_lessons(root, arg),
         "route_map" => crate::api::route_map(root, arg),
         "tool_map" => crate::api::tool_map(root, arg),
         "shape_check" => crate::api::format_shape_check(root, arg),
@@ -529,6 +555,39 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "triage_prs" => crate::pr::triage(root, arg),
         _ => unreachable!("dispatch only called for implemented tools"),
     }
+}
+
+fn call_memory_save(root: &Path, params: &Value) -> std::result::Result<Value, String> {
+    let arguments = params
+        .get("arguments")
+        .ok_or_else(|| "missing arguments".to_string())?;
+    let text = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let question = text("question").ok_or_else(|| "missing argument `question`".to_string())?;
+    let answer = text("answer").ok_or_else(|| "missing argument `answer`".to_string())?;
+    let record = crate::memory::Record {
+        question,
+        answer,
+        nodes: text("nodes")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect(),
+        outcome: text("outcome").unwrap_or_else(|| "open".to_string()),
+        correction: text("correction"),
+        revision: text("revision"),
+    };
+    let (text, is_error) = match crate::memory::save(root, &record) {
+        Ok(id) => (format!("saved memory entry #{id}"), false),
+        Err(error) => (error.to_string(), true),
+    };
+    Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
 }
 
 fn call_group(params: &Value, name: &str) -> std::result::Result<Value, String> {

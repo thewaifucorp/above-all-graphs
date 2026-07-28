@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Api { command } => print_api(command)?,
+        Command::Memory { command } => run_memory(command)?,
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }
@@ -139,6 +140,56 @@ fn hook_target(event: aag::cli::HookEvent) -> (std::path::PathBuf, aag::hook::Ev
         aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
         aag::cli::HookEvent::SessionStart { path } => (path, aag::hook::Event::SessionStart),
     }
+}
+
+/// Runs one work-memory operation.
+fn run_memory(command: aag::cli::MemoryCommand) -> anyhow::Result<()> {
+    use aag::cli::MemoryCommand;
+    match command {
+        MemoryCommand::Save {
+            question,
+            answer,
+            nodes,
+            outcome,
+            correction,
+            revision,
+            path,
+        } => {
+            let id = aag::memory::save(
+                &path,
+                &aag::memory::Record {
+                    question,
+                    answer,
+                    nodes: nodes
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string)
+                        .collect(),
+                    outcome,
+                    correction,
+                    revision,
+                },
+            )?;
+            println!("saved memory entry #{id}");
+        }
+        MemoryCommand::Correct {
+            id,
+            outcome,
+            correction,
+            path,
+        } => {
+            aag::memory::correct(&path, id, &outcome, correction.as_deref())?;
+            println!("updated memory entry #{id}");
+        }
+        MemoryCommand::Recall { question, path } => {
+            println!("{}", aag::memory::format_recall(&path, &question)?);
+        }
+        MemoryCommand::Lessons { path } => {
+            println!("{}", aag::memory::format_lessons(&path, "")?);
+        }
+    }
+    Ok(())
 }
 
 fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
