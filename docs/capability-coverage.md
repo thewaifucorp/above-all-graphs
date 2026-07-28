@@ -368,9 +368,26 @@ P2 gates expand reach after the core is measurable and dependable.
     says. An element whose name is built at runtime (`<component :is="x">`)
     names nothing and is skipped, and a Groovy declaration written without a
     parameter list is not a method to this rule.
-- 14. Expand agent installers and uninstallers from seven integrations to the
-    broader cross-framework surface, while keeping every edit additive,
-    idempotent, and reversible.
+- 14. **Closed.** Fourteen integrations, up from seven (`src/install.rs`): the
+    original Claude Code, Cursor, Gemini CLI, Kiro, opencode, Codex, and
+    Antigravity, plus VS Code / GitHub Copilot (`.vscode/mcp.json`, keyed
+    `servers`), Windsurf (`~/.codeium/windsurf/mcp_config.json` + `.windsurf/
+    rules/aag.md`), Zed (`.zed/settings.json`, keyed `context_servers`), Roo
+    Code (`.roo/mcp.json` + `.roo/rules/aag.md`), Cline (`.clinerules/aag.md`),
+    Crush (`.crush.json`, keyed `mcp`, `type: stdio`), and goose (a stdio
+    extension in `~/.config/goose/config.yaml`). See
+    [agent integration](agent-integration.md).
+    Each shape is written as that agent documents it rather than assumed to be
+    `mcpServers`, and every edit stays additive, idempotent, and reversible: a
+    test installs all fourteen twice, asserts the second pass writes nothing,
+    then uninstalls and asserts the neighbouring servers, extensions, themes,
+    and provider settings are still there.
+    Not claimed: Cline's MCP list lives in VS Code extension globalStorage,
+    whose path varies by platform, VS Code flavour, and fork — writing there
+    would be a guess, so only its rules file is written and the server is left
+    to Cline's own UI. Antigravity stays UI-managed for the same reason. An
+    `extensions:` map that only ever held `aag` is left behind empty rather
+    than deleted, matching how the JSON configs are treated.
 - 15. Generate repository-area skills from detected communities, entrypoints,
     processes, contracts, and cross-area links, with deterministic refresh.
 - 16. Ship semantic search as an optional prebuilt distribution so npm users can

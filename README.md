@@ -92,6 +92,13 @@ Built-in multi-provider AI chat (Anthropic, OpenAI, Azure, Gemini, OpenRouter, M
 | opencode    | `opencode.json`           | —                                                | `AGENTS.md` (fenced)      |
 | Codex       | `~/.codex/config.toml`    | —                                                | 7 skills (`.agents/skills/`) + `AGENTS.md` |
 | Antigravity | (UI-managed)              | —                                                | `AGENTS.md` (fenced)      |
+| VS Code / Copilot | `.vscode/mcp.json` (`servers`) | —                                   | `.github/copilot-instructions.md` (fenced) |
+| Windsurf    | `~/.codeium/windsurf/mcp_config.json` | —                                    | `.windsurf/rules/aag.md`  |
+| Zed         | `.zed/settings.json` (`context_servers`) | —                                 | `AGENTS.md` (fenced)      |
+| Roo Code    | `.roo/mcp.json`           | —                                                | `.roo/rules/aag.md`       |
+| Cline       | (VS Code globalStorage — left to its UI) | —                                 | `.clinerules/aag.md`      |
+| Crush       | `.crush.json` (`mcp`)     | —                                                | `AGENTS.md` (fenced)      |
+| goose       | `~/.config/goose/config.yaml` | —                                            | `.goosehints` (fenced)    |
 
 Idempotent (re-running never duplicates), additive (your existing hooks/servers/rules survive untouched), reversible (`aag uninstall` removes exactly what was written). Agents without hook systems stay fresh anyway — the MCP server reconciles on connect and runs the native watcher.
 

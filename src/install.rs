@@ -17,6 +17,13 @@
 //! | opencode    | `opencode.json`             | —                           | `AGENTS.md` (fenced)        |
 //! | Codex       | `~/.codex/config.toml`      | —                           | `.agents/skills/aag-*` + `AGENTS.md` |
 //! | Antigravity | (UI-managed)                | —                           | `AGENTS.md` (fenced)        |
+//! | VS Code / Copilot | `.vscode/mcp.json`    | —                           | `.github/copilot-instructions.md` (fenced) |
+//! | Windsurf    | `~/.codeium/windsurf/mcp_config.json` | —                 | `.windsurf/rules/aag.md`    |
+//! | Zed         | `.zed/settings.json`        | —                           | `AGENTS.md` (fenced)        |
+//! | Roo Code    | `.roo/mcp.json`             | —                           | `.roo/rules/aag.md`         |
+//! | Cline       | (VS Code globalStorage)     | —                           | `.clinerules/aag.md`        |
+//! | Crush       | `.crush.json`               | —                           | `AGENTS.md` (fenced)        |
+//! | goose       | `~/.config/goose/config.yaml` | —                         | `.goosehints` (fenced)      |
 //!
 //! Agents without a hook system still stay fresh: the MCP server itself
 //! reconciles on connect and runs the native watcher (`SPEC.md` section 2).
@@ -115,13 +122,43 @@ pub fn run(root: &Path, force: bool) -> Result<InstallSummary> {
 /// Returns a write/create error if a config file cannot be written.
 pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<InstallSummary> {
     let mut summary = InstallSummary::default();
-    let mut wants_agents_md = false;
 
     // The graph and agent integration are local machine state. Keep those
     // artifacts out of a project's commits, but deliberately leave the
     // root `.mcp.json` visible: teams often version its server definition.
     upsert_gitignore(&root.join(".gitignore"))?;
 
+    let hooked = register_hooked_agents(root, home, force, &mut summary)?;
+    let config_only = register_config_only_agents(root, home, force, &mut summary)?;
+
+    // AGENTS.md is written only when something reads it.
+    summary.rules_written += u32::from(upsert_fenced_md(
+        &root.join("AGENTS.md"),
+        hooked || config_only,
+    )?);
+
+    if !summary.agents.is_empty() {
+        tracing::info!(
+            agents = ?summary.agents,
+            skills = summary.skills_written,
+            hooks = summary.hooks_added,
+            mcp = summary.mcp_configs,
+            rules = summary.rules_written,
+            "agent integration installed"
+        );
+    }
+    Ok(summary)
+}
+
+/// The two agents with a native hook system: edits they make re-index the
+/// graph without waiting for the watcher. Returns whether any of them reads
+/// `AGENTS.md`.
+fn register_hooked_agents(
+    root: &Path,
+    home: Option<&Path>,
+    force: bool,
+    summary: &mut InstallSummary,
+) -> Result<bool> {
     if detected(root, home, ".claude") {
         summary.agents.push("claude-code");
         summary.skills_written += install_skills_at(&root.join(".claude").join("skills"), force)?;
@@ -140,6 +177,18 @@ pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<In
         )?);
     }
 
+    Ok(false)
+}
+
+/// Everything else: MCP registration plus whatever guidance file the agent
+/// reads. Returns whether any of them reads `AGENTS.md`.
+fn register_config_only_agents(
+    root: &Path,
+    home: Option<&Path>,
+    force: bool,
+    summary: &mut InstallSummary,
+) -> Result<bool> {
+    let mut wants_agents_md = false;
     if detected(root, home, ".gemini") {
         summary.agents.push("gemini-cli");
         summary.mcp_configs +=
@@ -181,20 +230,117 @@ pub fn run_with_home(root: &Path, force: bool, home: Option<&Path>) -> Result<In
         summary.agents.push("antigravity");
         wants_agents_md = true;
     }
+    wants_agents_md |= register_editor_agents(root, home, force, summary)?;
+    Ok(wants_agents_md)
+}
 
-    summary.rules_written += u32::from(upsert_fenced_md(&root.join("AGENTS.md"), wants_agents_md)?);
-
-    if !summary.agents.is_empty() {
-        tracing::info!(
-            agents = ?summary.agents,
-            skills = summary.skills_written,
-            hooks = summary.hooks_added,
-            mcp = summary.mcp_configs,
-            rules = summary.rules_written,
-            "agent integration installed"
-        );
+/// The editors: VS Code and the forks and IDE agents that followed it. Each
+/// keys its servers differently — `servers`, `context_servers`, `mcp` — so
+/// the shape is passed in rather than assumed. Returns whether any of them
+/// reads `AGENTS.md`.
+fn register_editor_agents(
+    root: &Path,
+    home: Option<&Path>,
+    force: bool,
+    summary: &mut InstallSummary,
+) -> Result<bool> {
+    let mut wants_agents_md = false;
+    // VS Code's own MCP surface (GitHub Copilot agent mode) keys its servers
+    // under `servers`, not `mcpServers` — a distinct shape, same idea.
+    if detected(root, home, ".vscode") {
+        summary.agents.push("vscode-copilot");
+        summary.mcp_configs += u32::from(register_keyed(
+            &root.join(".vscode").join("mcp.json"),
+            "servers",
+            &json!({"type": "stdio", "command": "aag", "args": ["mcp"]}),
+        )?);
+        summary.rules_written += u32::from(upsert_fenced_md(
+            &root.join(".github").join("copilot-instructions.md"),
+            true,
+        )?);
     }
-    Ok(summary)
+
+    // Windsurf reads one global MCP file; its per-repo surface is rules.
+    if detected(root, home, ".windsurf") || home.is_some_and(|home| home.join(".codeium").is_dir())
+    {
+        summary.agents.push("windsurf");
+        if let Some(home) = home {
+            summary.mcp_configs += u32::from(register_mcp(
+                &home
+                    .join(".codeium")
+                    .join("windsurf")
+                    .join("mcp_config.json"),
+            )?);
+        }
+        summary.rules_written += u32::from(write_if_missing(
+            &root.join(".windsurf").join("rules").join("aag.md"),
+            &format!("# aag — code knowledge graph\n\n{}", agent_blurb()),
+            force,
+        )?);
+    }
+
+    // Zed calls them context servers and runs them over stdio.
+    if detected(root, home, ".zed")
+        || home.is_some_and(|home| home.join(".config").join("zed").is_dir())
+    {
+        summary.agents.push("zed");
+        summary.mcp_configs += u32::from(register_keyed(
+            &root.join(".zed").join("settings.json"),
+            "context_servers",
+            &json!({"source": "custom", "command": "aag", "args": ["mcp"]}),
+        )?);
+        wants_agents_md = true;
+    }
+
+    if detected(root, home, ".roo") {
+        summary.agents.push("roo-code");
+        summary.mcp_configs += u32::from(register_mcp(&root.join(".roo").join("mcp.json"))?);
+        summary.rules_written += u32::from(write_if_missing(
+            &root.join(".roo").join("rules").join("aag.md"),
+            &format!("# aag — code knowledge graph\n\n{}", agent_blurb()),
+            force,
+        )?);
+    }
+
+    // Cline keeps its MCP list in VS Code's extension globalStorage, whose
+    // path differs per platform, per VS Code flavour, and per fork. Writing
+    // there would be a guess, so only the rules directory is written and the
+    // MCP server is left to Cline's own UI.
+    if detected(root, home, ".clinerules") {
+        summary.agents.push("cline");
+        summary.rules_written += u32::from(write_if_missing(
+            &root.join(".clinerules").join("aag.md"),
+            &format!("# aag — code knowledge graph\n\n{}", agent_blurb()),
+            force,
+        )?);
+    }
+
+    if root.join(".crush.json").is_file()
+        || root.join("crush.json").is_file()
+        || home.is_some_and(|home| home.join(".config").join("crush").is_dir())
+    {
+        summary.agents.push("crush");
+        summary.mcp_configs += u32::from(register_keyed(
+            &root.join(".crush.json"),
+            "mcp",
+            &json!({"type": "stdio", "command": "aag", "args": ["mcp"]}),
+        )?);
+        wants_agents_md = true;
+    }
+
+    if root.join(".goosehints").is_file()
+        || home.is_some_and(|home| home.join(".config").join("goose").is_dir())
+    {
+        summary.agents.push("goose");
+        if let Some(home) = home {
+            summary.mcp_configs += u32::from(register_goose(
+                &home.join(".config").join("goose").join("config.yaml"),
+            )?);
+        }
+        summary.rules_written += u32::from(upsert_fenced_md(&root.join(".goosehints"), true)?);
+    }
+
+    Ok(wants_agents_md)
 }
 
 /// Removes everything `run` writes across every agent. Files that end up
@@ -237,12 +383,28 @@ pub fn uninstall_with_home(root: &Path, home: Option<&Path>) -> Result<()> {
     unregister_mcp(&root.join(".gemini").join("settings.json"))?;
     unregister_mcp(&root.join(".kiro").join("settings").join("mcp.json"))?;
     unregister_opencode(&root.join("opencode.json"))?;
+    unregister_mcp(&root.join(".roo").join("mcp.json"))?;
+    unregister_keyed(&root.join(".vscode").join("mcp.json"), "servers")?;
+    unregister_keyed(&root.join(".zed").join("settings.json"), "context_servers")?;
+    unregister_keyed(&root.join(".crush.json"), "mcp")?;
     if let Some(home) = home {
         unregister_codex(&home.join(".codex").join("config.toml"))?;
+        unregister_mcp(
+            &home
+                .join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        )?;
+        unregister_goose(&home.join(".config").join("goose").join("config.yaml"))?;
     }
 
     remove_file_if_present(&root.join(".cursor").join("rules").join("aag.mdc"))?;
     remove_file_if_present(&root.join(".kiro").join("steering").join("aag.md"))?;
+    remove_file_if_present(&root.join(".windsurf").join("rules").join("aag.md"))?;
+    remove_file_if_present(&root.join(".roo").join("rules").join("aag.md"))?;
+    remove_file_if_present(&root.join(".clinerules").join("aag.md"))?;
+    remove_fenced_md(&root.join(".github").join("copilot-instructions.md"))?;
+    remove_fenced_md(&root.join(".goosehints"))?;
     remove_fenced_md(&root.join("AGENTS.md"))?;
     remove_fenced_md(&root.join("GEMINI.md"))?;
     remove_gitignore_block(&root.join(".gitignore"))?;
@@ -448,6 +610,115 @@ fn register_mcp(path: &Path) -> Result<bool> {
     servers.insert("aag".into(), json!({"command": "aag", "args": ["mcp"]}));
     write_json(path, &Value::Object(config))?;
     Ok(true)
+}
+
+/// Adds the `aag` server to a JSON config that keys its servers under
+/// `container` — VS Code uses `servers`, Zed uses `context_servers`, Crush
+/// uses `mcp`, each with its own entry shape. Same additive, idempotent,
+/// skip-what-we-cannot-parse rules as [`register_mcp`].
+fn register_keyed(path: &Path, container: &str, entry: &Value) -> Result<bool> {
+    let Some(mut config) = read_json_object(path)? else {
+        tracing::warn!(path = %path.display(), container, "unparseable config — skipping");
+        return Ok(false);
+    };
+    let servers = config
+        .entry(container.to_string())
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| malformed(path, "server container is not an object"))?;
+    if servers.contains_key("aag") {
+        return Ok(false);
+    }
+    servers.insert("aag".into(), entry.clone());
+    write_json(path, &Value::Object(config))?;
+    Ok(true)
+}
+
+/// Removes the `aag` entry from a `container`-keyed JSON config.
+fn unregister_keyed(path: &Path, container: &str) -> Result<()> {
+    let Some(mut config) = read_json_object(path)? else {
+        return Ok(());
+    };
+    let Some(servers) = config.get_mut(container).and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    if servers.remove("aag").is_none() {
+        return Ok(());
+    }
+    write_json(path, &Value::Object(config))
+}
+
+/// Adds the `aag` stdio extension to goose's YAML config, preserving the
+/// provider settings and other extensions around it.
+fn register_goose(path: &Path) -> Result<bool> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(Error::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let mut config = serde_yaml_ng::Mapping::new();
+    if !raw.trim().is_empty() {
+        let Ok(serde_yaml_ng::Value::Mapping(parsed)) = serde_yaml_ng::from_str(&raw) else {
+            tracing::warn!(path = %path.display(), "unparseable goose config — skipping");
+            return Ok(false);
+        };
+        config = parsed;
+    }
+    let key = serde_yaml_ng::Value::String("extensions".into());
+    let extensions = config
+        .entry(key)
+        .or_insert_with(|| serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()));
+    let Some(extensions) = extensions.as_mapping_mut() else {
+        return Err(malformed(path, "`extensions` is not a mapping"));
+    };
+    let name = serde_yaml_ng::Value::String("aag".into());
+    if extensions.contains_key(&name) {
+        return Ok(false);
+    }
+    let mut entry = serde_yaml_ng::Mapping::new();
+    entry.insert("name".into(), "aag".into());
+    entry.insert("type".into(), "stdio".into());
+    entry.insert("cmd".into(), "aag".into());
+    entry.insert(
+        "args".into(),
+        serde_yaml_ng::Value::Sequence(vec!["mcp".into()]),
+    );
+    entry.insert("enabled".into(), true.into());
+    extensions.insert(name, serde_yaml_ng::Value::Mapping(entry));
+    let rendered = serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(config))
+        .map_err(|_| malformed(path, "goose config could not be serialized"))?;
+    write_text(path, &rendered)?;
+    Ok(true)
+}
+
+/// Removes the `aag` extension from goose's YAML config.
+fn unregister_goose(path: &Path) -> Result<()> {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let Ok(serde_yaml_ng::Value::Mapping(mut config)) = serde_yaml_ng::from_str(&raw) else {
+        return Ok(());
+    };
+    let Some(extensions) = config
+        .get_mut(serde_yaml_ng::Value::String("extensions".into()))
+        .and_then(serde_yaml_ng::Value::as_mapping_mut)
+    else {
+        return Ok(());
+    };
+    if extensions
+        .remove(serde_yaml_ng::Value::String("aag".into()))
+        .is_none()
+    {
+        return Ok(());
+    }
+    let rendered = serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(config))
+        .map_err(|_| malformed(path, "goose config could not be serialized"))?;
+    write_text(path, &rendered)
 }
 
 /// Removes the `aag` server entry, leaving everything else intact.
@@ -830,14 +1101,27 @@ mod tests {
     #[test]
     fn install_is_idempotent_across_all_agents() {
         let (root, home) = scratch();
-        for dir in [".claude", ".cursor", ".gemini", ".kiro", ".antigravity"] {
+        for dir in [
+            ".claude",
+            ".cursor",
+            ".gemini",
+            ".kiro",
+            ".antigravity",
+            ".vscode",
+            ".windsurf",
+            ".zed",
+            ".roo",
+            ".clinerules",
+        ] {
             fs::create_dir_all(home.join(dir)).unwrap();
         }
         fs::create_dir_all(home.join(".codex")).unwrap();
-        fs::create_dir_all(home.join(".config").join("opencode")).unwrap();
+        for dir in ["opencode", "crush", "goose"] {
+            fs::create_dir_all(home.join(".config").join(dir)).unwrap();
+        }
 
         let first = install(&root, &home, false);
-        assert_eq!(first.agents.len(), 7, "agents: {:?}", first.agents);
+        assert_eq!(first.agents.len(), 14, "agents: {:?}", first.agents);
 
         let second = install(&root, &home, false);
         assert_eq!(second.skills_written, 0);
@@ -860,6 +1144,43 @@ mod tests {
         );
         let codex = fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
         assert_eq!(codex.matches("[mcp_servers.aag]").count(), 1);
+        // Each newer agent gets its own shape, not a copy of `mcpServers`.
+        let vscode = read_json(&root.join(".vscode").join("mcp.json"));
+        assert_eq!(vscode["servers"]["aag"]["command"], "aag");
+        assert_eq!(vscode["servers"]["aag"]["type"], "stdio");
+        let zed = read_json(&root.join(".zed").join("settings.json"));
+        assert_eq!(zed["context_servers"]["aag"]["source"], "custom");
+        let crush = read_json(&root.join(".crush.json"));
+        assert_eq!(crush["mcp"]["aag"]["type"], "stdio");
+        let roo = read_json(&root.join(".roo").join("mcp.json"));
+        assert_eq!(roo["mcpServers"]["aag"]["command"], "aag");
+        let windsurf = read_json(
+            &home
+                .join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        );
+        assert_eq!(windsurf["mcpServers"]["aag"]["args"][0], "mcp");
+        let goose =
+            fs::read_to_string(home.join(".config").join("goose").join("config.yaml")).unwrap();
+        assert_eq!(goose.matches("cmd: aag").count(), 1, "{goose}");
+        for rules in [
+            root.join(".windsurf").join("rules").join("aag.md"),
+            root.join(".roo").join("rules").join("aag.md"),
+            root.join(".clinerules").join("aag.md"),
+        ] {
+            assert!(rules.is_file(), "missing rules file {}", rules.display());
+        }
+        assert!(
+            fs::read_to_string(root.join(".github").join("copilot-instructions.md"))
+                .unwrap()
+                .contains("aag explore")
+        );
+        assert!(
+            fs::read_to_string(root.join(".goosehints"))
+                .unwrap()
+                .contains("aag impact")
+        );
         for (name, _) in SKILLS {
             assert!(
                 root.join(".agents")
@@ -1065,6 +1386,74 @@ mod tests {
         assert!(agents_md.contains("# My agents file"));
         // GEMINI.md existed only for our section — gone entirely.
         assert!(!root.join("GEMINI.md").exists());
+    }
+
+    /// Every integration added in the second wave is reversible too, and
+    /// none of them takes a neighbouring entry with it on the way out.
+    #[test]
+    fn uninstall_reverses_the_newer_integrations() {
+        let (root, home) = scratch();
+        for dir in [".vscode", ".windsurf", ".zed", ".roo", ".clinerules"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::create_dir_all(home.join(".config").join("goose")).unwrap();
+        fs::write(root.join(".crush.json"), "{}").unwrap();
+        // Foreign entries that must survive, in each config's own shape.
+        fs::write(
+            root.join(".vscode").join("mcp.json"),
+            r#"{"servers":{"theirs":{"command":"other"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".zed").join("settings.json"),
+            r#"{"theme":"One Dark","context_servers":{"theirs":{"source":"custom"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".config").join("goose").join("config.yaml"),
+            "GOOSE_PROVIDER: anthropic\nextensions:\n  developer:\n    type: builtin\n",
+        )
+        .unwrap();
+        let summary = install(&root, &home, false);
+        assert!(summary.agents.contains(&"goose"), "{:?}", summary.agents);
+
+        uninstall_with_home(&root, Some(&home)).unwrap();
+
+        let vscode = read_json(&root.join(".vscode").join("mcp.json"));
+        assert!(vscode["servers"].get("aag").is_none());
+        assert_eq!(vscode["servers"]["theirs"]["command"], "other");
+        let zed = read_json(&root.join(".zed").join("settings.json"));
+        assert!(zed["context_servers"].get("aag").is_none());
+        assert_eq!(zed["theme"], "One Dark", "unrelated settings survive");
+        assert!(zed["context_servers"].get("theirs").is_some());
+        let crush = read_json(&root.join(".crush.json"));
+        assert!(crush["mcp"].get("aag").is_none());
+        let roo = read_json(&root.join(".roo").join("mcp.json"));
+        assert!(roo["mcpServers"].get("aag").is_none());
+        let windsurf = read_json(
+            &home
+                .join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        );
+        assert!(windsurf["mcpServers"].get("aag").is_none());
+        let goose =
+            fs::read_to_string(home.join(".config").join("goose").join("config.yaml")).unwrap();
+        assert!(!goose.contains("cmd: aag"), "{goose}");
+        assert!(
+            goose.contains("developer"),
+            "their extension stays: {goose}"
+        );
+        assert!(goose.contains("anthropic"), "their provider stays: {goose}");
+        for rules in [
+            root.join(".windsurf").join("rules").join("aag.md"),
+            root.join(".roo").join("rules").join("aag.md"),
+            root.join(".clinerules").join("aag.md"),
+            root.join(".github").join("copilot-instructions.md"),
+            root.join(".goosehints"),
+        ] {
+            assert!(!rules.exists(), "{} survives", rules.display());
+        }
     }
 
     #[test]

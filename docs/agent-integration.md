@@ -15,6 +15,13 @@ Per agent:
 - opencode: `opencode.json` (its own `mcp` shape), fenced section in `AGENTS.md`
 - Codex: fenced TOML block in the global `~/.codex/config.toml`, fenced section in `AGENTS.md`
 - Antigravity: fenced section in `AGENTS.md` (its MCP config is UI-managed)
+- VS Code / GitHub Copilot: MCP in `.vscode/mcp.json` (keyed `servers`, not `mcpServers`), fenced section in `.github/copilot-instructions.md`
+- Windsurf: MCP in the global `~/.codeium/windsurf/mcp_config.json`, rules in `.windsurf/rules/aag.md`
+- Zed: context server in `.zed/settings.json` (keyed `context_servers`), fenced section in `AGENTS.md`
+- Roo Code: project MCP in `.roo/mcp.json`, rules in `.roo/rules/aag.md`
+- Cline: rules in `.clinerules/aag.md` — its MCP list lives in VS Code's extension globalStorage, whose path varies by platform and fork, so that file is left to Cline's own UI
+- Crush: MCP in `.crush.json` (keyed `mcp`, `type: stdio`), fenced section in `AGENTS.md`
+- goose: stdio extension in the global `~/.config/goose/config.yaml`, fenced section in `.goosehints`
 
 ## The skill pack
 
