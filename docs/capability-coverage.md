@@ -140,7 +140,9 @@ P2 gates expand reach after the core is measurable and dependable.
    subset with real pattern evaluation: a lexer, a parser, and an evaluator that
    honors labels, relationship types, direction, variable-length hops, `WHERE`
    with the usual comparisons plus `CONTAINS`/`STARTS WITH`/`ENDS WITH`/`IN`/`IS
-   NULL`, `count` with grouping, `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT`.
+   NULL`, `OPTIONAL MATCH`, `UNION`/`UNION ALL`, the aggregates `count`,
+   `collect`, `min`, `max`, `sum`, and `avg` with grouping, `DISTINCT`,
+   `ORDER BY`, `SKIP`, and `LIMIT`.
    The grammar is written down in [query](query.md), `aag cypher` exposes it on
    the CLI, and the MCP `cypher` tool returns the same answers as JSON. What the
    shim did instead is on the record there: it ignored relationship types and
@@ -148,9 +150,17 @@ P2 gates expand reach after the core is measurable and dependable.
    wrong answer that reads like a right one.
    Bounds are stated: `LIMIT` clamped to 1000, hops to 5, 20 000 intermediate
    rows, no repeated edge within a path, and a paged answer says it was paged.
+   `OPTIONAL MATCH` keeps the row it could not extend, with that pattern's
+   variables null, so "functions that call nothing" is answerable rather than
+   invisible; `UNION` follows Cypher's rule that the arms return the same
+   columns; and every aggregate ignores nulls, so `count(x)` counts values while
+   `count(*)` counts rows and `sum` over non-numbers is null rather than a
+   guess.
    Not claimed: this is not full Cypher and not a query planner. There is no
-   `WITH`, `UNWIND`, `OPTIONAL MATCH`, `UNION`, subquery, arithmetic, or function
-   other than `count`; each is rejected by name rather than reinterpreted.
+   `WITH`, `UNWIND`, subquery, arithmetic, `CASE`, or scalar function — a
+   pipeline needs an intermediate row shape that is not a graph match, and this
+   evaluator has one stage on purpose. Each is rejected by name rather than
+   reinterpreted, and an unknown function is named against the six that exist.
 - 5. **Closed.** Statement-level control-flow and data-flow foundations: basic
    blocks, CFG, def-use, control/data dependence, PDG queries, and
    provenance-aware source-to-sink taint findings, starting with TypeScript and

@@ -26,7 +26,9 @@ matched is worth less than no query surface at all, because a reader trusts it.
 ## The subset
 
 ```text
-query      := MATCH pattern (',' pattern)*
+query      := select (UNION [ALL] select)*
+select     := (MATCH | OPTIONAL MATCH) pattern (',' pattern)*
+              ((MATCH | OPTIONAL MATCH) pattern (',' pattern)*)*
               [WHERE predicate]
               RETURN [DISTINCT] item (',' item)*
               [ORDER BY column [ASC|DESC] (',' ...)*]
@@ -45,7 +47,8 @@ predicate  := predicate (AND|OR) predicate | NOT predicate | '(' predicate ')'
               | value IN '[' literal (',' literal)* ']'
 comparison := '=' | '<>' | '<' | '<=' | '>' | '>=' | CONTAINS | STARTS WITH | ENDS WITH
 
-item       := value [AS alias] | count '(' (variable | '*') ')' [AS alias]
+item       := value [AS alias] | aggregate [AS alias]
+aggregate  := count '(' (value | '*') ')' | (collect|min|max|sum|avg) '(' value ')'
 value      := variable | variable '.' property | literal
 literal    := 'text' | "text" | integer
 ```
@@ -53,7 +56,8 @@ literal    := 'text' | "text" | integer
 Keywords and labels are case-insensitive; variables are not.
 
 **Labels** are the graph's node kinds: `File`, `Function`, `Struct`, `Method`,
-`Interface`, `Doc`, `Endpoint`, `Schema`, `DatabaseTable`, `InfraResource`.
+`Interface`, `Doc`, `Endpoint`, `Schema`, `DatabaseTable`, `InfraResource`,
+`Component`.
 `Fn`, `Class`, `Trait`, `Table`, and `Resource` are accepted spellings of the
 ones a reader would expect them to mean.
 
@@ -85,6 +89,18 @@ MATCH (a:Function)-[:CALLS]->(b) RETURN a.file, count(*) AS calls ORDER BY calls
 
 -- A doc that explains a function that calls something else: two patterns, joined
 MATCH (a)-[:CALLS]->(b), (d:Doc)-[:EXPLAINS]->(b) RETURN d.name, b.name, a.name
+
+-- Every function, and what it calls — including the ones that call nothing
+MATCH (f:Function) OPTIONAL MATCH (f)-[:CALLS]->(g)
+RETURN f.name, collect(g.name) AS callees, count(g) AS calls ORDER BY calls DESC
+
+-- Functions and structs in one list
+MATCH (f:Function) WHERE f.file = 'src/query.rs' RETURN f.name AS name, f.line AS line
+UNION
+MATCH (s:Struct) WHERE s.file = 'src/query.rs' RETURN s.name AS name, s.line AS line
+
+-- The span of a file's symbols
+MATCH (f:Function) RETURN f.file, min(f.line) AS first, max(f.line) AS last, avg(f.line) AS middle
 ```
 
 From the CLI, `aag cypher "<query>"` prints a table and `--json` prints rows;
@@ -108,6 +124,9 @@ line and column where it was found. Nothing is silently reinterpreted.
 |---|---|
 | `MATCH (n) DELETE n` | ``line 1, column 11: `DELETE` writes to the graph; this surface is read-only`` |
 | `MATCH (n) WITH n RETURN n` | ``line 1, column 11: `WITH` is outside the supported subset`` |
+| `MATCH (n) RETURN toUpper(n.name)` | ``unknown function `toUpper` — this subset evaluates count, collect, min, max, sum, avg`` |
+| `OPTIONAL MATCH (n) RETURN n` | `OPTIONAL MATCH extends rows another pattern produced; this query has no MATCH to extend` |
+| `MATCH (f:Function) RETURN f.name UNION MATCH (s:Struct) RETURN s.name` | `UNION needs the same columns in each arm: this one returns s.name, the first returns f.name` |
 | `MATCH (n:Widget) RETURN n` | ``unknown label `Widget` — the graph has: File, Function, …`` |
 | `MATCH (a)-[:USES]->(b) RETURN a` | ``unknown relationship type `USES` — the graph has: CALLS, IMPORTS, …`` |
 | `MATCH (n) RETURN n.colour` | ``unknown property `colour` — a node has id, kind, name, file, line, end_line`` |
@@ -128,6 +147,9 @@ intent rather than syntax. The graph is read-only through this surface.
   well as while rows accumulate. Beyond that the query is rejected with the
   advice that would make it answerable, rather than answered slowly.
 - A variable-length path never repeats an edge, so a cycle terminates.
+- A table cell is cut at 60 characters — `collect()` can gather hundreds of
+  names, and a table one cell wide is not a table. The cut is announced under
+  the table, and the JSON form carries the whole value.
 
 ## Deliberate limits
 
@@ -136,11 +158,21 @@ These are limits, not bugs:
 - **Not a planner.** Evaluation loads the graph and matches in memory. Labels
   and literal property maps are pushed down before a node is bound, `WHERE` runs
   on rows afterward, and nothing else is optimized.
-- **`count` is the only function.** No `collect`, no `sum`, no path functions, no
-  arithmetic, no `CASE`, no `exists`. Grouping is by the non-aggregate returned
-  columns, which is the one aggregation rule this subset has.
-- **No `WITH`, `UNWIND`, `OPTIONAL MATCH`, `UNION`, or subqueries.** Each is
-  rejected by name.
+- **Six functions, all aggregates**: `count`, `collect`, `min`, `max`, `sum`,
+  `avg`. Grouping is by the non-aggregate returned columns — Cypher's rule — and
+  every aggregate ignores nulls, so `count(x)` counts values while `count(*)`
+  counts rows, and `sum` over anything but numbers is null rather than a
+  guess. There are no scalar functions, no arithmetic, no `CASE`, no `exists`;
+  anything else in call position is rejected by name.
+- **No `WITH`, `UNWIND`, or subqueries.** Each is rejected by name. A pipeline
+  needs an intermediate row shape that is not a graph match, and this evaluator
+  has one stage on purpose.
+- **`OPTIONAL MATCH` extends, it does not start.** A row that cannot satisfy the
+  optional pattern survives with that pattern's variables null. A query whose
+  only clause is optional is rejected: there is nothing to extend.
+- **`UNION` arms must return the same columns in the same order**, as in Cypher,
+  and each arm carries its own `ORDER BY`, `SKIP`, and `LIMIT`. `UNION` drops
+  duplicate rows; `UNION ALL` keeps them.
 - **`ORDER BY` names returned columns**, not arbitrary expressions: with `count`
   in the projection, ordering by anything else has no defined meaning here.
 - **String literals have no escapes** — a literal is the text between two

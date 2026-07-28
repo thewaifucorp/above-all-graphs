@@ -58,6 +58,7 @@ const ROW_BUDGET: usize = 20_000;
 const RESERVED: &[&str] = &[
     "match", "where", "return", "distinct", "order", "by", "skip", "limit", "as", "and", "or",
     "not", "is", "null", "in", "contains", "starts", "ends", "with", "count", "asc", "desc",
+    "optional", "union", "all", "collect", "min", "max", "sum", "avg",
 ];
 
 /// Words that would write to the graph. Rejected before parsing so the message
@@ -67,7 +68,11 @@ const WRITE_WORDS: &[&str] = &[
 ];
 
 /// Clauses Cypher has and this subset does not.
-const UNSUPPORTED_WORDS: &[&str] = &["unwind", "union", "optional", "case", "exists", "collect"];
+const UNSUPPORTED_WORDS: &[&str] = &["unwind", "case", "exists"];
+
+/// Aggregate functions the subset evaluates. Anything else in call position is
+/// rejected by name against this list.
+const AGGREGATES: &[&str] = &["count", "collect", "min", "max", "sum", "avg"];
 
 /// Node properties a query may read.
 const NODE_PROPERTIES: &[&str] = &["id", "kind", "name", "file", "line", "end_line"];
@@ -184,9 +189,19 @@ fn error_at(source: &str, offset: usize, detail: impl Into<String>) -> Error {
 // Syntax tree
 // ---------------------------------------------------------------------------
 
-/// One parsed query.
+/// One parsed query: a `MATCH … RETURN`, plus any arms `UNION` joins to it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
+    /// One arm per `UNION`; a query without `UNION` has exactly one.
+    arms: Vec<Select>,
+    /// For arm `i + 1`, whether it was joined with `UNION ALL` (keep
+    /// duplicates) rather than plain `UNION` (drop them).
+    keep_duplicates: Vec<bool>,
+}
+
+/// One `MATCH … RETURN` arm.
+#[derive(Debug, Clone, PartialEq)]
+struct Select {
     patterns: Vec<Pattern>,
     filter: Option<Predicate>,
     projections: Vec<Projection>,
@@ -202,6 +217,9 @@ pub struct Query {
 struct Pattern {
     start: NodePattern,
     hops: Vec<(RelationshipPattern, NodePattern)>,
+    /// `OPTIONAL MATCH`: a row that cannot satisfy this pattern survives with
+    /// the pattern's variables null, rather than being dropped.
+    optional: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -287,8 +305,23 @@ struct Projection {
 #[derive(Debug, Clone, PartialEq)]
 enum Expression {
     Value(Value),
-    /// `count(*)` is `None`; `count(x)` is `Some("x")`.
-    Count(Option<String>),
+    /// An aggregate over the rows of a group. `count(*)` carries no argument;
+    /// every other function requires one.
+    Aggregate {
+        function: Aggregate,
+        argument: Option<Value>,
+    },
+}
+
+/// The aggregate functions the subset evaluates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Aggregate {
+    Count,
+    Collect,
+    Min,
+    Max,
+    Sum,
+    Avg,
 }
 
 /// Maps a pattern label onto a node kind, accepting the spellings a reader would
@@ -468,28 +501,91 @@ pub fn parse(source: &str) -> Result<Query> {
         tokens,
         cursor: 0,
     };
-    parser.expect_word("match")?;
-    let mut patterns = vec![parse_pattern(&mut parser)?];
-    while parser.take_symbol(",") {
-        patterns.push(parse_pattern(&mut parser)?);
+    let mut arms = vec![parse_select(&mut parser)?];
+    let mut keep_duplicates = Vec::new();
+    while parser.take_word("union") {
+        keep_duplicates.push(parser.take_word("all"));
+        arms.push(parse_select(&mut parser)?);
     }
-    let filter = if parser.take_word("where") {
-        Some(parse_predicate(&mut parser)?)
-    } else {
-        None
-    };
-    parser.expect_word("return")?;
-    let distinct = parser.take_word("distinct");
-    let mut projections = vec![parse_projection(&mut parser)?];
-    while parser.take_symbol(",") {
-        projections.push(parse_projection(&mut parser)?);
-    }
-    let order = parse_order(&mut parser, &projections)?;
-    let (skip, limit, limit_clamped) = parse_paging(&mut parser)?;
     if parser.peek().is_some() {
         return Err(parser.error("unexpected input after the end of the query"));
     }
+    // Cypher's rule, and the only one that makes a union of two shapes
+    // meaningful: the arms must return the same columns in the same order.
+    let columns = |select: &Select| {
+        select
+            .projections
+            .iter()
+            .map(|projection| projection.column.clone())
+            .collect::<Vec<_>>()
+    };
+    let expected = columns(&arms[0]);
+    for arm in &arms[1..] {
+        let found = columns(arm);
+        if found != expected {
+            return Err(Error::Query {
+                detail: format!(
+                    "UNION needs the same columns in each arm: this one returns {}, \
+                     the first returns {}",
+                    found.join(", "),
+                    expected.join(", ")
+                ),
+            });
+        }
+    }
     Ok(Query {
+        arms,
+        keep_duplicates,
+    })
+}
+
+/// One `MATCH … RETURN` arm, up to a `UNION` or the end of the query.
+fn parse_select(parser: &mut Parser<'_>) -> Result<Select> {
+    let mut patterns = Vec::new();
+    let mut filter = None;
+    loop {
+        let optional = parser.take_word("optional");
+        if optional {
+            parser.expect_word("match")?;
+        } else if !parser.take_word("match") {
+            break;
+        }
+        if filter.is_some() {
+            return Err(parser.error(
+                "WHERE filters the rows every MATCH before it produced, so it comes after \
+                 the last one",
+            ));
+        }
+        loop {
+            let mut pattern = parse_pattern(parser)?;
+            pattern.optional = optional;
+            patterns.push(pattern);
+            if !parser.take_symbol(",") {
+                break;
+            }
+        }
+        if parser.take_word("where") {
+            filter = Some(parse_predicate(parser)?);
+        }
+    }
+    if patterns.is_empty() {
+        return Err(parser.error("expected `MATCH`"));
+    }
+    if patterns.iter().all(|pattern| pattern.optional) {
+        return Err(parser.error(
+            "OPTIONAL MATCH extends rows another pattern produced; this query has no MATCH \
+             to extend",
+        ));
+    }
+    parser.expect_word("return")?;
+    let distinct = parser.take_word("distinct");
+    let mut projections = vec![parse_projection(parser)?];
+    while parser.take_symbol(",") {
+        projections.push(parse_projection(parser)?);
+    }
+    let order = parse_order(parser, &projections)?;
+    let (skip, limit, limit_clamped) = parse_paging(parser)?;
+    Ok(Select {
         patterns,
         filter,
         projections,
@@ -546,7 +642,11 @@ fn parse_pattern(parser: &mut Parser<'_>) -> Result<Pattern> {
         let relationship = parse_relationship_pattern(parser)?;
         hops.push((relationship, parse_node_pattern(parser)?));
     }
-    Ok(Pattern { start, hops })
+    Ok(Pattern {
+        start,
+        hops,
+        optional: false,
+    })
 }
 
 fn parse_node_pattern(parser: &mut Parser<'_>) -> Result<NodePattern> {
@@ -871,16 +971,56 @@ fn parse_value(parser: &mut Parser<'_>) -> Result<Value> {
 
 fn parse_projection(parser: &mut Parser<'_>) -> Result<Projection> {
     let start = parser.offset();
-    let expression = if parser.at_word("count") {
+    let call_position = matches!(
+        (
+            parser.tokens.get(parser.cursor),
+            parser.tokens.get(parser.cursor + 1)
+        ),
+        (Some((Token::Word(_), _)), Some((Token::Symbol("("), _)))
+    );
+    let called = AGGREGATES
+        .iter()
+        .find(|name| parser.at_word(name))
+        .copied()
+        .filter(|_| call_position);
+    if call_position && called.is_none() {
+        let name = parser.take_name().unwrap_or_default();
+        return Err(error_at(
+            parser.source,
+            start,
+            format!(
+                "unknown function `{name}` — this subset evaluates {}",
+                AGGREGATES.join(", ")
+            ),
+        ));
+    }
+    let expression = if let Some(name) = called {
         parser.cursor += 1;
         parser.expect_symbol("(")?;
-        let counted = if parser.take_symbol("*") {
+        let function = match name {
+            "collect" => Aggregate::Collect,
+            "min" => Aggregate::Min,
+            "max" => Aggregate::Max,
+            "sum" => Aggregate::Sum,
+            "avg" => Aggregate::Avg,
+            _ => Aggregate::Count,
+        };
+        // `count(*)` counts rows; every other function needs something to
+        // aggregate, and `min(*)` has no meaning to guess at.
+        let argument = if parser.take_symbol("*") {
+            if function != Aggregate::Count {
+                return Err(error_at(
+                    parser.source,
+                    start,
+                    format!("`{name}(*)` has no meaning — only `count(*)` counts rows"),
+                ));
+            }
             None
         } else {
-            Some(parser.expect_variable()?)
+            Some(parse_value(parser)?)
         };
         parser.expect_symbol(")")?;
-        Expression::Count(counted)
+        Expression::Aggregate { function, argument }
     } else {
         Expression::Value(parse_value(parser)?)
     };
@@ -972,6 +1112,9 @@ fn parse_paging(parser: &mut Parser<'_>) -> Result<(usize, usize, bool)> {
 /// What a variable is bound to in one candidate row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Bound {
+    /// A variable an `OPTIONAL MATCH` declared and could not bind. It exists —
+    /// reading it gives null — which is what separates it from a typo.
+    Missing,
     /// Position in [`Index::nodes`].
     Node(usize),
     /// Positions in [`Index::edges`], in traversal order. A fixed-length hop
@@ -1127,7 +1270,7 @@ impl Index {
     }
 
     /// Every row that satisfies the patterns and the `WHERE` clause.
-    fn rows(&self, query: &Query) -> Result<Vec<Row>> {
+    fn rows(&self, query: &Select) -> Result<Vec<Row>> {
         let mut rows = vec![Row::new()];
         for pattern in &query.patterns {
             rows = self.expand(pattern, rows)?;
@@ -1148,13 +1291,25 @@ impl Index {
     }
 
     /// Extends every row with the bindings one pattern adds.
+    ///
+    /// An `OPTIONAL MATCH` that finds nothing for a row keeps the row and binds
+    /// its variables to [`Bound::Missing`], so the columns it would have filled
+    /// read as null instead of the row disappearing.
     fn expand(&self, pattern: &Pattern, rows: Vec<Row>) -> Result<Vec<Row>> {
         let mut out = Vec::new();
         for row in rows {
+            let before = out.len();
             for start in self.candidates(&pattern.start, &row) {
                 let mut seeded = row.clone();
                 bind_node(&mut seeded, pattern.start.variable.as_deref(), start);
                 self.walk(pattern, 0, start, seeded, &mut out)?;
+            }
+            if pattern.optional && out.len() == before {
+                let mut unmatched = row;
+                for variable in pattern_variables(pattern) {
+                    unmatched.entry(variable).or_insert(Bound::Missing);
+                }
+                out.push(unmatched);
             }
         }
         Ok(out)
@@ -1248,6 +1403,7 @@ impl Index {
             Value::Variable(variable) => match row.get(variable) {
                 Some(Bound::Node(index)) => Val::Node(*index),
                 Some(Bound::Path(trail)) => Val::Path(trail.clone()),
+                Some(Bound::Missing) => Val::Null,
                 None => return Err(unbound(variable)),
             },
             Value::Property { variable, key } => match row.get(variable) {
@@ -1256,6 +1412,7 @@ impl Index {
                     .get(*index)
                     .map_or(Val::Null, |node| node_property(node, key)),
                 Some(Bound::Path(trail)) => self.path_property(trail, key),
+                Some(Bound::Missing) => Val::Null,
                 None => return Err(unbound(variable)),
             },
         })
@@ -1315,6 +1472,16 @@ impl Index {
             .and_then(|index| self.nodes.get(*index))
             .map(|node| node.name.as_str())
     }
+}
+
+/// Every variable one pattern declares, in the order it declares them.
+fn pattern_variables(pattern: &Pattern) -> Vec<String> {
+    let mut out: Vec<String> = pattern.start.variable.clone().into_iter().collect();
+    for (relationship, node) in &pattern.hops {
+        out.extend(relationship.variable.clone());
+        out.extend(node.variable.clone());
+    }
+    out
 }
 
 fn bind_node(row: &mut Row, variable: Option<&str>, index: usize) {
@@ -1431,7 +1598,7 @@ impl Answer {
         let cells: Vec<Vec<String>> = self
             .rows
             .iter()
-            .map(|row| row.iter().map(cell_text).collect())
+            .map(|row| row.iter().map(cell_text).map(elide).collect())
             .collect();
         let widths: Vec<usize> = self
             .columns
@@ -1464,6 +1631,13 @@ impl Answer {
                 self.rows.len()
             ));
         }
+        if cells.iter().flatten().any(|cell| cell.ends_with('…')) {
+            lines.push(
+                "(a cell was cut to keep the table readable; the MCP `cypher` tool returns \
+                 the whole value as JSON)"
+                    .to_string(),
+            );
+        }
         lines.join("\n")
     }
 }
@@ -1486,6 +1660,19 @@ fn join_row<S: AsRef<str>>(cells: &[S], widths: &[usize]) -> String {
 
 /// One JSON value as a table cell: a node reads as `name (file:line)`, because
 /// a table of nested objects is not a table.
+/// Widest a table cell gets before it is cut. `collect()` can gather hundreds
+/// of names into one cell, and a table one cell wide is not a table. The JSON
+/// form keeps everything, and the message under the table says where to get it.
+const CELL_WIDTH: usize = 60;
+
+fn elide(text: String) -> String {
+    if text.chars().count() <= CELL_WIDTH {
+        return text;
+    }
+    let kept: String = text.chars().take(CELL_WIDTH - 1).collect();
+    format!("{kept}…")
+}
+
 fn cell_text(value: &Json) -> String {
     match value {
         Json::Null => "null".to_string(),
@@ -1512,8 +1699,30 @@ fn cell_text(value: &Json) -> String {
 /// the row budget, or [`Error::Storage`] when the graph cannot be read.
 pub fn evaluate(graph: &Graph, query: &Query) -> Result<Answer> {
     let index = Index::build(graph)?;
+    let mut answer = evaluate_select(&index, &query.arms[0])?;
+    for (position, arm) in query.arms[1..].iter().enumerate() {
+        let next = evaluate_select(&index, arm)?;
+        answer.rows.extend(next.rows);
+        answer.truncated |= next.truncated;
+        // `UNION` is set union; `UNION ALL` keeps what each arm found.
+        if !query
+            .keep_duplicates
+            .get(position)
+            .copied()
+            .unwrap_or(false)
+        {
+            let mut seen = std::collections::HashSet::new();
+            answer
+                .rows
+                .retain(|row| seen.insert(row.iter().map(Json::to_string).collect::<Vec<_>>()));
+        }
+    }
+    Ok(answer)
+}
+
+fn evaluate_select(index: &Index, query: &Select) -> Result<Answer> {
     let rows = index.rows(query)?;
-    let mut projected = project(&index, query, &rows)?;
+    let mut projected = project(index, query, &rows)?;
     for (column, descending) in query.order.iter().rev() {
         let Some(position) = query
             .projections
@@ -1553,15 +1762,17 @@ pub fn evaluate(graph: &Graph, query: &Query) -> Result<Answer> {
     })
 }
 
-/// Applies the projection, folding rows into groups when `count` is present.
+/// Applies the projection, folding rows into groups when an aggregate is
+/// present.
 ///
-/// Grouping is by the non-aggregate columns, which is the one aggregation rule
-/// this subset has and the only one it claims.
-fn project(index: &Index, query: &Query, rows: &[Row]) -> Result<Vec<Vec<Json>>> {
+/// Grouping is by the non-aggregate columns — Cypher's rule — and every
+/// aggregate ignores nulls, so a `min` over a column an `OPTIONAL MATCH` left
+/// empty is the minimum of what was there rather than null.
+fn project(index: &Index, query: &Select, rows: &[Row]) -> Result<Vec<Vec<Json>>> {
     let aggregating = query
         .projections
         .iter()
-        .any(|projection| matches!(projection.expression, Expression::Count(_)));
+        .any(|projection| matches!(projection.expression, Expression::Aggregate { .. }));
     if !aggregating {
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
@@ -1570,39 +1781,50 @@ fn project(index: &Index, query: &Query, rows: &[Row]) -> Result<Vec<Vec<Json>>>
         return Ok(out);
     }
     // `BTreeMap` so groups come out in a stable order rather than a hashed one.
-    let mut groups: BTreeMap<Vec<String>, (Vec<Json>, usize, Vec<usize>)> = BTreeMap::new();
+    let mut groups: BTreeMap<Vec<String>, Group> = BTreeMap::new();
     for row in rows {
         let mut key = Vec::new();
         let mut values = Vec::new();
-        let mut counted = Vec::new();
-        for (position, projection) in query.projections.iter().enumerate() {
+        let mut collected: Vec<Vec<Json>> = Vec::new();
+        for projection in &query.projections {
             match &projection.expression {
                 Expression::Value(value) => {
                     let rendered = index.json(&index.value(value, row)?);
                     key.push(rendered.to_string());
                     values.push(rendered);
+                    collected.push(Vec::new());
                 }
-                Expression::Count(variable) => {
+                Expression::Aggregate { argument, .. } => {
                     values.push(Json::Null);
-                    if variable
-                        .as_ref()
-                        .is_none_or(|variable| row.contains_key(variable))
-                    {
-                        counted.push(position);
-                    }
+                    let cell = match argument {
+                        // `count(*)` counts the row itself, so it always has
+                        // something to count.
+                        None => Json::Bool(true),
+                        Some(value) => index.json(&index.value(value, row)?),
+                    };
+                    collected.push(vec![cell]);
                 }
             }
         }
-        let entry = groups.entry(key).or_insert((values, 0, Vec::new()));
-        entry.1 += 1;
-        entry.2 = counted;
+        let entry = groups.entry(key).or_insert_with(|| (values, Vec::new()));
+        if entry.1.is_empty() {
+            entry.1 = collected;
+        } else {
+            for (slot, cell) in entry.1.iter_mut().zip(collected) {
+                slot.extend(cell);
+            }
+        }
     }
     Ok(groups
         .into_values()
-        .map(|(mut values, rows_in_group, counted)| {
-            for position in counted {
+        .map(|(mut values, collected)| {
+            for (position, projection) in query.projections.iter().enumerate() {
+                let Expression::Aggregate { function, .. } = &projection.expression else {
+                    continue;
+                };
+                let gathered = collected.get(position).cloned().unwrap_or_default();
                 if let Some(slot) = values.get_mut(position) {
-                    *slot = json!(rows_in_group);
+                    *slot = fold(*function, &gathered);
                 }
             }
             values
@@ -1610,12 +1832,73 @@ fn project(index: &Index, query: &Query, rows: &[Row]) -> Result<Vec<Vec<Json>>>
         .collect())
 }
 
-fn project_row(index: &Index, query: &Query, row: &Row) -> Result<Vec<Json>> {
+/// One group being folded: the non-aggregate cells that identify it, and the
+/// values each aggregate column has gathered so far.
+type Group = (Vec<Json>, Vec<Vec<Json>>);
+
+/// Folds one group's values with one aggregate function. Nulls are dropped
+/// first, which is what makes `count(x)` differ from `count(*)`.
+fn fold(function: Aggregate, values: &[Json]) -> Json {
+    let present: Vec<&Json> = values.iter().filter(|value| !value.is_null()).collect();
+    match function {
+        Aggregate::Count => json!(present.len()),
+        Aggregate::Collect => Json::Array(present.into_iter().cloned().collect()),
+        Aggregate::Min | Aggregate::Max => {
+            let pick = if function == Aggregate::Min {
+                present
+                    .into_iter()
+                    .min_by(|left, right| order_json(Some(left), Some(right)))
+            } else {
+                present
+                    .into_iter()
+                    .max_by(|left, right| order_json(Some(left), Some(right)))
+            };
+            pick.cloned().unwrap_or(Json::Null)
+        }
+        Aggregate::Sum | Aggregate::Avg => {
+            // Only numbers add up. A group of names has no sum, and inventing
+            // one by counting them would be a wrong answer, not a lenient one.
+            let numbers: Vec<f64> = present.iter().filter_map(|value| value.as_f64()).collect();
+            if numbers.is_empty() {
+                return Json::Null;
+            }
+            let total: f64 = numbers.iter().sum();
+            let result = if function == Aggregate::Sum {
+                total
+            } else {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a group large enough to lose precision in its own size is far past \
+                              the row budget"
+                )]
+                let count = numbers.len() as f64;
+                total / count
+            };
+            json_number(result)
+        }
+    }
+}
+
+/// A whole number renders as an integer: `sum(n.line)` over integers is an
+/// integer, and `3.0` would read as a rounding artifact.
+fn json_number(value: f64) -> Json {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "guarded by the fractional and range checks on the line above"
+    )]
+    if value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
+        json!(value as i64)
+    } else {
+        serde_json::Number::from_f64(value).map_or(Json::Null, Json::Number)
+    }
+}
+
+fn project_row(index: &Index, query: &Select, row: &Row) -> Result<Vec<Json>> {
     let mut out = Vec::with_capacity(query.projections.len());
     for projection in &query.projections {
         match &projection.expression {
             Expression::Value(value) => out.push(index.json(&index.value(value, row)?)),
-            Expression::Count(_) => out.push(Json::Null),
+            Expression::Aggregate { .. } => out.push(Json::Null),
         }
     }
     Ok(out)
@@ -1890,12 +2173,109 @@ mod tests {
     }
 
     #[test]
+    fn optional_match_keeps_the_row_it_could_not_extend() {
+        // `leaf` calls nothing, and `Widget` is called by nothing: with a plain
+        // MATCH both disappear, which is the answer to a different question.
+        let rows = answer(
+            "MATCH (f:Function) OPTIONAL MATCH (f)-[:CALLS]->(g) RETURN f.name, g.name ORDER BY f.name",
+        )
+        .rows;
+        let pairs: Vec<(String, String)> = rows
+            .iter()
+            .map(|row| (cell_text(&row[0]), cell_text(&row[1])))
+            .collect();
+        assert!(
+            pairs.contains(&("leaf".to_string(), "null".to_string())),
+            "a function that calls nothing keeps its row with a null: {pairs:?}"
+        );
+        assert!(
+            pairs.contains(&("caller".to_string(), "helper".to_string())),
+            "{pairs:?}"
+        );
+    }
+
+    #[test]
+    fn a_union_combines_arms_and_drops_duplicates_unless_told_not_to() {
+        let names = column(
+            "MATCH (f:Function {name: 'leaf'}) RETURN f.name AS name \
+             UNION MATCH (g:Struct {name: 'leaf'}) RETURN g.name AS name",
+            0,
+        );
+        assert_eq!(names, vec!["leaf".to_string()], "UNION is a set union");
+
+        let repeated = column(
+            "MATCH (f:Function {name: 'leaf'}) RETURN f.name AS name \
+             UNION ALL MATCH (g:Function {name: 'leaf'}) RETURN g.name AS name",
+            0,
+        );
+        assert_eq!(repeated.len(), 2, "UNION ALL keeps both arms: {repeated:?}");
+
+        let both = column(
+            "MATCH (f:Function {name: 'leaf'}) RETURN f.name AS name \
+             UNION MATCH (s:Struct) RETURN s.name AS name",
+            0,
+        );
+        assert!(
+            both.contains(&"leaf".to_string()) && both.contains(&"Widget".to_string()),
+            "each arm contributes its rows: {both:?}"
+        );
+
+        // Cypher's rule, kept: arms whose columns disagree have no union.
+        let mismatched = rejected(
+            "MATCH (f:Function) RETURN f.name AS name UNION MATCH (g:Function) RETURN g.line",
+        );
+        assert!(mismatched.contains("same columns"), "{mismatched}");
+    }
+
+    #[test]
+    fn the_aggregates_fold_a_group_rather_than_counting_it() {
+        let folded = answer(
+            "MATCH (f:Function) RETURN count(*), collect(f.name), min(f.line), max(f.line), \
+             sum(f.line), avg(f.line)",
+        );
+        let row = &folded.rows[0];
+        assert_eq!(row[0], json!(3));
+        assert_eq!(
+            row[1],
+            json!(["caller", "helper", "leaf"]),
+            "collect gathers the group's values"
+        );
+        assert_eq!(row[2], json!(5), "min over 10, 20, 5");
+        assert_eq!(row[3], json!(20));
+        assert_eq!(row[4], json!(35));
+        assert_eq!(
+            row[5],
+            json!(11.666_666_666_666_666),
+            "an average that is not whole stays fractional"
+        );
+    }
+
+    #[test]
+    fn an_aggregate_over_nothing_is_null_and_over_names_has_no_sum() {
+        let empty = answer(
+            "MATCH (f:Function) OPTIONAL MATCH (f)-[:CALLS]->(g:Struct) \
+             RETURN count(g.name), collect(g.name), min(g.line)",
+        );
+        let row = &empty.rows[0];
+        assert_eq!(row[0], json!(0), "count(x) counts values, not rows");
+        assert_eq!(row[1], json!([]));
+        assert_eq!(row[2], Json::Null);
+
+        let named = answer("MATCH (f:Function) RETURN sum(f.name)");
+        assert_eq!(
+            named.rows[0][0],
+            Json::Null,
+            "a group of names has no sum, and counting them would be a wrong answer"
+        );
+    }
+
+    #[test]
     fn an_unsupported_clause_says_so_instead_of_guessing() {
         assert!(rejected("MATCH (n) WITH n RETURN n").contains("outside the supported subset"));
         assert!(rejected("UNWIND [1] AS x RETURN x").contains("outside the supported subset"));
         assert!(
-            rejected("MATCH (n) RETURN n UNION MATCH (m) RETURN m")
-                .contains("outside the supported subset")
+            rejected("MATCH (n) RETURN toUpper(n.name)").contains("unknown function"),
+            "a function the subset does not evaluate is named, not silently ignored"
         );
         // `STARTS WITH` still parses: `WITH` there is part of the operator.
         assert!(parse("MATCH (n) WHERE n.name STARTS WITH 'a' RETURN n").is_ok());
