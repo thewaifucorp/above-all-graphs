@@ -40,9 +40,12 @@ No API key, no native compile step, no config file, nothing to keep in sync by h
 
 ```bash
 npm install -g @waifucorp/aag
+
+# with local semantic search (larger, still one self-contained file):
+AAG_SEMANTIC=1 npm install -g @waifucorp/aag
 ```
 
-That's it — postinstall downloads the prebuilt binary for your platform (linux/macos/windows, x64 + arm64) from [GitHub Releases](https://github.com/thewaifucorp/above-all-graphs/releases); nothing compiles.
+That's it — postinstall downloads the prebuilt binary for your platform (linux/macos/windows, x64 + arm64) from [GitHub Releases](https://github.com/thewaifucorp/above-all-graphs/releases); nothing compiles. The semantic build is the same binary with embeddings and onnxruntime linked statically — 55 MB against 25 MB, which is why it is opt-in. See [semantic search](docs/semantic-search.md).
 
 Building from source instead:
 

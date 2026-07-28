@@ -405,8 +405,21 @@ P2 gates expand reach after the core is measurable and dependable.
     boundary — test fixtures in twelve languages cluster because they look
     alike. Vendored bundles are excluded by path, clusters under 8 symbols are
     not areas, and at most 12 pages are generated.
-- 16. Ship semantic search as an optional prebuilt distribution so npm users can
-    enable embeddings without compiling Rust or packaging ONNX themselves.
+- 16. **Closed.** Every release now builds two assets per platform —
+    `aag-<target>` and `aag-semantic-<target>` (`.github/workflows/release.yml`)
+    — and the npm postinstall picks between them from `AAG_SEMANTIC=1` or
+    `npm i --aag-semantic` (`npm/install.js`, with the mapping asserted by
+    `npm/install.test.js` in CI). See [semantic search](semantic-search.md).
+    `onnxruntime` links statically, so the semantic asset stays one
+    self-contained file: no sidecar library, no toolchain, no ONNX packaging.
+    Measured on Linux x86-64: 25.7 MB standard against 54.6 MB semantic (9.1 MB
+    against 18.3 MB compressed), which is why it is opt-in rather than default.
+    Verified by running the semantic release binary against a real repository —
+    1534 nodes embedded, and `explore` answering a question phrased in prose.
+    Not claimed: the ~90 MB embedding model is still fetched on first
+    `aag embeddings` and cached by `fastembed`, so the first run needs network
+    and an air-gapped machine needs that cache primed by hand. Bundling the
+    model would triple an asset most users never install.
 - 17. Add branch-aware indexes and explicit comparisons between workspace,
     branch, commit, and PR graph states.
 - 18. Improve public onboarding and proof: architecture docs, benchmark history,

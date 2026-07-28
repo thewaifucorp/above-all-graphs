@@ -15,6 +15,27 @@ const { pipeline } = require("node:stream/promises");
 const REPO = "thewaifucorp/above-all-graphs";
 const VERSION = require("./package.json").version;
 
+// Semantic search (local embeddings) ships as a separate, larger asset: the
+// same binary built with `--features semantic`, with onnxruntime linked
+// statically so it stays one self-contained file. Opt in with
+// `AAG_SEMANTIC=1 npm i -g @waifucorp/aag` or `npm i --aag-semantic`.
+function wantsSemantic(env = process.env) {
+  const flags = [env.AAG_SEMANTIC, env.npm_config_aag_semantic];
+  return flags.some((value) =>
+    ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase()),
+  );
+}
+
+// The release asset for a platform key, e.g. `linux-x64` -> the tar.gz name.
+// `null` when the platform has no prebuilt binary.
+function assetFor(key, semantic) {
+  const target = TARGETS[key];
+  if (!target) return null;
+  const windows = key.startsWith("win32");
+  const variant = semantic ? "aag-semantic" : "aag";
+  return `${variant}-${target}.${windows ? "zip" : "tar.gz"}`;
+}
+
 const TARGETS = {
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
@@ -25,15 +46,18 @@ const TARGETS = {
 
 async function main() {
   const key = `${process.platform}-${process.arch}`;
-  const target = TARGETS[key];
-  if (!target) {
+  const semantic = wantsSemantic();
+  const asset = assetFor(key, semantic);
+  if (!asset) {
     console.error(`aag: unsupported platform ${key}`);
     process.exit(1);
   }
 
   const windows = process.platform === "win32";
-  const asset = `aag-${target}.${windows ? "zip" : "tar.gz"}`;
   const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${asset}`;
+  if (semantic) {
+    console.log("aag: AAG_SEMANTIC set — installing the build with local embeddings");
+  }
   const binDir = path.join(__dirname, "bin");
   const binPath = path.join(binDir, windows ? "aag.exe" : "aag");
   fs.mkdirSync(binDir, { recursive: true });
@@ -42,6 +66,12 @@ async function main() {
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok) {
     console.error(`aag: download failed (${response.status}) — ${url}`);
+    if (semantic) {
+      console.error(
+        "aag: the semantic build may not exist for this release; " +
+          "install without AAG_SEMANTIC to get the standard binary.",
+      );
+    }
     process.exit(1);
   }
 
@@ -93,6 +123,14 @@ function extractSingleFileTar(buffer, wanted, out) {
   }
   console.error(`aag: '${wanted}' not found in archive`);
   process.exit(1);
+}
+
+// Exported for the installer's own tests; `require.main` guards the run so
+// importing this file never downloads anything.
+module.exports = { assetFor, wantsSemantic };
+
+if (require.main !== module) {
+  return;
 }
 
 main().catch((error) => {
