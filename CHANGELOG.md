@@ -6,6 +6,7 @@ All notable changes to AboveAllGraphs are documented here.
 
 ### Added
 
+- MCP Streamable HTTP (`src/transport.rs`): `Mcp-Session-Id` sessions with `DELETE` termination and idle expiry, JSON or SSE framing chosen by `Accept`, a keepalive `GET` stream, and `--bind`, `--stateless`, `--max-body`, `--rate-limit` on `aag mcp --transport http`. Binding beyond loopback without `--api-key` refuses to start. Container guidance in `docs/transport.md`.
 - Cross-repository protocol links: `aag group links <group>` and the MCP tool `group_links` pair API producer to client, package export to import, event producer to consumer, schema to model, and tool definition to invocation. Each member's graph is read separately and never merged, and every link carries the evidence that produced it. See `docs/federation.md`.
 - Events and tool invocations are indexed: a publisher gets a `References` edge to every listener of that event name, and `call_tool('x')` gets a `Calls` edge into the tool `x` was defined as.
 - Route, RPC, and tool intelligence (`src/api.rs`): `aag api routes|tools|shapes|impact` and the MCP tools `route_map`, `tool_map`, `shape_check`, `api_impact`. Declared and served endpoints pair by shape, both mismatch states are reported, and declared response shapes are compared with the fields handlers return. See `docs/api.md`.

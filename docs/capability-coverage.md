@@ -61,8 +61,9 @@ alone do not establish parity.
   intentionally lightweight and does not include this feature yet.
 - True file-level incremental parsing with persisted unresolved references,
   global edge re-resolution, watcher reconciliation, and agent hooks.
-- MCP over stdio and authenticated loopback HTTP request/response. The HTTP
-  transport is not yet a shared Streamable HTTP/SSE service.
+- MCP over stdio, and Streamable HTTP with sessions, SSE or JSON framing,
+  stateless mode, a configurable bind address, bearer authentication, and
+  size/rate limits.
 - Integrations for Claude Code, Cursor, Codex, Gemini CLI, Kiro, OpenCode, and
   Antigravity.
 
@@ -227,9 +228,19 @@ P2 gates expand reach after the core is measurable and dependable.
    images, audio/video transcripts, URLs, papers, and workspace documents.
    Host-agent descriptions remain valid additional evidence, not the only
    extraction path.
-- 10. Implement shared MCP Streamable HTTP with session management, SSE and JSON
-    responses, stateless mode, configurable bind address, authentication,
-    rate/size limits, and container deployment guidance.
+- 10. **Closed.** Shared MCP Streamable HTTP (`src/transport.rs`): sessions with
+    `Mcp-Session-Id`, `DELETE` termination, and idle expiry; the same JSON-RPC
+    answer framed as JSON or as one SSE `event: message` by `Accept`; a `GET`
+    stream with keepalives; `--stateless` for a load balancer that will not pin a
+    client; `--bind`, `--api-key`, `--max-body`, and `--rate-limit`; and container
+    guidance in [transport](transport.md). Binding beyond loopback without a key
+    refuses to start rather than exposing the repository, and the twelve HTTP
+    behaviours are covered by tests that speak HTTP to a real socket.
+    Not claimed: the `GET` stream carries no server-initiated notifications — it
+    opens with one ready message and then keepalives, so a client that opens a
+    stream gets a valid one instead of a 405, and when the graph changes the
+    client asks again. Sessions live in the process that minted them, which is
+    what `--stateless` is for.
 - 11. Turn PR primitives into a full graph-backed workflow: dashboard, worktree
     mapping, conflict detection through shared communities, review queue,
     risk-ranked findings, and plan to work to review gates.

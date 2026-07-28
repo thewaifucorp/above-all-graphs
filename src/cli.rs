@@ -231,9 +231,28 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         port: u16,
 
-        /// Optional bearer token required by the HTTP transport.
+        /// Optional bearer token required by the HTTP transport. Required when
+        /// `--bind` is not loopback.
         #[arg(long, env = "AAG_MCP_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+
+        /// Address the HTTP transport binds. Anything but loopback needs
+        /// `--api-key`.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+
+        /// Serve every HTTP request on its own, with no session tracking — for
+        /// running behind a load balancer that will not pin a client.
+        #[arg(long)]
+        stateless: bool,
+
+        /// Largest HTTP request body accepted, in bytes.
+        #[arg(long, default_value_t = 1_048_576)]
+        max_body: usize,
+
+        /// HTTP requests one client may make per minute.
+        #[arg(long, default_value_t = 600)]
+        rate_limit: u32,
     },
 
     /// Record the host agent's vision-pass description of a doc/image, and

@@ -35,6 +35,7 @@ pub mod semantic;
 pub mod storage;
 pub mod sync;
 pub mod toolchain;
+pub mod transport;
 pub mod watch;
 pub mod workspaces;
 

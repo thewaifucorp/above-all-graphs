@@ -67,14 +67,7 @@ fn main() -> anyhow::Result<()> {
             let count = aag::semantic::build(&path)?;
             println!("embedded {count} nodes");
         }
-        Command::Mcp {
-            path,
-            transport,
-            port,
-            api_key,
-        } => {
-            run_mcp(&path, &transport, port, api_key.as_deref())?;
-        }
+        served @ Command::Mcp { .. } => run_mcp(served)?,
         Command::Describe {
             doc,
             description,
@@ -105,16 +98,36 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_mcp(
-    path: &std::path::Path,
-    transport: &str,
-    port: u16,
-    api_key: Option<&str>,
-) -> anyhow::Result<()> {
+/// Serves MCP over the chosen transport. Takes the whole command so `main`
+/// stays a router rather than growing the HTTP option list twice.
+fn run_mcp(command: Command) -> anyhow::Result<()> {
+    let Command::Mcp {
+        path,
+        transport,
+        port,
+        api_key,
+        bind,
+        stateless,
+        max_body,
+        rate_limit,
+    } = command
+    else {
+        return Ok(());
+    };
     if transport == "http" {
-        aag::mcp::run_http(path, port, api_key)?;
+        aag::transport::serve(
+            &path,
+            &aag::transport::Options {
+                bind,
+                port,
+                api_key,
+                stateless,
+                max_body,
+                rate_per_minute: rate_limit,
+            },
+        )?;
     } else {
-        aag::mcp::run(path)?;
+        aag::mcp::run(&path)?;
     }
     Ok(())
 }

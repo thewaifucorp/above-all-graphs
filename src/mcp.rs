@@ -303,95 +303,30 @@ pub fn run(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Runs MCP Streamable HTTP on loopback. JSON-RPC requests are accepted at
-/// `POST /mcp`; `GET /mcp` returns 405 because this server does not emit SSE.
-/// When `api_key` is set, every request requires `Authorization: Bearer ...`.
+/// Runs the Streamable HTTP transport with default options.
+///
+/// Kept so an embedder that only wants "serve HTTP on this port" does not have
+/// to build [`crate::transport::Options`]; everything else lives there.
 ///
 /// # Errors
-/// Returns an error if the loopback listener cannot be created.
+/// As [`crate::transport::serve`].
 pub fn run_http(root: &Path, port: u16, api_key: Option<&str>) -> Result<()> {
-    use tiny_http::{Header, Method, Response, Server, StatusCode};
-
-    let root = root.to_path_buf();
-    if let Err(error) = crate::watch::reconcile(&root) {
-        tracing::warn!(%error, "startup reconciliation failed");
-    }
-    crate::watch::spawn(root.clone());
-    let server = Server::http(("127.0.0.1", port)).map_err(|error| Error::Protocol {
-        context: "MCP HTTP bind failed",
-        detail: error.to_string(),
-    })?;
-    let json_header =
-        Header::from_bytes("Content-Type", "application/json").map_err(|()| Error::Protocol {
-            context: "MCP HTTP header creation failed",
-            detail: "invalid static content-type header".into(),
-        })?;
-    eprintln!(
-        "aag MCP HTTP listening on http://{}/mcp",
-        server.server_addr()
-    );
-
-    for mut request in server.incoming_requests() {
-        if request.url() != "/mcp" {
-            let _ = request.respond(Response::empty(StatusCode(404)));
-            continue;
-        }
-        if !origin_allowed(&request) {
-            let _ = request.respond(Response::empty(StatusCode(403)));
-            continue;
-        }
-        if !authorized(&request, api_key) {
-            let _ = request.respond(Response::empty(StatusCode(401)));
-            continue;
-        }
-        if request.method() != &Method::Post {
-            let _ = request.respond(Response::empty(StatusCode(405)));
-            continue;
-        }
-        let mut body = String::new();
-        if request.as_reader().read_to_string(&mut body).is_err() {
-            let _ = request.respond(Response::empty(StatusCode(400)));
-            continue;
-        }
-        let Ok(message) = serde_json::from_str::<Value>(&body) else {
-            let response =
-                json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}});
-            let _ = request.respond(
-                Response::from_string(response.to_string())
-                    .with_status_code(400)
-                    .with_header(json_header.clone()),
-            );
-            continue;
-        };
-        if let Some(response) = handle(&root, &message) {
-            let _ = request.respond(
-                Response::from_string(response.to_string()).with_header(json_header.clone()),
-            );
-        } else {
-            let _ = request.respond(Response::empty(StatusCode(202)));
-        }
-    }
-    Ok(())
+    crate::transport::serve(
+        root,
+        &crate::transport::Options {
+            port,
+            api_key: api_key.map(str::to_string),
+            ..crate::transport::Options::default()
+        },
+    )
 }
 
-fn origin_allowed(request: &tiny_http::Request) -> bool {
-    request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Origin"))
-        .is_none_or(|header| {
-            let origin = header.value.as_str();
-            origin.starts_with("http://127.0.0.1") || origin.starts_with("http://localhost")
-        })
-}
-
-fn authorized(request: &tiny_http::Request, api_key: Option<&str>) -> bool {
-    let Some(api_key) = api_key else { return true };
-    request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Authorization"))
-        .is_some_and(|header| header.value.as_str() == format!("Bearer {api_key}"))
+/// Handles one JSON-RPC message against `root`, returning the response, or
+/// `None` for a notification. Shared with [`crate::transport`] so both
+/// transports answer identically.
+#[must_use]
+pub fn handle_message(root: &Path, request: &Value) -> Option<Value> {
+    handle(root, request)
 }
 
 fn handle(root: &Path, request: &Value) -> Option<Value> {
