@@ -57,8 +57,8 @@ fn main() -> anyhow::Result<()> {
         Command::Pdg { file, line } => {
             println!("{}", aag::flow::format_pdg(&file, line)?);
         }
-        Command::Taint { file } => {
-            println!("{}", aag::flow::format_taint(&file)?);
+        Command::Taint { file, depth } => {
+            println!("{}", aag::flow::format_taint(&file, depth)?);
         }
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);

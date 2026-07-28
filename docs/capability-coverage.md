@@ -31,6 +31,11 @@ alone do not establish parity.
 - Graph-aware search, node context, neighbors, impact, affected tests,
   shortest path, god nodes, communities, detected entrypoints, and execution
   processes rooted at them.
+- Statement-level flow for seven languages: basic blocks, a control-flow graph,
+  reaching definitions, def-use chains, control dependence, the program
+  dependence graph, and taint findings that cross calls by joining per-function
+  summaries to the resolved call graph, with sanitizer recognition and reported
+  suppression.
 - Coordinated whole-word rename, a limited read-only Cypher-shaped query
   surface, diff change detection, wiki, report, GraphML, JSON, Cypher export,
   Obsidian export, and an offline WebGL graph.
@@ -122,9 +127,10 @@ P2 gates expand reach after the core is measurable and dependable.
 - 4. Replace the current Cypher-shaped shim with either a documented formal
    subset and real pattern evaluation or a genuine graph query engine. Do not
    advertise arbitrary Cypher until query semantics match the claim.
-- 5. Add statement-level control-flow and data-flow foundations: basic blocks,
-   CFG, def-use, control/data dependence, PDG queries, and provenance-aware
-   source-to-sink taint findings, starting with TypeScript and JavaScript.
+- 5. **Closed.** Statement-level control-flow and data-flow foundations: basic
+   blocks, CFG, def-use, control/data dependence, PDG queries, and
+   provenance-aware source-to-sink taint findings, starting with TypeScript and
+   JavaScript.
    Landed: basic blocks, a control-flow graph with typed edges (sequential,
    true, false, back), definitions and uses, reaching definitions, def-use
    chains, and control dependence from post-dominance — for Rust, JavaScript,
@@ -134,13 +140,27 @@ P2 gates expand reach after the core is measurable and dependable.
    including the transitive backward slice of one line) and source-to-sink
    taint findings (`aag taint`, MCP `taint`) carrying the assignments that
    carried the value and whether a branch decides the sink runs.
-   Still open: interprocedural flow — following a value from a caller into a
-   callee — and sanitizer recognition. Not claimed: this is not security
-   analysis. The data flow is syntactic and line-granular, aliasing through
-   references, fields, and containers is not tracked, a finding is a place to
-   look rather than a proven vulnerability, and no findings is not evidence of
-   safety. Reaching definitions over-approximates what may reach and
-   under-approximates what does.
+   Also landed: interprocedural flow and sanitizer recognition. Each function
+   gets a summary — which parameter positions reach a sink, which reach a
+   `return`, whether it returns an input of its own, whether it neutralizes what
+   it is given — and a flow crosses a call by reading the callee's summary rather
+   than re-analyzing it. Callees come from the indexed `calls` edges, so
+   resolution is the language-aware ladder of priority 2 and not a second
+   implementation of it; an ambiguous call is followed through every candidate
+   and the finding says which of how many it is, and an unindexed repository
+   joins only calls inside one file and says the callee was matched by name.
+   Sanitizers are a short list of escaping, quoting, and narrowing calls, plus
+   any function whose parameter reaches its `return` only through one; a
+   suppressed flow is reported as suppressed rather than disappearing. Bounds are
+   stated: 2 call hops by default, 400 joined functions, 8 rounds of
+   assignment-chasing. See [flow](flow.md).
+   Not claimed: this is not security analysis. The data flow is syntactic and
+   line-granular, aliasing through references, fields, and containers is not
+   tracked in a callee any more than in a caller, a Rust tail expression is not
+   recorded as a return, a finding is a place to look rather than a proven
+   vulnerability, and no findings is not evidence of safety. Reaching
+   definitions over-approximates what may reach and under-approximates what
+   does.
 
 ### P1 — complete workflows and heterogeneous graphs
 
@@ -529,6 +549,9 @@ repository.
   INFERRED or AMBIGUOUS accordingly.
 - Detected routes are what the implementation registers, not what a contract
   declares. An observed endpoint is evidence of code, not of a published API.
+- Taint findings are syntactic and line-granular, and crossing a call does not
+  change that. A finding is a place to look, no findings is not evidence of
+  safety, and neither `aag taint` nor the `taint` tool is a security scanner.
 - Binary Office/media files are graph nodes, but native content extraction is
   still a priority gate.
 - Group queries aggregate independent graphs; cross-repository symbol and

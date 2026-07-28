@@ -2,6 +2,20 @@
 
 All notable changes to AboveAllGraphs are documented here.
 
+## Unreleased
+
+### Added
+
+- Taint flows that cross calls: each function is summarized (which parameter positions reach a sink, which reach a `return`, whether it returns an input of its own), and a caller reads that summary instead of re-analyzing the callee. Callees come from the indexed `calls` edges, so an ambiguous call is followed through every candidate and reported as one of them.
+- Sanitizer recognition — a short list of escaping, quoting, and narrowing calls, plus any function whose parameter reaches its `return` only through one — with suppressed flows reported rather than silently dropped.
+- `aag taint --depth <hops>` and the MCP `taint` tool's `path:hops` form.
+- `Graph::find_in_file`, for resolving a symbol name within one file.
+
+### Changed
+
+- `flow::Call::arguments` groups identifiers per positional argument, so an argument can be matched to the parameter at the same position.
+- A sink now takes any tainted name on its line, catching chains like `Command::new(sh).arg(cmd).spawn()` where the value rides the receiver.
+
 ## [0.2.0] - 2026-07-20
 
 ### Added

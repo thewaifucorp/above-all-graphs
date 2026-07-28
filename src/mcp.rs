@@ -79,9 +79,9 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "taint",
-        description: "Source-to-sink flows in a file. Intraprocedural and syntactic: a finding is a place to look, not a proven vulnerability, and no findings is not evidence of safety.",
+        description: "Source-to-sink flows in a file, followed across calls through the indexed call graph. Syntactic: a finding is a place to look, not a proven vulnerability, and no findings is not evidence of safety. Pass `<file>` or `<file>:<call hops>` (default 2).",
         arg: "file",
-        arg_description: "Repo-relative file path.",
+        arg_description: "Repo-relative file path, optionally `path:hops`.",
         implemented: true,
     },
     ToolSpec {
@@ -531,7 +531,15 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
                 .unwrap_or((arg, None));
             crate::flow::format_pdg(&root.join(file), line)
         }
-        "taint" => crate::flow::format_taint(&root.join(arg)),
+        "taint" => {
+            // `<file>` or `<file>:<hops>`, so an agent can widen the search
+            // without a second tool.
+            let (file, depth) = arg
+                .rsplit_once(':')
+                .and_then(|(file, depth)| depth.parse::<u32>().ok().map(|depth| (file, depth)))
+                .unwrap_or((arg, 2));
+            crate::flow::format_taint(&root.join(file), depth)
+        }
         "wiki" => write_wiki(root),
         "affected" => affected_text(root, arg),
         "detect_changes" => detect_changes_text(root, arg),

@@ -1147,6 +1147,30 @@ impl Graph {
             })
     }
 
+    /// Finds a node by name within one file. Two files can declare the same
+    /// name, so a caller that knows the file gets the right one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Storage`] if the query fails.
+    pub fn find_in_file(&self, name: &str, file_path: &str) -> Result<Option<Node>> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, name, file_path, start_line, end_line, description
+                 FROM nodes WHERE name = ?1 AND file_path = ?2 LIMIT 1",
+                (name, file_path),
+                Self::row_to_node,
+            )
+            .map(Some)
+            .or_else(|source| match source {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                source => Err(Error::Storage {
+                    context: "find node by name and file",
+                    source,
+                }),
+            })
+    }
+
     fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
         Ok(Node {
             id: Some(row.get(0)?),

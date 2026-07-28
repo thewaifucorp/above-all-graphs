@@ -150,11 +150,14 @@ pub enum Command {
         line: Option<u32>,
     },
 
-    /// Show source-to-sink flows in a file. Intraprocedural and syntactic —
-    /// each finding is a place to look, not a proven vulnerability.
+    /// Show source-to-sink flows in a file, following values across calls.
+    /// Syntactic — each finding is a place to look, not a proven vulnerability.
     Taint {
         /// File to analyze.
         file: PathBuf,
+        /// How many call hops to follow out of the file. 0 stays inside it.
+        #[arg(long, default_value_t = 2)]
+        depth: u32,
     },
 
     /// Show detected architectural communities.
