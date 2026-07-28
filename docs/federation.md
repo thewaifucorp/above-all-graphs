@@ -44,8 +44,11 @@ real evidence and it is not proof:
 - Two repositories can name the same event and mean different things.
 - A declared `Order` schema and a class called `Order` may be unrelated types
   that happen to share a noun.
-- A path built at runtime is never matched, so an absent link is not evidence
-  that no call exists.
+- A path built from literals is folded and matched (see [api](api.md)), but one
+  that only exists at runtime is not, so an absent link is not evidence that no
+  call exists. Event and tool names are matched strictly: a folded event name
+  would link two halves that may never meet, and a wrong link is worse than a
+  missing one.
 - The `api` link's evidence line says which of the two matches it was: an exact
   path or a flattened one.
 

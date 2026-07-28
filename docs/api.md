@@ -146,8 +146,14 @@ nothing to compare, and inventing a comparison would be worse than silence.
 
 ## Deliberate limits
 
-- A path built at runtime (`fetch(url)`, an interpolated base) is not a target
-  this can name, and is skipped rather than guessed.
+- A path assembled from literals is folded before it is matched: a template
+  (`` fetch(`${BASE}/orders/${id}`) ``) and a concatenation
+  (`fetch(BASE + '/orders')`) name the same endpoints as the literals do. A
+  leading unreadable piece followed by `/` is a base URL — host, not path — and
+  every other unreadable piece must fill a whole segment to become `{param}`.
+  `fetch('/orders' + suffix)` could be `/ordersearch` as easily as `/orders/1`,
+  so it is skipped rather than resolved to the wrong endpoint, and so is
+  `fetch(url)`, which names nothing at all.
 - `api impact` reports the handler's blast radius through the existing symbol
   graph; it does not know about consumers outside this repository, and says so
   when a declared contract has no local caller.

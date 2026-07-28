@@ -222,9 +222,15 @@ P2 gates expand reach after the core is measurable and dependable.
    `customer.name` is a finding and no longer silence. Recursion stops at the
    first name that resolves back to itself, and nesting is compared four levels
    deep. A tool invocation is linked to the definition it names by priority 7.
+   A path assembled from literals is folded before matching, so
+   `` fetch(`${BASE}/orders/${id}`) `` and `fetch(BASE + '/orders')` name the
+   endpoints their literals name: a leading unreadable piece before a `/` is a
+   base URL, and every other one must fill a whole segment to become a
+   parameter.
    Not claimed: recognition is by name across a fixed set of frameworks and
    clients, so a house-built router or client is invisible until its shape is
-   added. A path built at runtime is skipped rather than guessed. The shape
+   added. A path that only exists at runtime is skipped rather than guessed, and
+   so is a partial segment (`'/orders' + suffix` could be `/ordersearch`). The shape
    check is still syntactic — a field copied out of a call, a model, or a
    serializer reads as missing, a key computed at runtime is not a name it can
    read, and a finding is a place to look.

@@ -150,9 +150,8 @@ fn http_method(name: &str) -> Option<String> {
 /// The route path inside a registration argument, if the argument is a
 /// string literal that looks like a path.
 fn route_path(raw: &str) -> Option<String> {
-    let trimmed = raw
-        .trim()
-        .trim_matches(|character| matches!(character, '"' | '\'' | '`'));
+    let folded = folded_target(raw)?;
+    let trimmed = folded.trim();
     (trimmed.starts_with('/') || trimmed.is_empty()).then(|| {
         if trimmed.is_empty() {
             "/".to_string()
@@ -160,6 +159,109 @@ fn route_path(raw: &str) -> Option<String> {
             trimmed.to_string()
         }
     })
+}
+
+/// Stands in for a piece of a request target the parser cannot read: an
+/// interpolation, a variable, a call. It is a private marker, never a path.
+const OPAQUE: char = '\u{1}';
+
+/// The request target an argument names, folding what can be folded.
+///
+/// A path is rarely one literal. `` `${BASE}/pets/${id}` `` and
+/// `BASE + "/pets/" + id` are the same request as `/pets/{id}`, and skipping
+/// them means a client that builds its URL the ordinary way is invisible. So
+/// the argument is folded: literals concatenate, and every unreadable piece
+/// becomes one marker.
+///
+/// Two rules keep this from guessing. A leading unreadable piece followed by
+/// `/` is a base URL — host, not path — and is dropped. Every other unreadable
+/// piece must occupy a whole path segment to become a parameter; a target like
+/// `"/pets" + suffix` could be `/petshop` as easily as `/pets/1`, so it is
+/// skipped rather than resolved to the wrong endpoint.
+fn folded_target(raw: &str) -> Option<String> {
+    let mut folded = String::new();
+    for term in split_concatenation(raw) {
+        match quoted_argument(term) {
+            Some(text) => folded.push_str(&interpolations_marked(&text)),
+            None => folded.push(OPAQUE),
+        }
+    }
+    while let Some(rest) = folded.strip_prefix(OPAQUE) {
+        // A base URL is whatever sits before the path, so a marker that a `/`
+        // follows is host and not part of the target.
+        if !rest.starts_with('/') {
+            return None;
+        }
+        folded = rest.to_string();
+    }
+    if !folded.contains(OPAQUE) {
+        return Some(folded);
+    }
+    let mut out = String::new();
+    for (position, segment) in folded.split('/').enumerate() {
+        if position > 0 {
+            out.push('/');
+        }
+        if segment.contains(OPAQUE) {
+            // Whole segment, or nothing: a marker glued to text names no
+            // segment this can match.
+            if segment.chars().any(|character| character != OPAQUE) {
+                return None;
+            }
+            out.push_str("{param}");
+        } else {
+            out.push_str(segment);
+        }
+    }
+    Some(out)
+}
+
+/// Replaces `${…}` and `{…}` interpolations in a template literal with the
+/// opaque marker. A Python f-string and a JavaScript template read the same
+/// way here, because both spell the hole with braces.
+fn interpolations_marked(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        let head = &rest[..open];
+        out.push_str(head.strip_suffix('$').unwrap_or(head));
+        let Some(close) = rest[open..].find('}') else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        out.push(OPAQUE);
+        rest = &rest[open + close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Splits `a + b + c` into its terms, ignoring `+` inside strings or brackets.
+fn split_concatenation(raw: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut in_string: Option<char> = None;
+    for (offset, character) in raw.char_indices() {
+        if let Some(quote) = in_string {
+            if character == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' | '`' => in_string = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '+' if depth == 0 => {
+                parts.push(raw[start..offset].trim());
+                start = offset + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(raw[start..].trim());
+    parts.into_iter().filter(|part| !part.is_empty()).collect()
 }
 
 /// Splits an argument list on commas that are not nested inside brackets.
@@ -537,7 +639,7 @@ fn consumer_call(
         .trim_start_matches('(')
         .trim_end_matches(')');
     let parts = split_arguments(args);
-    let path = request_path(&quoted_argument(parts.first()?)?)?;
+    let path = request_path(&folded_target(parts.first()?)?)?;
     let lowered = callee.to_ascii_lowercase();
     let method = if let Some(method) = http_method(callee) {
         // Two arguments are a route registration unless the receiver says

@@ -877,7 +877,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join("openapi.yaml"),
-            "openapi: 3.0.0\ninfo:\n  title: Pets\n  version: '1'\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'\n  /pets/{id}:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: one pet\n  /archived:\n    get:\n      operationId: listArchived\n      responses:\n        '200':\n          description: never built\n  /orders:\n    get:\n      operationId: listOrders\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Order'\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [id, name]\n      properties:\n        id:\n          type: integer\n        name:\n          type: string\n        tag:\n          type: string\n    Order:\n      type: object\n      required: [id, customer]\n      properties:\n        id:\n          type: integer\n        customer:\n          type: object\n          required: [name]\n          properties:\n            name:\n              type: string\n            email:\n              type: string\n",
+            "openapi: 3.0.0\ninfo:\n  title: Pets\n  version: '1'\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'\n  /pets/{id}:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: one pet\n  /archived:\n    get:\n      operationId: listArchived\n      responses:\n        '200':\n          description: never built\n  /orders/{id}:\n    get:\n      operationId: getOrder\n      responses:\n        '200':\n          description: one order\n  /orders:\n    get:\n      operationId: listOrders\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Order'\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [id, name]\n      properties:\n        id:\n          type: integer\n        name:\n          type: string\n        tag:\n          type: string\n    Order:\n      type: object\n      required: [id, customer]\n      properties:\n        id:\n          type: integer\n        customer:\n          type: object\n          required: [name]\n          properties:\n            name:\n              type: string\n            email:\n              type: string\n",
         )
         .unwrap();
         fs::write(
@@ -886,12 +886,17 @@ mod tests {
              function getPet(req, res) { return res.json({ id: 1 }); }\n\
              function health(req, res) { return res.json({ ok: true }); }\n\
              function listOrders(req, res) {\n  const customer = { email: 'ada@example.com' };\n  const base = { id: 1 };\n  const body = { ...base, customer };\n  return res.json(body);\n}\n\
-             function wire(app) {\n  app.get('/pets', listPets);\n  app.get('/pets/:id', getPet);\n  app.get('/health', health);\n  app.get('/orders', listOrders);\n}\n",
+             function getOrder(req, res) { return res.json({ id: 1 }); }\n\
+             function wire(app) {\n  app.get('/pets', listPets);\n  app.get('/pets/:id', getPet);\n  app.get('/health', health);\n  app.get('/orders', listOrders);\n  app.get('/orders/:id', getOrder);\n}\n",
         )
         .unwrap();
         fs::write(
             root.join("client.js"),
-            "function loadPets() { return fetch('/pets'); }\n",
+            "const BASE = 'https://api.example.com';\n\
+             function loadPets() { return fetch('/pets'); }\n\
+             function loadOrder(id) { return fetch(`${BASE}/orders/${id}`); }\n\
+             function loadOrders() { return fetch(BASE + '/orders'); }\n\
+             function loadSuffixed(suffix) { return fetch('/orders' + suffix); }\n",
         )
         .unwrap();
         fs::write(
@@ -1007,6 +1012,42 @@ mod tests {
         assert!(
             !pets.missing.contains(&"id".to_string()),
             "`id` is returned, so it is not missing: {pets:?}"
+        );
+    }
+
+    #[test]
+    fn a_url_built_from_a_base_and_a_parameter_still_names_its_endpoint() {
+        let root = indexed_root();
+
+        let surfaces = surfaces(&root).unwrap();
+
+        let orders = surfaces
+            .iter()
+            .find(|surface| surface.name == "GET /orders")
+            .expect("GET /orders");
+        assert!(
+            orders
+                .consumers
+                .iter()
+                .any(|(name, _, _)| name == "loadOrders"),
+            "`BASE + '/orders'` is a call to /orders: {:?}",
+            orders.consumers
+        );
+        let parameterized = surfaces
+            .iter()
+            .find(|surface| surface.path.starts_with("/orders/"))
+            .map(|surface| surface.consumers.clone())
+            .unwrap_or_default();
+        assert!(
+            parameterized.iter().any(|(name, _, _)| name == "loadOrder"),
+            "an interpolated id is a path parameter, and the base URL is host: {parameterized:?}"
+        );
+        assert!(
+            surfaces.iter().all(|surface| !surface
+                .consumers
+                .iter()
+                .any(|(name, _, _)| name == "loadSuffixed")),
+            "`'/orders' + suffix` could be /ordersearch; a partial segment is skipped"
         );
     }
 
