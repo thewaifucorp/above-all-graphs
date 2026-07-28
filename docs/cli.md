@@ -22,6 +22,7 @@ Defines the command-line surface for `aag`. This module owns the `Cli` struct an
 - `Hook` — nests `HookEvent`, the entry point the agent harness calls with a JSON payload on stdin. Never invoked by hand.
 - `Explore` — answers a question about the codebase (symbols, call paths, blast radius) given a free-text `query`.
 - `Impact` — shows what would break if a given `symbol` changed.
+- `Cypher` — runs a read-only pattern query over the graph in a documented subset of Cypher; prints a table, or JSON with `--json`. The grammar, the bounds, and what it refuses are in [query](query.md).
 - `Flow`, `Pdg`, `Taint` — statement-level flow for one file: blocks and def-use chains (`--function` narrows to one), the dependence graph (`--line` gives one line's transitive slice), and source-to-sink flows (`--depth` sets how many call hops to follow out of the file, 2 by default). See [flow](flow.md).
 - `Mcp` — runs the MCP server, newline-delimited JSON-RPC 2.0 over stdio.
 - `Describe` — records an agent's vision-pass description of a doc or image and links it to any symbol it mentions by name.

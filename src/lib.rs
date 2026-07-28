@@ -27,6 +27,7 @@ mod openapi;
 pub mod parse;
 pub mod pr;
 pub mod protocol;
+pub mod query;
 pub mod refactor;
 pub mod resolve;
 pub mod semantic;

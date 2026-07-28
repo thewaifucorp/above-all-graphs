@@ -6,6 +6,8 @@ All notable changes to AboveAllGraphs are documented here.
 
 ### Added
 
+- A documented formal subset of Cypher with real pattern evaluation (`src/query.rs`): labels, relationship types and direction, variable-length hops (`*1..3`), `WHERE` with `=`/`<>`/`<`/`<=`/`>`/`>=`/`CONTAINS`/`STARTS WITH`/`ENDS WITH`/`IN`/`IS NULL`/`AND`/`OR`/`NOT`, `count` with grouping, `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT`. Anything outside the subset is an error naming what was expected, at the line and column it was found. See `docs/query.md`.
+- `aag cypher "<query>"`, printing a table or `--json` rows.
 - Taint flows that cross calls: each function is summarized (which parameter positions reach a sink, which reach a `return`, whether it returns an input of its own), and a caller reads that summary instead of re-analyzing the callee. Callees come from the indexed `calls` edges, so an ambiguous call is followed through every candidate and reported as one of them.
 - Sanitizer recognition — a short list of escaping, quoting, and narrowing calls, plus any function whose parameter reaches its `return` only through one — with suppressed flows reported rather than silently dropped.
 - `aag taint --depth <hops>` and the MCP `taint` tool's `path:hops` form.
@@ -13,6 +15,7 @@ All notable changes to AboveAllGraphs are documented here.
 
 ### Changed
 
+- The MCP `cypher` tool evaluates queries instead of sniffing their text. The previous surface ignored relationship types and returned every edge in the graph for any query containing `-[`, and reported the first `.name`/`.kind` literal found anywhere in the string as a filter.
 - `flow::Call::arguments` groups identifiers per positional argument, so an argument can be matched to the parameter at the same position.
 - A sink now takes any tainted name on its line, catching chains like `Command::new(sh).arg(cmd).spawn()` where the value rides the receiver.
 

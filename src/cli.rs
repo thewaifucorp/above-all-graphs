@@ -160,6 +160,21 @@ pub enum Command {
         depth: u32,
     },
 
+    /// Run a read-only pattern query over the graph, in a documented subset of
+    /// Cypher. See `docs/query.md` for the grammar the parser accepts.
+    Cypher {
+        /// The query, e.g. `MATCH (f:Function)-[:CALLS*1..3]->(g) RETURN f.name, g.name`.
+        query: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Print JSON rows instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.

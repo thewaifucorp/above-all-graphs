@@ -100,9 +100,9 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "cypher",
-        description: "Direct query against the graph layer.",
+        description: "Read-only pattern query over the graph, in a documented subset of Cypher: MATCH patterns (labels, relationship types, `*1..3` hops), WHERE, RETURN with count/DISTINCT/ORDER BY/SKIP/LIMIT. Anything outside the subset is an error that names what was expected. See docs/query.md.",
         arg: "query",
-        arg_description: "Cypher query.",
+        arg_description: "A query in the supported subset, e.g. MATCH (f:Function)-[:CALLS]->(g) WHERE f.file STARTS WITH 'src/' RETURN f.name, g.name LIMIT 20.",
         implemented: true,
     },
     ToolSpec {
@@ -543,7 +543,7 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "wiki" => write_wiki(root),
         "affected" => affected_text(root, arg),
         "detect_changes" => detect_changes_text(root, arg),
-        "cypher" => cypher_text(root, arg),
+        "cypher" => crate::query::run_json(root, arg),
         "communities" => communities_text(root, arg),
         "processes" => processes_text(root, arg),
         "neighbors" => neighbors_text(root, arg),
@@ -780,86 +780,6 @@ fn detect_changes_text(root: &Path, diff: &str) -> Result<String> {
     ))
 }
 
-fn cypher_text(root: &Path, query: &str) -> Result<String> {
-    let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ");
-    let upper = normalized.to_ascii_uppercase();
-    if !upper.starts_with("MATCH ")
-        || !upper.contains(" RETURN ")
-        || [" CREATE ", " DELETE ", " SET ", " REMOVE ", " MERGE "]
-            .iter()
-            .any(|keyword| upper.contains(keyword))
-    {
-        return Err(Error::Protocol {
-            context: "Cypher query rejected",
-            detail: "only read-only MATCH ... RETURN queries are supported".into(),
-        });
-    }
-    let limit = upper
-        .rsplit_once(" LIMIT ")
-        .and_then(|(_, value)| value.parse::<usize>().ok())
-        .unwrap_or(100)
-        .min(1_000);
-    let graph = Graph::open_existing(root)?;
-    if normalized.contains("-[") || normalized.contains("]->") {
-        let nodes = graph.all_nodes()?;
-        let by_id: std::collections::HashMap<i64, _> = nodes
-            .iter()
-            .filter_map(|node| node.id.map(|id| (id, node)))
-            .collect();
-        let rows = graph
-            .all_edges()?
-            .into_iter()
-            .take(limit)
-            .filter_map(|edge| {
-                Some(json!({
-                    "source": by_id.get(&edge.src)?.name,
-                    "relationship": edge.kind.as_str(),
-                    "target": by_id.get(&edge.dst)?.name,
-                    "confidence": edge.confidence.as_str()
-                }))
-            })
-            .collect::<Vec<_>>();
-        return Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()));
-    }
-    let name_filter = cypher_string_filter(&normalized, ".name");
-    let kind_filter = cypher_string_filter(&normalized, ".kind");
-    let rows = graph
-        .all_nodes()?
-        .into_iter()
-        .filter(|node| name_filter.as_ref().is_none_or(|name| node.name == *name))
-        .filter(|node| {
-            kind_filter
-                .as_ref()
-                .is_none_or(|kind| node.kind.as_str() == kind)
-        })
-        .take(limit)
-        .map(|node| {
-            json!({
-                "id": node.id,
-                "kind": node.kind.as_str(),
-                "name": node.name,
-                "file": node.file_path,
-                "line": node.start_line
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
-}
-
-fn cypher_string_filter(query: &str, field: &str) -> Option<String> {
-    let start = query.find(field)? + field.len();
-    let value = query
-        .get(start..)?
-        .trim_start()
-        .strip_prefix('=')?
-        .trim_start();
-    let quote = value
-        .chars()
-        .next()
-        .filter(|character| matches!(character, '\'' | '"'))?;
-    value.get(1..)?.split(quote).next().map(str::to_string)
-}
-
 fn write_wiki(root: &Path) -> Result<String> {
     let graph = Graph::open_existing(root)?;
     let out_dir = root.join(".aag").join("wiki");
@@ -1088,10 +1008,11 @@ mod tests {
     fn cypher_tool_returns_read_only_graph_rows() {
         let root = indexed_root();
         let text =
-            cypher_text(&root, "MATCH (n) WHERE n.name = 'helper' RETURN n LIMIT 5").unwrap();
+            crate::query::run_json(&root, "MATCH (n) WHERE n.name = 'helper' RETURN n LIMIT 5")
+                .unwrap();
         assert!(text.contains("helper"));
         assert!(!text.contains("caller"));
-        assert!(cypher_text(&root, "MATCH (n) DELETE n").is_err());
+        assert!(crate::query::run_json(&root, "MATCH (n) DELETE n").is_err());
     }
 
     #[test]

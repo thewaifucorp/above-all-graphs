@@ -40,13 +40,7 @@ fn main() -> anyhow::Result<()> {
         Command::Ui { port, no_open } => aag::hub::run(port, no_open)?,
         Command::Uninstall { path } => aag::install::uninstall(&path)?,
         Command::Hook { event } => {
-            let (path, hook_event) = match event {
-                aag::cli::HookEvent::PreEdit { path } => (path, aag::hook::Event::PreEdit),
-                aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
-                aag::cli::HookEvent::SessionStart { path } => {
-                    (path, aag::hook::Event::SessionStart)
-                }
-            };
+            let (path, hook_event) = hook_target(event);
             aag::hook::run(&path, hook_event, &mut std::io::stdin().lock());
         }
         Command::Explore { query, path } => aag::explore::run(&path, &query)?,
@@ -60,6 +54,7 @@ fn main() -> anyhow::Result<()> {
         Command::Taint { file, depth } => {
             println!("{}", aag::flow::format_taint(&file, depth)?);
         }
+        Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }
@@ -120,6 +115,28 @@ fn run_mcp(
     } else {
         aag::mcp::run(path)?;
     }
+    Ok(())
+}
+
+/// Which repository a hook fires against, and which lifecycle point it is.
+fn hook_target(event: aag::cli::HookEvent) -> (std::path::PathBuf, aag::hook::Event) {
+    match event {
+        aag::cli::HookEvent::PreEdit { path } => (path, aag::hook::Event::PreEdit),
+        aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
+        aag::cli::HookEvent::SessionStart { path } => (path, aag::hook::Event::SessionStart),
+    }
+}
+
+fn print_query(path: &std::path::Path, query: &str, json: bool) -> anyhow::Result<()> {
+    let answer = aag::query::run(path, query)?;
+    println!(
+        "{}",
+        if json {
+            answer.to_json()
+        } else {
+            answer.to_table()
+        }
+    );
     Ok(())
 }
 

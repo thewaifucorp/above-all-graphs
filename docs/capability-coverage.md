@@ -36,9 +36,12 @@ alone do not establish parity.
   dependence graph, and taint findings that cross calls by joining per-function
   summaries to the resolved call graph, with sanitizer recognition and reported
   suppression.
-- Coordinated whole-word rename, a limited read-only Cypher-shaped query
-  surface, diff change detection, wiki, report, GraphML, JSON, Cypher export,
-  Obsidian export, and an offline WebGL graph.
+- Coordinated whole-word rename, a read-only query surface over a documented
+  formal subset of Cypher — labels, relationship types and direction,
+  variable-length hops, `WHERE`, `count`, `DISTINCT`, `ORDER BY`, paging — with
+  real pattern evaluation and an error for anything outside the subset. Diff
+  change detection, wiki, report, GraphML, JSON, Cypher export, Obsidian export,
+  and an offline WebGL graph.
 - OpenAPI and Swagger operations, parameters, bodies, responses, security,
   schemas, references, implementation matching, SQL DDL and foreign keys, and
   Terraform/HCL resources.
@@ -124,9 +127,21 @@ P2 gates expand reach after the core is measurable and dependable.
    model with task-specific overview, explore, path, impact, and contract
    views. The current graph is functional but not yet a competitive visual
    product.
-- 4. Replace the current Cypher-shaped shim with either a documented formal
-   subset and real pattern evaluation or a genuine graph query engine. Do not
-   advertise arbitrary Cypher until query semantics match the claim.
+- 4. **Closed.** The Cypher-shaped shim is replaced by a documented formal
+   subset with real pattern evaluation: a lexer, a parser, and an evaluator that
+   honors labels, relationship types, direction, variable-length hops, `WHERE`
+   with the usual comparisons plus `CONTAINS`/`STARTS WITH`/`ENDS WITH`/`IN`/`IS
+   NULL`, `count` with grouping, `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT`.
+   The grammar is written down in [query](query.md), `aag cypher` exposes it on
+   the CLI, and the MCP `cypher` tool returns the same answers as JSON. What the
+   shim did instead is on the record there: it ignored relationship types and
+   returned every edge in the graph for any query mentioning `-[`, which is a
+   wrong answer that reads like a right one.
+   Bounds are stated: `LIMIT` clamped to 1000, hops to 5, 20 000 intermediate
+   rows, no repeated edge within a path, and a paged answer says it was paged.
+   Not claimed: this is not full Cypher and not a query planner. There is no
+   `WITH`, `UNWIND`, `OPTIONAL MATCH`, `UNION`, subquery, arithmetic, or function
+   other than `count`; each is rejected by name rather than reinterpreted.
 - 5. **Closed.** Statement-level control-flow and data-flow foundations: basic
    blocks, CFG, def-use, control/data dependence, PDG queries, and
    provenance-aware source-to-sink taint findings, starting with TypeScript and
@@ -543,7 +558,9 @@ repository.
 - Engine and best-in-class claims require empirical runs that identify the
   producer, consumer, engine build, protocol version, corpus, task, ground
   truth, and immutable raw result.
-- The current query surface is not full Cypher.
+- The query surface is a documented subset of Cypher with real pattern
+  evaluation, not full Cypher and not a query planner. Every unsupported clause
+  is an error naming what was expected — see [query](query.md).
 - Receiver typing is syntactic — construction, annotation, and enclosing type.
   It is not type inference, and must not be described as one. Call edges stay
   INFERRED or AMBIGUOUS accordingly.
