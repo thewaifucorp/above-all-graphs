@@ -207,6 +207,10 @@ pub enum NodeKind {
     DatabaseTable,
     /// A Terraform or other infrastructure-as-code resource.
     InfraResource,
+    /// A UI component declared by a single-file component (`.vue`, `.svelte`,
+    /// `.astro`). The file is the declaration, and the template is where one
+    /// component reaches another.
+    Component,
 }
 
 impl NodeKind {
@@ -224,6 +228,7 @@ impl NodeKind {
             Self::Schema => "schema",
             Self::DatabaseTable => "database_table",
             Self::InfraResource => "infra_resource",
+            Self::Component => "component",
         }
     }
 
@@ -238,6 +243,7 @@ impl NodeKind {
             "schema" => Self::Schema,
             "database_table" => Self::DatabaseTable,
             "infra_resource" => Self::InfraResource,
+            "component" => Self::Component,
             _ => Self::Interface,
         }
     }

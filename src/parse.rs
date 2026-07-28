@@ -909,13 +909,16 @@ fn polyglot_language(file_path: &str) -> Option<&'static str> {
 /// block and the rest of the file is markup.
 const EMBEDDED_SCRIPT: &[&str] = &["vue", "svelte", "astro"];
 
-/// Parses a component file by handing its script block to the JavaScript
-/// frontend.
+/// Parses a component file: the script block goes to the JavaScript frontend,
+/// and the markup gives the component itself and what it renders.
 ///
-/// The markup half is not indexed: a template is not a declaration, and the
-/// grammar hands the script back as one opaque `raw_text` node anyway. Line
-/// numbers are shifted so a symbol still points at the right line of the
-/// component.
+/// A single-file component *is* a declaration — the file is the component — so
+/// it gets one node named after the file, and every component element in the
+/// template becomes a call from it to the component that element names. That is
+/// the edge nothing else can supply: a globally registered component is used
+/// without an import, so without reading the markup the parent and the child
+/// look unrelated. Line numbers from the script are shifted so a symbol still
+/// points at the right line of the component.
 fn parse_embedded_script(file_path: &str, source: &str, language: &str) -> Result<ParsedFile> {
     let mut parser =
         tree_sitter_language_pack::get_parser(language).map_err(|error| Error::Parse {
@@ -928,6 +931,31 @@ fn parse_embedded_script(file_path: &str, source: &str, language: &str) -> Resul
     let mut blocks = Vec::new();
     collect_script_blocks(&tree.root_node(), source, &mut blocks);
     let mut out = ParsedFile::default();
+    let component = component_name(file_path);
+    out.nodes.push(Node {
+        id: None,
+        kind: NodeKind::Component,
+        name: component.clone(),
+        file_path: file_path.to_string(),
+        start_line: 1,
+        end_line: u32::try_from(source.lines().count().max(1)).unwrap_or(u32::MAX),
+        description: None,
+    });
+    let mut rendered = Vec::new();
+    collect_rendered_components(&tree.root_node(), source, &mut rendered);
+    rendered.sort_unstable();
+    rendered.dedup();
+    for child in rendered {
+        if child == component {
+            continue;
+        }
+        out.calls.push(CallRef {
+            caller: component.clone(),
+            caller_type: None,
+            callee: child,
+            receiver: None,
+        });
+    }
     for (script, offset) in blocks {
         let Ok(mut parsed) = JavaScriptParser.parse(file_path, script) else {
             continue;
@@ -954,6 +982,72 @@ fn parse_embedded_script(file_path: &str, source: &str, language: &str) -> Resul
     Ok(out)
 }
 
+/// The component a single-file component declares: its file stem, which is the
+/// name every framework in this family uses to refer to it.
+fn component_name(file_path: &str) -> String {
+    file_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(file_path)
+        .rsplit_once('.')
+        .map_or(file_path, |(stem, _)| stem)
+        .to_string()
+}
+
+/// Component elements used in a template.
+///
+/// A component is told from an HTML element by its name: `PascalCase` or
+/// `kebab-case-with-a-dash` is a component, `div` is not. That is the same rule
+/// Vue, Svelte, and Astro themselves use, and it is a rule about the name — an
+/// element whose name is built at runtime (`<component :is="x">`) names nothing
+/// and is skipped.
+fn collect_rendered_components(
+    node: &tree_sitter_language_pack::Node,
+    source: &str,
+    out: &mut Vec<String>,
+) {
+    if matches!(node.kind().as_str(), "tag_name" | "element_name") {
+        let range = node.byte_range();
+        if let Some(name) = source
+            .get(range.start..range.end)
+            .filter(|name| is_component_element(name))
+        {
+            out.push(name.to_string());
+        }
+    }
+    for index in 0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX) {
+        if let Some(child) = node.named_child(index) {
+            collect_rendered_components(&child, source, out);
+        }
+    }
+}
+
+/// Reserved names that look like components but are framework control flow.
+const NOT_COMPONENTS: &[&str] = &[
+    "template",
+    "component",
+    "slot",
+    "script",
+    "style",
+    "svelte:self",
+    "svelte:component",
+    "svelte:fragment",
+    "svelte:window",
+    "svelte:body",
+    "svelte:head",
+    "svelte:element",
+    "svelte:options",
+];
+
+fn is_component_element(name: &str) -> bool {
+    if NOT_COMPONENTS.contains(&name) || name.contains(':') {
+        return false;
+    }
+    let pascal = name.chars().next().is_some_and(char::is_uppercase);
+    let custom = name.contains('-') && !name.starts_with('-');
+    pascal || custom
+}
+
 /// `(script text, line offset)` for every script block in a component file.
 fn collect_script_blocks<'a>(
     node: &tree_sitter_language_pack::Node,
@@ -977,11 +1071,62 @@ fn collect_script_blocks<'a>(
     }
 }
 
-/// Groovy's grammar is a loose command soup: `def greet() { … }` parses as a
-/// `command` whose first `unit` is the keyword and whose block starts with the
-/// name. So the keyword is matched and the next word taken, which covers `def`
-/// and `class` declarations and nothing more — see the limits in
-/// `docs/parse.md`.
+/// Control flow that takes a parenthesised head and a brace, exactly like a
+/// method declaration does.
+const GROOVY_KEYWORDS: &[&str] = &[
+    "if",
+    "else",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "synchronized",
+    "try",
+    "do",
+    "return",
+];
+
+/// A Groovy method declaration, whatever it is spelled with.
+///
+/// The grammar is a loose command soup, but a declaration has a shape inside
+/// it: somewhere in the command sits a `func` — an identifier with an argument
+/// list — followed by a brace. That is true of `def greet() { … }`,
+/// `String greet(who) { … }`, `static int add(a, b) { … }`, and
+/// `@Override void run() { … }` alike, so the type and the modifiers stop
+/// mattering. The brace is what separates a declaration from a call: `greet(1)`
+/// has the same `func` and no body.
+fn groovy_method(node: &tree_sitter_language_pack::Node, source: &str) -> Option<String> {
+    let block = (0..u32::try_from(node.named_child_count()).ok()?)
+        .filter_map(|index| node.named_child(index))
+        .find(|child| child.kind() == "block")?;
+    let func = (0..u32::try_from(block.named_child_count()).ok()?)
+        .filter_map(|index| block.named_child(index))
+        .filter(|child| child.kind() == "unit")
+        .find_map(|unit| {
+            (0..u32::try_from(unit.named_child_count()).ok()?)
+                .filter_map(|index| unit.named_child(index))
+                .find(|child| child.kind() == "func")
+        })?;
+    if !source
+        .get(func.end_byte()..)
+        .is_some_and(|rest| rest.trim_start().starts_with('{'))
+    {
+        return None;
+    }
+    let name = (0..u32::try_from(func.named_child_count()).ok()?)
+        .filter_map(|index| func.named_child(index))
+        .find(|child| child.kind() == "identifier")
+        .and_then(|identifier| {
+            let range = identifier.byte_range();
+            source.get(range.start..range.end)
+        })?;
+    (!name.is_empty() && !GROOVY_KEYWORDS.contains(&name)).then(|| name.to_string())
+}
+
+/// Groovy's grammar is a loose command soup, so declarations are recovered
+/// from the shapes inside it: a `func` with a brace after it is a method
+/// (`groovy_method`), and `class`/`interface`/`trait` followed by a word is a
+/// type. See the limits in `docs/parse.md`.
 fn collect_groovy_declarations(
     node: &tree_sitter_language_pack::Node,
     source: &str,
@@ -989,6 +1134,21 @@ fn collect_groovy_declarations(
     out: &mut ParsedFile,
     owners: &mut Vec<(String, usize, usize)>,
 ) {
+    if node.kind() == "command"
+        && let Some(name) = groovy_method(node, source)
+        && !out.nodes.iter().any(|existing| existing.name == name)
+    {
+        out.nodes.push(Node {
+            id: None,
+            kind: NodeKind::Function,
+            name: name.clone(),
+            file_path: file_path.to_string(),
+            start_line: u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX),
+            end_line: u32::try_from(node.end_position().row + 1).unwrap_or(u32::MAX),
+            description: None,
+        });
+        owners.push((name, node.start_byte(), node.end_byte()));
+    }
     if node.kind() == "command" {
         let words: Vec<&str> = (0..u32::try_from(node.named_child_count()).unwrap_or(u32::MAX))
             .filter_map(|index| node.named_child(index))
@@ -2907,6 +3067,83 @@ mod tests {
                 callee: "insert_node".into(),
                 receiver: Some("graph".into()),
             }]
+        );
+    }
+
+    #[test]
+    fn a_component_declares_itself_and_the_components_its_template_renders() {
+        let parsed = parse_file(
+            "src/OrderPage.vue",
+            "<script setup>\nimport OrderRow from './OrderRow.vue';\n</script>\n\
+             <template>\n  <div class=\"page\">\n    <OrderRow :order=\"o\" />\n    \
+             <order-total :sum=\"s\" />\n    <p>plain</p>\n  </div>\n</template>\n",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            parsed
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::Component && node.name == "OrderPage"),
+            "the file is the component: {:?}",
+            parsed.nodes
+        );
+        let rendered: Vec<&str> = parsed
+            .calls
+            .iter()
+            .filter(|call| call.caller == "OrderPage")
+            .map(|call| call.callee.as_str())
+            .collect();
+        assert!(
+            rendered.contains(&"OrderRow") && rendered.contains(&"order-total"),
+            "both spellings of a component element are a use: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains(&"div") && !rendered.contains(&"p"),
+            "an HTML element is not a component: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn groovy_methods_are_found_without_the_def_keyword() {
+        let parsed = parse_file(
+            "Main.groovy",
+            "class Main {\n  String greet(String who) { return who }\n  \
+             static int add(a, b) { a + b }\n  void run() { greet('x') }\n}\n\
+             def helper() { return 1 }\nprintln greet('y')\n",
+        )
+        .unwrap()
+        .unwrap();
+
+        let names: Vec<&str> = parsed.nodes.iter().map(|node| node.name.as_str()).collect();
+        for expected in ["Main", "greet", "add", "run", "helper"] {
+            assert!(
+                names.contains(&expected),
+                "{expected} missing from {names:?}"
+            );
+        }
+        assert!(
+            !names.contains(&"println"),
+            "a call is not a declaration: {names:?}"
+        );
+    }
+
+    #[test]
+    fn a_svelte_control_element_is_not_a_component() {
+        let parsed = parse_file(
+            "src/List.svelte",
+            "<script>\n  let items = [];\n</script>\n\
+             <svelte:head><title>x</title></svelte:head>\n<Row />\n",
+        )
+        .unwrap()
+        .unwrap();
+
+        let rendered: Vec<&str> = parsed.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(rendered.contains(&"Row"), "{rendered:?}");
+        assert!(
+            !rendered.iter().any(|name| name.starts_with("svelte:")),
+            "framework control flow is not a component: {rendered:?}"
         );
     }
 

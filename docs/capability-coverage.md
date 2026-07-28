@@ -289,13 +289,24 @@ P2 gates expand reach after the core is measurable and dependable.
     table entry: Vue/Svelte/Astro hand their script block back as one opaque
     node, so the block is extracted and handed to the JavaScript frontend with
     line numbers shifted; Clojure declares with a form (`(defn greet …)`) rather
-    than a node kind; Groovy parses as a loose command soup and is matched on the
-    `def`/`class`/`interface`/`trait` keyword; the rest declare with their own
-    node kinds (Zig's `FnProto`, Fortran's `subroutine`, Perl's
+    than a node kind; Groovy parses as a loose command soup; the rest declare
+    with their own node kinds (Zig's `FnProto`, Fortran's `subroutine`, Perl's
     `subroutine_declaration_statement`, …) and their own name nodes.
-    Not claimed: structural coverage, as the claim discipline below already says.
-    A component file's markup is not indexed — a template is not a declaration.
-    Groovy recognition covers the keyword forms and nothing more.
+    The markup half of a component file is indexed too, because a single-file
+    component *is* a declaration: the file becomes a `Component` node, and every
+    component element in its template becomes a call into the component that
+    element names. That is the edge nothing else supplies — a globally
+    registered child is rendered without an import, so parent and child look
+    unrelated until the template is read. `PascalCase` or `kebab-case` is a
+    component and `div` is not, which is the same rule the frameworks use.
+    Groovy recognition is by shape rather than by keyword: a `func` followed by
+    a brace is a method, so `String greet(who) { … }` and
+    `static int add(a, b) { … }` are found alongside `def`, and `greet(1)` is
+    not — the brace is what separates a declaration from a call.
+    Not claimed: structural coverage, as the claim discipline below already
+    says. An element whose name is built at runtime (`<component :is="x">`)
+    names nothing and is skipped, and a Groovy declaration written without a
+    parameter list is not a method to this rule.
 - 14. Expand agent installers and uninstallers from seven integrations to the
     broader cross-framework surface, while keeping every edit additive,
     idempotent, and reversible.
