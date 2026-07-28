@@ -394,6 +394,15 @@ screen, so none of them asks for that.
   unwind one layer at a time.
 - **Semantic zoom** by camera band, with a floor that stands down for small
   scenes — a nine-node impact fan-out with no labels answers nothing.
+- **Explore overflow is aggregated, not dropped.** The ranking that keeps the
+  top neighbours per hop is where a hub actually loses neighbours — 898 of them
+  becomes 40 — so whatever it cuts becomes one expandable aggregate per module,
+  labelled with its count, listing its members in the inspector, and expandable
+  in place. The scene cap feeds the same aggregation.
+- **Path shows every equally short route**, not the first one BFS happened to
+  find: two equally short routes are two different answers, and showing one
+  silently is showing half the truth. The primary route is drawn heavier so the
+  alternatives are distinguishable without a legend.
 - **Layout cache** in `localStorage`, keyed by scene shape and force settings,
   so a reload or a return from another mode lands on the same picture. A
   changed node set invalidates rather than partially reusing.
@@ -439,10 +448,9 @@ CI with everything else.
 - Node kind is carried by a label glyph and relation kind by hue plus width,
   because sigma's default programs draw circles and plain lines. The shape and
   dash grammar in the specification above needs custom WebGL programs.
-- Explore ranks and caps neighbours but does not yet aggregate the ones it
-  drops into an expandable bundle the way Overview does.
-- Path shows the shortest route only; alternative paths of equal length are not
-  offered.
+- Node kind is still carried by a label glyph rather than a shape, and relation
+  kind by hue plus width rather than a dash pattern. Both need custom sigma
+  programs or an overlay pass.
 
 ### Definition of done
 

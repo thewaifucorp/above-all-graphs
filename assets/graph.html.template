@@ -712,16 +712,25 @@ function exploreSpec() {
   const depth = new Map([[root.id, 0]]);
   const direction = new Map([[root.id, "root"]]);
   const kept = new Set([root.id]);
+  // Where neighbours are really lost: a hub with 900 neighbours shows the top
+  // few per hop. Whatever the ranking cuts is remembered, not forgotten.
+  const overflowed = new Set();
   let frontier = [root.id];
   for (let hop = 1; hop <= Math.max(State.down, 0) && frontier.length; hop++) {
     const next = [];
     for (const id of frontier) {
-      const ranked = (outgoing.get(id) || [])
+      const scored = (outgoing.get(id) || [])
         .filter(edgeAllowed)
         .map((edge) => ({ edge, node: byId.get(edge.target) }))
         .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
-        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge))
-        .slice(0, hop === 1 ? 40 : 12);
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge));
+      const budget = hop === 1 ? 40 : 12;
+      const ranked = scored.filter(
+        (candidate, position) => position < budget || State.expanded.has(candidate.node.community)
+      );
+      for (const candidate of scored.slice(budget)) {
+        if (!State.expanded.has(candidate.node.community)) overflowed.add(candidate.node.id);
+      }
       for (const candidate of ranked) {
         kept.add(candidate.node.id);
         depth.set(candidate.node.id, hop);
@@ -735,12 +744,18 @@ function exploreSpec() {
   for (let hop = 1; hop <= Math.max(State.up, 0) && frontier.length; hop++) {
     const next = [];
     for (const id of frontier) {
-      const ranked = (incoming.get(id) || [])
+      const scored = (incoming.get(id) || [])
         .filter(edgeAllowed)
         .map((edge) => ({ edge, node: byId.get(edge.source) }))
         .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
-        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge))
-        .slice(0, hop === 1 ? 40 : 12);
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge));
+      const budget = hop === 1 ? 40 : 12;
+      const ranked = scored.filter(
+        (candidate, position) => position < budget || State.expanded.has(candidate.node.community)
+      );
+      for (const candidate of scored.slice(budget)) {
+        if (!State.expanded.has(candidate.node.community)) overflowed.add(candidate.node.id);
+      }
       for (const candidate of ranked) {
         kept.add(candidate.node.id);
         depth.set(candidate.node.id, hop);
@@ -754,12 +769,23 @@ function exploreSpec() {
 
   let omitted = 0;
   let ids = [...kept];
+  let dropped = [];
   if (ids.length > MAX_SCENE_NODES) {
-    omitted = ids.length - MAX_SCENE_NODES;
-    ids = ids
-      .sort((left, right) => (depth.get(left) || 0) - (depth.get(right) || 0) || (byId.get(right).degree || 0) - (byId.get(left).degree || 0))
-      .slice(0, MAX_SCENE_NODES);
+    const ranked = ids.sort(
+      (left, right) =>
+        (depth.get(left) || 0) - (depth.get(right) || 0) ||
+        (byId.get(right).degree || 0) - (byId.get(left).degree || 0)
+    );
+    // A capped neighbour is not a dropped neighbour: keep the overflow as
+    // expandable aggregates so the scene never hides work without saying where
+    // it went.
+    dropped = ranked.slice(MAX_SCENE_NODES).filter((id) => !State.expanded.has(byId.get(id).community));
+    const rescued = ranked.slice(MAX_SCENE_NODES).filter((id) => State.expanded.has(byId.get(id).community));
+    omitted = dropped.length;
+    ids = ranked.slice(0, MAX_SCENE_NODES).concat(rescued);
   }
+  for (const id of overflowed) if (!kept.has(id)) dropped.push(id);
+  omitted = dropped.length;
   const set = new Set(ids);
   const items = ids.map((id) => {
     const node = byId.get(id);
@@ -776,6 +802,41 @@ function exploreSpec() {
     if (!set.has(edge.source) || !set.has(edge.target) || !edgeAllowed(edge)) continue;
     edges.push(Object.assign({ key: `e${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
   }
+
+  // One aggregate per module the cap cut into, attached where its members
+  // hung. Clicking it expands that module in place.
+  const byCommunity = new Map();
+  for (const id of dropped) {
+    const community = byId.get(id).community;
+    if (!byCommunity.has(community)) byCommunity.set(community, []);
+    byCommunity.get(community).push(id);
+  }
+  for (const [community, members] of byCommunity) {
+    const key = `m${community}`;
+    const meta = communityMeta[community] || {};
+    items.push({
+      key,
+      label: `+${members.length} more in ${meta.label || "#" + community}`,
+      size: 5 + Math.min(Math.sqrt(members.length) * 2.6, 16),
+      color: fade(communityColor(community), 0.55),
+      _overflow: { community, members },
+    });
+    // Attach to whichever shown node the overflow actually connects to.
+    const anchor = members
+      .flatMap((id) => [...(neighborsOf.get(id) || [])])
+      .find((other) => set.has(other));
+    if (anchor !== undefined) {
+      edges.push({
+        key: `o${index++}`,
+        from: key,
+        to: `n${anchor}`,
+        size: 1,
+        color: fade(EDGE_COLOR, 0.7),
+        _overflowEdge: true,
+      });
+    }
+  }
+
   return {
     layout: "force",
     items,
@@ -789,33 +850,56 @@ function exploreSpec() {
 // --- Path --------------------------------------------------------------------
 // Directed shortest paths, drawn as layers rather than as a force graph: a
 // path has an order, and a force layout hides it.
+// Every shortest route, not just the first one found. BFS keeps *all*
+// predecessors that discovered a node at its own depth, then the paths are
+// enumerated from them — two equally short routes are two different answers,
+// and showing one silently is showing half the truth.
 function shortestPaths(fromId, toId, limit) {
-  const previous = new Map([[fromId, null]]);
-  const queue = [fromId];
-  let found = false;
-  while (queue.length && !found) {
-    const id = queue.shift();
-    for (const edge of outgoing.get(id) || []) {
-      if (!edgeAllowed(edge) || previous.has(edge.target)) continue;
-      const node = byId.get(edge.target);
-      if (!node || !nodeAllowed(node)) continue;
-      previous.set(edge.target, edge);
-      if (edge.target === toId) {
-        found = true;
-        break;
+  const depth = new Map([[fromId, 0]]);
+  const arrivals = new Map();
+  let frontier = [fromId];
+  let reached = false;
+  while (frontier.length && !reached) {
+    const next = [];
+    for (const id of frontier) {
+      for (const edge of outgoing.get(id) || []) {
+        if (!edgeAllowed(edge)) continue;
+        const node = byId.get(edge.target);
+        if (!node || !nodeAllowed(node)) continue;
+        const hop = depth.get(id) + 1;
+        const known = depth.get(edge.target);
+        if (known !== undefined && known < hop) continue;
+        if (known === undefined) {
+          depth.set(edge.target, hop);
+          next.push(edge.target);
+        }
+        if (!arrivals.has(edge.target)) arrivals.set(edge.target, []);
+        arrivals.get(edge.target).push(edge);
+        if (edge.target === toId) reached = true;
       }
-      queue.push(edge.target);
     }
+    frontier = next;
   }
-  if (!previous.has(toId)) return [];
-  const chain = [];
-  let cursor = toId;
-  while (previous.get(cursor)) {
-    const edge = previous.get(cursor);
-    chain.unshift(edge);
-    cursor = edge.source;
-  }
-  return limit ? chain.slice(0, limit) : chain;
+  if (!arrivals.has(toId)) return [];
+
+  const routes = [];
+  const walk = (id, chain, seen) => {
+    if (routes.length >= (limit || 4)) return;
+    if (id === fromId) {
+      routes.push(chain.slice());
+      return;
+    }
+    for (const edge of arrivals.get(id) || []) {
+      if (depth.get(edge.source) !== depth.get(id) - 1 || seen.has(edge.source)) continue;
+      seen.add(edge.source);
+      chain.unshift(edge);
+      walk(edge.source, chain, seen);
+      chain.shift();
+      seen.delete(edge.source);
+    }
+  };
+  walk(toId, [], new Set([toId]));
+  return routes;
 }
 
 function pathSpec() {
@@ -833,8 +917,8 @@ function pathSpec() {
   if (from.id === to.id) {
     return { layout: "layered", items: [], edges: [], omitted: 0, empty: "Source and target are the same node." };
   }
-  const chain = shortestPaths(from.id, to.id);
-  if (!chain.length) {
+  const routes = shortestPaths(from.id, to.id);
+  if (!routes.length) {
     return {
       layout: "layered",
       items: [],
@@ -843,16 +927,44 @@ function pathSpec() {
       empty: `No directed path from ${from.name} to ${to.name} under the current filters.`,
     };
   }
-  const sequence = [from.id, ...chain.map((edge) => edge.target)];
-  const items = sequence.map((id, index) =>
-    nodeEntry(byId.get(id), { _layer: index, size: nodeSize(byId.get(id)) * (index === 0 || index === sequence.length - 1 ? 1.7 : 1.2) + 2 })
-  );
-  const edges = chain.map((edge, index) =>
-    Object.assign({ key: `p${index}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge, _hop: index + 1 }, edgeStyle(edge), {
-      size: Math.max(2, edgeStyle(edge).size * 2),
-    })
-  );
-  return { layout: "layered", items, edges, omitted: 0, caption: `${chain.length} hops`, chain };
+  const layerOf = new Map([[from.id, 0]]);
+  const items = [];
+  const edges = [];
+  const seen = new Set();
+  const add = (id, layer) => {
+    layerOf.set(id, Math.max(layerOf.get(id) ?? 0, layer));
+    if (seen.has(id)) return;
+    seen.add(id);
+    const node = byId.get(id);
+    const endpoint = id === from.id || id === to.id;
+    items.push(nodeEntry(node, { _layer: layer, size: nodeSize(node) * (endpoint ? 1.7 : 1.2) + 2 }));
+  };
+  add(from.id, 0);
+  routes.forEach((chain, route) => {
+    chain.forEach((edge, hop) => {
+      add(edge.target, hop + 1);
+      const key = `p${route}_${hop}`;
+      edges.push(
+        Object.assign({ key, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge, _hop: hop + 1, _route: route }, edgeStyle(edge), {
+          // The first route is the one to read; the alternatives are thinner
+          // so a reader can tell them apart without a legend.
+          size: route === 0 ? Math.max(2.4, edgeStyle(edge).size * 2) : 1.2,
+        })
+      );
+    });
+  });
+  for (const item of items) item._layer = layerOf.get(item._node.id) ?? item._layer;
+  return {
+    layout: "layered",
+    items,
+    edges,
+    omitted: 0,
+    caption:
+      routes.length > 1
+        ? `${routes[0].length} hops · ${routes.length} equally short routes`
+        : `${routes[0].length} hops`,
+    routes,
+  };
 }
 
 // --- Impact ------------------------------------------------------------------
@@ -2041,6 +2153,10 @@ function resolveFocus(value) {
 // should not have to learn a second place to look.
 function inspect(key) {
   const attributes = scene.getNodeAttributes(key);
+  if (attributes._overflow) {
+    inspectOverflow(attributes._overflow);
+    return;
+  }
   if (attributes._aggregate) {
     inspectAggregate(attributes._aggregate);
     return;
@@ -2137,6 +2253,40 @@ function inspectNode(node, attributes) {
         go();
       }
     });
+  }
+}
+
+// The scene cap is a budget, not a judgement: say exactly what it held back
+// and offer to show it.
+function inspectOverflow(overflow) {
+  const panel = document.getElementById("panel");
+  const meta = communityMeta[overflow.community] || {};
+  const rows = overflow.members
+    .slice(0, 20)
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(
+      (node) =>
+        `<div class="callrow" data-node="${node.id}" tabindex="0" role="button"><span class="cname">${escapeHtml(nodeLabel(node))}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
+    )
+    .join("");
+  panel.innerHTML = `
+    <h3>${overflow.members.length} more in ${escapeHtml(meta.label || "#" + overflow.community)}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(overflow.community)}"></span>held back by the ${MAX_SCENE_NODES}-node scene cap</p>
+    <div class="agg-actions">
+      <button data-act="expand">Show them</button>
+    </div>
+    ${rows}
+    ${overflow.members.length > 20 ? `<p class="cc-note">${overflow.members.length - 20} not listed</p>` : ""}
+  `;
+  panel.classList.add("open");
+  panel.querySelector('[data-act="expand"]').addEventListener("click", () => {
+    const expanded = new Set(State.expanded);
+    expanded.add(overflow.community);
+    setState({ expanded });
+  });
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    row.addEventListener("click", () => setState({ focus: row.dataset.node }, { push: true }));
   }
 }
 
