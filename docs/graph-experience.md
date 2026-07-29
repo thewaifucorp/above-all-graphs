@@ -731,17 +731,17 @@ The tiers separated a file from a method, but a module aggregate and a file were
 still the same big coloured circle, so the one thing the Overview is for — is
 this a module or a file? — took a click to answer.
 
-- **A module is pastel.** An aggregate is lifted toward white past every file's
-  brightness and painted above them, so it reads as the level above rather than
-  as another node of the same kind.
-- **Importance inside the file tier is saturation, not whiteness.** A file's
-  colour is pushed up in saturation and lightness in proportion to
-  `sqrt(degree / peak degree)`: the handful of files a module actually turns on
-  are the vivid ones. Mixing toward white was tried first and reads as washed
-  out — the opposite of important.
-
-That leaves three readable levels: pastel and largest is a module, vivid is a
-file worth opening, dim is code inside one.
+- **The module keeps the colour; everything else is darkened.** A module
+  aggregate is the only thing on screen carrying its module colour at full
+  strength. Files sit at 82% of it, types at 58%, functions at 42%, methods at
+  38%, each mixed that far toward the background.
+- **Brightening the important things was tried first and abandoned.** Lifting
+  files toward white, and pushing their saturation up by degree, both fight the
+  page: the eye goes to whatever is lightest, so a screen full of lifted files
+  has no top. Darkening the rest leaves exactly one thing at full strength and
+  needs no legend to explain it.
+- **Selecting a node brings it back to full strength**, whatever tier it
+  normally sits in, because selecting it is asking to look at it.
 
 ### Definition of done
 
