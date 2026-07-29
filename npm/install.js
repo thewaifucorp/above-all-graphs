@@ -26,11 +26,18 @@ function wantsSemantic(env = process.env) {
   );
 }
 
+// Platforms with no semantic asset: `ort` publishes no prebuilt onnxruntime
+// for Intel macOS, so the release carries the plain binary only. Asking for
+// the variant there would download a 404, so the request is answered with the
+// plain build and a line saying why.
+const NO_SEMANTIC_BUILD = new Set(["darwin-x64"]);
+
 // The release asset for a platform key, e.g. `linux-x64` -> the tar.gz name.
 // `null` when the platform has no prebuilt binary.
 function assetFor(key, semantic) {
   const target = TARGETS[key];
   if (!target) return null;
+  if (semantic && NO_SEMANTIC_BUILD.has(key)) semantic = false;
   const windows = key.startsWith("win32");
   const variant = semantic ? "aag-semantic" : "aag";
   return `${variant}-${target}.${windows ? "zip" : "tar.gz"}`;
@@ -55,7 +62,11 @@ async function main() {
 
   const windows = process.platform === "win32";
   const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${asset}`;
-  if (semantic) {
+  if (semantic && NO_SEMANTIC_BUILD.has(key)) {
+    console.log(
+      `aag: no semantic build exists for ${key} (onnxruntime ships no binaries for it) — installing the plain build`,
+    );
+  } else if (semantic) {
     console.log("aag: AAG_SEMANTIC set — installing the build with local embeddings");
   }
   const binDir = path.join(__dirname, "bin");

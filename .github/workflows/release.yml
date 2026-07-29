@@ -61,15 +61,21 @@ jobs:
       # file — no sidecar library, nothing for a user to install. It ships as
       # a separate asset because it is ~4x the size and most users never
       # enable it (`AAG_SEMANTIC=1 npm i -g @waifucorp/aag` opts in).
+      # `ort` ships no prebuilt onnxruntime for Intel macOS, and building it
+      # from source here would trade a 5-minute job for a 40-minute one to
+      # serve a shrinking platform. That target gets the plain binary only;
+      # every other target still gets both. Skipping deliberately beats a red
+      # release that blocks the assets already built.
       - name: Build with semantic search
+        if: matrix.target != 'x86_64-apple-darwin'
         run: cargo build --release --features semantic --target ${{ matrix.target }}
       - name: Package semantic (unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.target != 'x86_64-apple-darwin'
         run: |
           cd target/${{ matrix.target }}/release
           tar czf aag-semantic-${{ matrix.target }}.tar.gz aag
       - name: Package semantic (windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.target != 'x86_64-apple-darwin'
         shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
