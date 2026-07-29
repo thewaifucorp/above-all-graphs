@@ -503,6 +503,31 @@ first pass either dropped or never wired to a control anyone could find.
   scene. Canvas labels truncate at 34 characters; the inspector and the search
   results still show the real name.
 
+### Landed: the panel nobody could see, and the debris around small nodes
+
+- **The inspector was invisible.** `.fpanel` hides every floating panel and each
+  one shows through `.open`; the class was toggled on the inspector but no rule
+  matched it, so clicking a node filled a panel with `display: none`. One CSS
+  rule brings back the kind, location, perspective, degree, edge counts, the
+  action row, and the incoming/outgoing lists.
+- **Relation rows had no styling at all.** `.callrow`, `.cname`, and `.cfile`
+  were markup without CSS, so the name and its edge metadata ran together as
+  `src/bigbang.rsimports`. They are now a two-line row: name, then relation,
+  confidence, and file, dimmed.
+- **The wiki link looked like a stray hyperlink** wedged between buttons: it
+  carried the header's `hbtn` class inside a panel that styles only `button`.
+  The action row now styles its anchor like its buttons.
+- **Kind outlines no longer balloon.** The overlay ring was floored at a fixed
+  radius and scaled with `1 / sqrt(zoom)` without limit, so a node too small to
+  see still got a full sized outline, and diving the camera in grew every ring
+  until neighbouring ones overlapped into a rosette that reads as a rendering
+  fault. The ring now takes the node's own drawn radius, is skipped below 2.5
+  px, and is clamped at 16 px.
+- **The overlay is cleared in device pixels** with no transform in effect, and
+  is discarded together with the renderer that drew it. Clearing in CSS pixels
+  under a scaled transform only covers the canvas while the transform and the
+  backing size agree.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

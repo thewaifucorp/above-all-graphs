@@ -160,6 +160,10 @@
   #settings-panel button { width: 100%; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-primary); padding: 7px; border-radius: 8px; cursor: pointer; margin-top: 4px; }
   #settings-panel button:hover { border-color: var(--accent); }
   /* chat */
+  /* Every floating panel hides by default and shows through `.open`. The
+     inspector had the class toggled on it but no rule to match, so clicking a
+     node filled a panel nobody could see. */
+  .fpanel.open { display: block; }
   #chat-panel { display: none; flex-direction: column; width: 380px; padding: 0; overflow: hidden; }
   #chat-panel.open { display: flex; }
   #chat-panel .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -287,11 +291,22 @@
   .agg-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 10px 0; font-size: 11px; }
   .agg-facts dt { color: var(--text-dim, #9a978f); }
   .agg-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .agg-actions button {
+  /* The wiki link sits in this row and must read as one of the actions, not as
+     a stray underlined hyperlink wedged between buttons. */
+  .agg-actions button, .agg-actions a {
     background: transparent; border: 1px solid var(--line, #262624); color: var(--text, #f2f2ee);
     font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+    text-decoration: none; display: inline-flex; align-items: center; line-height: 1.4;
   }
-  .agg-actions button:hover { border-color: var(--accent, #ffc600); color: var(--accent, #ffc600); }
+  .agg-actions button:hover, .agg-actions a:hover { border-color: var(--accent, #ffc600); color: var(--accent, #ffc600); }
+  /* Relation rows in the inspector. Without these the name and the edge
+     metadata are two bare inline spans, so they run together: "src/bigbang.rs"
+     followed immediately by "imports". */
+  .callrow { display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; border-radius: 6px; cursor: pointer; }
+  .callrow:hover { background: var(--bg-2, #1c1c1c); }
+  .callrow .cname { color: var(--text-secondary, #c9c6bf); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .callrow:hover .cname { color: var(--text-primary, #f2f2ee); }
+  .callrow .cfile { color: var(--text-dim, #9a978f); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fm-missing { padding: 28px; color: var(--text-dim, #9a978f); line-height: 1.7; }
   .fm-missing code { color: var(--accent, #ffc600); }
   .tk-k { color: #c792ea; }
@@ -477,6 +492,14 @@ const EDGE_COLOR = "#33332f";
 /// is opaque so an edge running underneath cannot bleed through the name.
 const HOVER_PLATE = "#1c1c1c";
 const HOVER_PLATE_BORDER = "#3a3a36";
+/// A node drawn smaller than this carries no readable shape, so the kind
+/// outline is skipped rather than drawn around something invisible. The upper
+/// bound matters more: sigma keeps its circles small as the camera dives in,
+/// while `scaleSize` keeps growing, so an unclamped outline balloons past the
+/// node it describes and neighbouring outlines overlap into a rosette that
+/// reads as a rendering fault.
+const MIN_SHAPE_RADIUS = 2.5;
+const MAX_SHAPE_RADIUS = 16;
 const EDGE_HL = "#ffc600";
 
 const DEFAULT_SETTINGS = { repulsion: 8, gravity: 6, cluster: 8, nodeScale: 1, labelDensity: 4, edgeOpacity: 0.3, liveSim: false };
@@ -1440,7 +1463,13 @@ function renderScene(spec) {
     scene.mergeNodeAttributes(key, { x: point.x, y: point.y });
   }
 
-  if (renderer) renderer.kill();
+  if (renderer) {
+    // Kill the old renderer before dropping the overlay: a frame that lands
+    // between the two would draw the old scene onto the new canvas.
+    renderer.removeAllListeners();
+    renderer.kill();
+  }
+  discardOverlay();
   renderer = new Sigma(scene, document.getElementById("view"), {
     // A mode switch or a modal can hide this container; that is a normal
     // state here, not a misconfiguration.
@@ -1547,6 +1576,15 @@ function ensureOverlay() {
   return overlayCanvas;
 }
 
+/// Drops the overlay so the next scene starts on a blank one. A canvas that
+/// outlives the renderer that drew it keeps painting whatever the last frame
+/// left there: rings around nodes that have since moved or stopped existing,
+/// which read as debris in the middle of the graph.
+function discardOverlay() {
+  if (overlayCanvas && overlayCanvas.isConnected) overlayCanvas.remove();
+  overlayCanvas = null;
+}
+
 function drawShape(context, shape, x, y, radius) {
   context.beginPath();
   if (shape === "square") {
@@ -1586,9 +1624,14 @@ function drawGrammar() {
     canvas.style.height = `${host.offsetHeight}px`;
   }
   const context = canvas.getContext("2d");
+  // Clear the whole backing store in device pixels, with no transform in
+  // effect. Clearing in CSS pixels under a scaled transform only covers the
+  // canvas while the transform and the backing size agree; when they drift the
+  // uncleared band keeps every ring drawn into it and the leftovers stack up
+  // into a rosette.
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
   context.setTransform(scale, 0, 0, scale, 0, 0);
-  context.clearRect(0, 0, host.offsetWidth, host.offsetHeight);
-  const ratio = renderer.getCamera().getState().ratio;
 
   context.lineWidth = 1;
   for (const key of scene.edges()) {
@@ -1622,10 +1665,17 @@ function drawGrammar() {
     if (reduced.hidden) continue;
     const display = renderer.getNodeDisplayData(key);
     if (!display) continue;
+    // The ring has to hug the circle sigma actually drew. It used to be
+    // floored at a fixed radius, so a node too small to see still got a full
+    // sized outline: a stray diamond floating in open space, with nothing
+    // inside it and nothing to click, because sigma's hit area is the real
+    // node. Below a couple of pixels the shape carries no information anyway,
+    // so it is not drawn.
+    const drawn = renderer.scaleSize(display.size);
+    if (drawn < MIN_SHAPE_RADIUS) continue;
     const point = renderer.graphToViewport(display);
-    const radius = Math.max(3, (display.size / ratio) * 0.6) + 3;
     context.strokeStyle = reduced.color || attributes.color;
-    drawShape(context, shape, point.x, point.y, radius);
+    drawShape(context, shape, point.x, point.y, Math.min(drawn, MAX_SHAPE_RADIUS) + 2.5);
   }
 }
 
@@ -2491,7 +2541,7 @@ function inspectNode(node, attributes) {
       <button data-act="path-to">Path to</button>
       <button data-act="pin">${State.pins.has(node.id) ? "Unpin" : "Pin"}</button>
       <button data-act="source">Open source</button>
-      <a class="hbtn" href="wiki/${wikiSlug(node.file)}.html">wiki</a>
+      <a href="wiki/${wikiSlug(node.file)}.html">wiki</a>
     </div>
     ${relationRows(callers, "Incoming")}
     ${relationRows(callees, "Outgoing")}
