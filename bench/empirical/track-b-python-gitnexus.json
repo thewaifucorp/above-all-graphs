@@ -1,0 +1,39 @@
+{
+  "track": "B: engine extraction (entities, Python only)",
+  "oracle": "CPython ast",
+  "repository": "gitnexus",
+  "revision": "ba5de0bde4069e36460b17b74b54315290bd081e",
+  "python_files_tracked": 162,
+  "python_files_measured": 162,
+  "python_files_unparsable_by_oracle": 0,
+  "functions": {
+    "truth": 379,
+    "found": 379,
+    "true_positives": 379,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "classes": {
+    "truth": 107,
+    "found": 107,
+    "true_positives": 107,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "all_entities": {
+    "truth": 486,
+    "found": 486,
+    "true_positives": 486,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  }
+}

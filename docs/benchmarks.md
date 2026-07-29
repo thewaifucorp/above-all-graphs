@@ -67,12 +67,45 @@ other metric.
 at 196 MB — the difference is that the gitnexus run also built the export,
 which holds the whole graph payload in memory. The flutter run skipped it.
 
+## Track B, one slice: Python entity extraction
+
+Entity precision and recall against an **independent oracle** — CPython's own
+`ast` module, written by someone else, for another purpose, and the definition
+of what a Python function or class is. No ground truth was authored here, which
+is the point: ground truth written by whoever wrote the extractor proves
+nothing.
+
+```bash
+aag bigbang --path <repo> --no-viz --no-install
+python3 scripts/track_b_python.py <repo> <repo>/.aag/graph.db --json out.json
+```
+
+| repository | Python files | functions P / R | classes P / R | all entities P / R |
+|---|--:|---|---|---|
+| gitnexus `ba5de0bd` | 162 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 (486) |
+| flutter `00b0c91f` | 104 | 1.000 / 0.996 | 1.000 / 1.000 | 1.000 / 0.996 (545) |
+
+Records: `bench/empirical/track-b-python-*.json`.
+
+**Both misses are one behavior, not noise.** flutter's two missing functions are
+`main` in `.../fuchsia/flutter/build/asset_package.py` and
+`.../build/gen_debug_wrapper_main.py`. `engine/src/flutter/.gitignore` contains
+`*/**/build/`; git tracks those files anyway, because ignore rules do not apply
+to files already tracked, while the engine's walker honors the ignore rule and
+skips them. Precision is 1.000 on both corpora: the engine invented nothing.
+
+This is a slice of Track B, not Track B. It covers entities in one language.
+Relationship precision and recall by type, resolution ambiguity, contract
+matching, impact false positives, and affected-test accuracy all still need
+ground truth nobody here can supply without authoring the answers to their own
+exam.
+
 ## What this harness does not measure
 
 | Track | Status |
 |---|---|
 | A — protocol conformance | not implemented here; the protocol is a separate subject |
-| B — engine extraction quality | needs independently authored ground truth; not claimed |
+| B — engine extraction quality | partially measured: Python entities against CPython's `ast`, above. Relationships, ambiguity, contracts, and impact accuracy are not claimed |
 | C — agent utility | needs a consumer model and a factorial design; no model is called |
 | D — end-to-end economics | needs C; no token or call cost is measured |
 | E — scale and operations | this harness |

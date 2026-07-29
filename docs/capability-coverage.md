@@ -79,7 +79,7 @@ P2 gates expand reach after the core is measurable and dependable.
 
 ### P0 — correctness and product credibility
 
-- 1. **Open — Track E delivered, B/C/D outstanding.** The harness exists
+- 1. **Open — Track E delivered, a slice of B measured, C/D outstanding.** The harness exists
    (`src/bench.rs`, `aag bench`) and enforces three of the contract's rules in
    code rather than in prose: `empirical`, `pilot`, and `simulated` are written
    to separate immutable paths and never averaged together; a run against this
@@ -96,8 +96,17 @@ P2 gates expand reach after the core is measurable and dependable.
    rather than rounded off: incremental update scales with total graph size
    (26 ms at 57 files, 95 s at 15 361), and export size scales with edges
    (458 MB from a 1836-file repository with 98 437 edges).
+   One slice of Track B is measured with an **independent oracle** rather than
+   with authored ground truth: `scripts/track_b_python.py` compares extracted
+   Python entities against CPython's own `ast`. Entity precision is 1.000 on
+   both external corpora, recall 1.000 on gitnexus (486 entities) and 0.996 on
+   flutter (545) — and the entire recall gap is two files that git tracks while
+   `engine/src/flutter/.gitignore` ignores, which the walker honors and git does
+   not. The engine invented nothing on either corpus.
    What is **not** delivered, and why the gate stays open: Track A needs the
-   protocol as a separate subject; Track B needs ground truth authored
+   protocol as a separate subject; the rest of Track B — relationship precision
+   and recall by type, resolution ambiguity, contract matching, impact false
+   positives, affected-test accuracy — needs ground truth authored
    independently of the extractor, which cannot be produced by the same session
    that wrote the extractor without leaking answers; Tracks C and D need a
    consumer model, a factorial producer × consumer design, and token and call
