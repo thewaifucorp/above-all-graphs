@@ -17,3 +17,22 @@ nohup.out
 
 # Python bytecode from the benchmark scripts
 __pycache__/
+# aag:ignore:start
+# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.
+.aag/
+.aag.lock
+.claude/settings.json
+.claude/skills/aag-*/
+.agents/skills/aag-*/
+.cursor/mcp.json
+.cursor/hooks.json
+.cursor/rules/aag.mdc
+.gemini/settings.json
+.kiro/settings/mcp.json
+.kiro/steering/aag.md
+.roo/mcp.json
+.roo/rules/aag.md
+.vscode/mcp.json
+.zed/settings.json
+opencode.json
+# aag:ignore:end

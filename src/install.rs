@@ -89,6 +89,44 @@ const TOML_FENCE_END: &str = "# aag:end";
 const GITIGNORE_FENCE_START: &str = "# aag:ignore:start";
 const GITIGNORE_FENCE_END: &str = "# aag:ignore:end";
 
+/// Every path this installer writes in full, and therefore every path a
+/// repository should not be asked to version.
+///
+/// The rule is the installer's own output: if `install` creates the file, git
+/// should not see it. Two deliberate exceptions stay out of this list.
+/// `.mcp.json` is versioned on purpose — teams share the server definition. And
+/// the markdown context files (`AGENTS.md`, `GEMINI.md`,
+/// `.github/copilot-instructions.md`) only receive a fenced section inside a
+/// document the repository usually authors itself; ignoring the whole file
+/// would hide the author's own writing, and ignoring an already-tracked file
+/// does nothing anyway.
+const IGNORED_ARTIFACTS: [&str; 16] = [
+    ".aag/",
+    ".aag.lock",
+    ".claude/settings.json",
+    ".claude/skills/aag-*/",
+    ".agents/skills/aag-*/",
+    ".cursor/mcp.json",
+    ".cursor/hooks.json",
+    ".cursor/rules/aag.mdc",
+    ".gemini/settings.json",
+    ".kiro/settings/mcp.json",
+    ".kiro/steering/aag.md",
+    ".roo/mcp.json",
+    ".roo/rules/aag.md",
+    ".vscode/mcp.json",
+    ".zed/settings.json",
+    "opencode.json",
+];
+
+/// The fenced block as it should read, for comparison as well as for writing.
+fn gitignore_block() -> String {
+    format!(
+        "{GITIGNORE_FENCE_START}\n# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.\n{}\n{GITIGNORE_FENCE_END}\n",
+        IGNORED_ARTIFACTS.join("\n")
+    )
+}
+
 /// What one `install` run did — used for logging and tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct InstallSummary {
@@ -832,13 +870,26 @@ fn upsert_gitignore(path: &Path) -> Result<bool> {
             });
         }
     };
-    if existing.contains(GITIGNORE_FENCE_START) {
-        return Ok(false);
+    let block = gitignore_block();
+    // An existing block is brought up to date rather than left alone. The list
+    // grows as `install` learns new agents, and a repository that installed
+    // once would otherwise be asked forever to version the artifacts added
+    // since — which is how `.vscode/mcp.json` and `.zed/settings.json` ended up
+    // in front of a reader as untracked files.
+    if let Some(cleaned) = strip_fenced(&existing, GITIGNORE_FENCE_START, GITIGNORE_FENCE_END) {
+        let wanted = format!("{}\n{block}", cleaned.trim_end());
+        if existing == wanted {
+            return Ok(false);
+        }
+        write_text(path, &wanted)?;
+        return Ok(true);
     }
-    let section = format!(
-        "\n{GITIGNORE_FENCE_START}\n# Local AAG graph and agent-integration artifacts. Keep .mcp.json versioned.\n.aag/\n.aag.lock\n.claude/settings.json\n.claude/skills/aag-*/\n.agents/skills/aag-*/\n.cursor/mcp.json\n.cursor/hooks.json\n.cursor/rules/aag.mdc\n.gemini/settings.json\n.kiro/settings/mcp.json\n.kiro/steering/aag.md\nopencode.json\n{GITIGNORE_FENCE_END}\n"
-    );
-    write_text(path, &(existing + &section))?;
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    write_text(path, &format!("{existing}{separator}\n{block}"))?;
     Ok(true)
 }
 
@@ -1075,6 +1126,57 @@ mod tests {
         assert!(!root.join(".mcp.json").exists());
         assert!(!root.join("AGENTS.md").exists());
         assert!(root.join(".gitignore").is_file());
+    }
+
+    #[test]
+    fn every_generated_artifact_is_ignored() {
+        // The list and the writers have to stay in step: an agent added to
+        // `install` without an entry here leaves its config in front of the
+        // reader as an untracked file.
+        let (root, home) = scratch();
+        install(&root, &home, false);
+        let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        for artifact in IGNORED_ARTIFACTS {
+            assert!(
+                gitignore.lines().any(|line| line == artifact),
+                "{artifact} is written by install but not ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn an_older_block_is_brought_up_to_date() {
+        // What a repository that installed an earlier version has on disk: the
+        // fence, with fewer entries inside it.
+        let (root, home) = scratch();
+        fs::write(
+            root.join(".gitignore"),
+            format!("dist/\n\n{GITIGNORE_FENCE_START}\n.aag/\n{GITIGNORE_FENCE_END}\n"),
+        )
+        .unwrap();
+
+        install(&root, &home, false);
+
+        let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(
+            gitignore.contains("dist/"),
+            "user entries survive: {gitignore}"
+        );
+        assert!(gitignore.contains(".vscode/mcp.json"), "{gitignore}");
+        assert!(gitignore.contains(".zed/settings.json"), "{gitignore}");
+        assert_eq!(gitignore.matches(GITIGNORE_FENCE_START).count(), 1);
+    }
+
+    #[test]
+    fn a_context_document_is_never_ignored_wholesale() {
+        // `install` only appends a fenced section to these, so ignoring the file
+        // would hide whatever the repository wrote in it.
+        for document in ["AGENTS.md", "GEMINI.md", ".github/copilot-instructions.md"] {
+            assert!(
+                !IGNORED_ARTIFACTS.contains(&document),
+                "{document} carries repository-authored content"
+            );
+        }
     }
 
     #[test]
