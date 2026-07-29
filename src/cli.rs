@@ -130,6 +130,139 @@ pub enum Command {
         path: PathBuf,
     },
 
+    /// Show statement-level control and data flow for one file: basic blocks,
+    /// CFG edges, def-use chains, and what guards each block.
+    Flow {
+        /// File to analyze.
+        file: PathBuf,
+        /// Only this function.
+        #[arg(long, default_value = "")]
+        function: String,
+    },
+
+    /// Show the program dependence graph for a file: which lines depend on
+    /// which, by control or by data.
+    Pdg {
+        /// File to analyze.
+        file: PathBuf,
+        /// Only what this line depends on, transitively.
+        #[arg(long)]
+        line: Option<u32>,
+    },
+
+    /// Show source-to-sink flows in a file, following values across calls.
+    /// Syntactic — each finding is a place to look, not a proven vulnerability.
+    Taint {
+        /// File to analyze.
+        file: PathBuf,
+        /// How many call hops to follow out of the file. 0 stays inside it.
+        #[arg(long, default_value_t = 2)]
+        depth: u32,
+    },
+
+    /// Run a read-only pattern query over the graph, in a documented subset of
+    /// Cypher. See `docs/query.md` for the grammar the parser accepts.
+    Cypher {
+        /// The query, e.g. `MATCH (f:Function)-[:CALLS*1..3]->(g) RETURN f.name, g.name`.
+        query: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Print JSON rows instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Route, RPC, and tool intelligence: what this repository serves, what
+    /// serves it, and who consumes it.
+    Api {
+        /// Which view to print.
+        #[command(subcommand)]
+        command: ApiView,
+    },
+
+    /// Measure the engine on a repository (Track E of the evaluation
+    /// contract) and append an immutable run record.
+    Bench {
+        /// Repository to measure. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+
+        /// Evidence class: `empirical`, `pilot`, or `simulated`. A run
+        /// against this engine's own repository is recorded as `pilot`
+        /// whatever is asked for.
+        #[arg(long, default_value = "empirical")]
+        run_kind: String,
+
+        /// How many times each measurement repeats.
+        #[arg(long, default_value_t = 3)]
+        repetitions: usize,
+
+        /// Where run records are appended.
+        #[arg(long, default_value = "bench")]
+        out: PathBuf,
+
+        /// Print the recorded runs of this class as a table instead of
+        /// measuring anything.
+        #[arg(long)]
+        report: bool,
+
+        /// Skip the export measurement — the site for a very large repository
+        /// can be hundreds of megabytes.
+        #[arg(long)]
+        skip_export: bool,
+    },
+
+    /// Compare two graph states: the workspace, a branch, a commit, or a
+    /// pull request's head. Each ref is indexed once into `.aag/refs/`,
+    /// through a detached worktree that never touches your checkout.
+    GraphDiff {
+        /// Earlier state: `workspace`, a git ref, or `pr/<number>`.
+        #[arg(default_value = "HEAD")]
+        before: String,
+
+        /// Later state: `workspace`, a git ref, or `pr/<number>`.
+        #[arg(default_value = "workspace")]
+        after: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// The repository's areas, as detected from the graph — the same
+    /// clustering the generated area skills are built from.
+    Areas {
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Pull requests, ranked by what the graph says they reach.
+    Pr {
+        /// Which pull-request view.
+        #[command(subcommand)]
+        command: PrView,
+    },
+
+    /// Live database catalogs: ingest one, and compare it with the DDL this
+    /// repository declares.
+    Db {
+        /// Which database operation.
+        #[command(subcommand)]
+        command: DbCommand,
+    },
+
+    /// Outcome-backed work memory: record what was asked and answered, how it
+    /// turned out, and review the lessons that repeat.
+    Memory {
+        /// Which memory operation.
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+
     /// Show detected architectural communities.
     Communities {
         /// Optional symbol-name filter.
@@ -178,9 +311,28 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         port: u16,
 
-        /// Optional bearer token required by the HTTP transport.
+        /// Optional bearer token required by the HTTP transport. Required when
+        /// `--bind` is not loopback.
         #[arg(long, env = "AAG_MCP_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+
+        /// Address the HTTP transport binds. Anything but loopback needs
+        /// `--api-key`.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+
+        /// Serve every HTTP request on its own, with no session tracking — for
+        /// running behind a load balancer that will not pin a client.
+        #[arg(long)]
+        stateless: bool,
+
+        /// Largest HTTP request body accepted, in bytes.
+        #[arg(long, default_value_t = 1_048_576)]
+        max_body: usize,
+
+        /// HTTP requests one client may make per minute.
+        #[arg(long, default_value_t = 600)]
+        rate_limit: u32,
     },
 
     /// Record the host agent's vision-pass description of a doc/image, and
@@ -271,6 +423,14 @@ pub enum GroupCommand {
         /// Optional group; omitted lists group definitions.
         name: Option<String>,
     },
+    /// Cross-repository protocol links: API producer to client, package export
+    /// to import, event producer to consumer, schema to model, tool definition
+    /// to invocation. Graphs stay separate.
+    Links {
+        /// Group name, or `all` for every registered workspace.
+        #[arg(default_value = "all")]
+        name: String,
+    },
     /// Query one group and all of its descendants.
     Query {
         /// Group name.
@@ -315,6 +475,219 @@ pub enum HookEvent {
     /// `SessionStart` — reconcile the index and inject a graph digest.
     SessionStart {
         /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Work-memory operations.
+#[derive(Subcommand, Debug, Clone)]
+pub enum MemoryCommand {
+    /// Record a question, its answer, and the symbols it rested on.
+    Save {
+        /// What was asked.
+        #[arg(long)]
+        question: String,
+
+        /// What was answered.
+        #[arg(long)]
+        answer: String,
+
+        /// Comma-separated symbols the answer rested on.
+        #[arg(long, default_value = "")]
+        nodes: String,
+
+        /// How it turned out: `worked`, `wrong`, or `open`.
+        #[arg(long, default_value = "open")]
+        outcome: String,
+
+        /// What replaced a wrong answer.
+        #[arg(long)]
+        correction: Option<String>,
+
+        /// The commit the work landed in.
+        #[arg(long)]
+        revision: Option<String>,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Record how an earlier answer turned out.
+    Correct {
+        /// Entry id, as printed by `save` and `recall`.
+        id: i64,
+
+        /// `worked`, `wrong`, or `open`.
+        #[arg(long, default_value = "wrong")]
+        outcome: String,
+
+        /// What replaced it.
+        #[arg(long)]
+        correction: Option<String>,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Recall entries relevant to a question, checked against the current graph.
+    Recall {
+        /// The question to match.
+        question: String,
+
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Review the lessons that repeated outcomes suggest.
+    Lessons {
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Which pull-request view to print.
+#[derive(Subcommand, Debug, Clone)]
+pub enum PrView {
+    /// Every open pull request, highest risk first, with the rules that
+    /// produced each score and the overlaps between them.
+    Dashboard {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Open pull requests that share a file or a symbol.
+    Conflicts {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Local git worktrees, mapped to the pull request on each branch.
+    Worktrees {
+        /// Only pull requests against this base branch.
+        #[arg(long, default_value = "")]
+        base: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// One pull request's blast radius, risk score, and reasons, as JSON.
+    Impact {
+        /// Pull request number.
+        number: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Live database catalog operations.
+#[derive(Subcommand, Debug, Clone)]
+pub enum DbCommand {
+    /// Read a live `PostgreSQL` catalog into the graph: schemas, tables, views,
+    /// columns, constraints, indexes, and foreign keys.
+    ///
+    /// The connection string is used to connect and then dropped. Nodes are
+    /// filed under `postgres/<database>/<schema>`, which carries no host, user,
+    /// or password.
+    Scan {
+        /// `PostgreSQL` connection string. Defaults to `AAG_DATABASE_URL`, then
+        /// `DATABASE_URL`.
+        #[arg(long, default_value = "", env = "AAG_DATABASE_URL")]
+        url: String,
+
+        /// Repository root whose graph receives the catalog.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Compare the tables this repository's DDL declares with the ones an
+    /// ingested catalog actually has.
+    Drift {
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// Which slice of the API surface to print.
+#[derive(Subcommand, Debug, Clone)]
+pub enum ApiView {
+    /// Every HTTP endpoint, declared and observed, with handler and consumers.
+    Routes {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Every RPC/MCP tool this repository exposes, with its handler.
+    Tools {
+        /// Only tools whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Emit an `OpenAPI` 3.1 document for the routes this repository serves.
+    Spec {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Also include endpoints a contract declares but no code serves.
+        #[arg(long)]
+        include_declared: bool,
+
+        /// Write to this file instead of standard output.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
+    /// Compare declared response shapes with what the handlers return.
+    Shapes {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Who is on the other side of one endpoint, tool, or path.
+    Impact {
+        /// Endpoint name (`GET /pets`), tool name (`TOOL explore`), or path.
+        target: String,
+
+        /// Repository root to query. Defaults to the current directory.
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },

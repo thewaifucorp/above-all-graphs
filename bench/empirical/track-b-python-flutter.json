@@ -1,0 +1,49 @@
+{
+  "track": "B: engine extraction (entities and calls, Python only)",
+  "oracle": "CPython ast",
+  "repository": "flutter",
+  "revision": "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694",
+  "python_files_tracked": 104,
+  "python_files_measured": 104,
+  "python_files_unparsable_by_oracle": 0,
+  "functions": {
+    "truth": 519,
+    "found": 517,
+    "true_positives": 517,
+    "false_positives": 0,
+    "false_negatives": 2,
+    "precision": 1.0,
+    "recall": 0.9961,
+    "f1": 0.9981
+  },
+  "classes": {
+    "truth": 26,
+    "found": 26,
+    "true_positives": 26,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "all_entities": {
+    "truth": 545,
+    "found": 543,
+    "true_positives": 543,
+    "false_positives": 0,
+    "false_negatives": 2,
+    "precision": 1.0,
+    "recall": 0.9963,
+    "f1": 0.9982
+  },
+  "calls": {
+    "truth": 620,
+    "found": 622,
+    "true_positives": 614,
+    "false_positives": 8,
+    "false_negatives": 6,
+    "precision": 0.9871,
+    "recall": 0.9903,
+    "f1": 0.9887
+  }
+}

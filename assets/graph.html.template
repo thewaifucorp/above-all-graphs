@@ -21,9 +21,16 @@
     --red:            #c1121f;
     --red-bright:     #da3610;
     --mono:           "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    /* Prose, labels and numbers read better in a text face; identifiers and
+       source stay monospaced, where alignment carries meaning. */
+    --sans:           system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --spectrum:       linear-gradient(90deg, #ff3b3b, #ffcf3b, #3bff6e, #3bd8ff, #7a3bff);
   }
-  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--mono); overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--sans); overflow: hidden; font-variant-numeric: tabular-nums; }
+  /* Anything that names a symbol, a path, or a relation keeps the monospaced
+     face: those are identifiers, not prose. */
+  #tree .leaf .name, #tree .tdir .name, #legend .name, .callrow .cname, .callrow .cfile,
+  #panel dd, #panel code, #repo-pill, .agg-facts, #mode-controls input, #search { font-family: var(--mono); }
 
   /* ---- header ---- */
   #header { position: fixed; top: 0; left: 0; right: 0; height: 46px; box-sizing: border-box; background: var(--bg-1); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 12px; z-index: 20; font-size: 12px; color: var(--text-secondary); }
@@ -31,16 +38,17 @@
   #brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text-primary); }
   #brand .word { font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
   #brand .sub { color: var(--text-dim); font-size: 9px; margin-top: 1px; display: block; line-height: 1; white-space: nowrap; }
-  #repo-pill { background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-secondary); white-space: nowrap; }
+  #brand { flex: none; }
+  #repo-pill { flex: none; background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-secondary); white-space: nowrap; }
   #repo-pill b { color: var(--text-primary); font-weight: 600; }
   /* Anchored to the true screen center (not flex-centered): siblings come
      and go — brand hides when embedded — and the search bar must not
      drift with them. */
-  #search-wrap { position: absolute; left: 50%; transform: translateX(-50%); width: min(420px, 36vw); }
-  #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 8px; width: 100%; font-size: 13px; outline: none; box-sizing: border-box; }
+  #search-wrap { flex: 1 1 200px; min-width: 120px; max-width: 420px; margin: 0 4px; }
+  #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 12px; border-radius: 8px; width: 100%; font-size: 12px; outline: none; box-sizing: border-box; }
   #search:focus { border-color: var(--accent); }
   #search::placeholder { color: var(--text-dim); }
-  #header .counts { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #header .counts { display: none; }
   #header .counts b { color: var(--text-primary); font-weight: 600; }
   #header button, #header a.hbtn { background: none; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 8px; height: 28px; cursor: pointer; font-size: 12px; padding: 0 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: color 0.12s, border-color 0.12s; }
   #header button:hover, #header a.hbtn:hover { color: var(--text-primary); border-color: var(--border-bright); }
@@ -82,7 +90,9 @@
   #sidebar .tabs button { flex: 1; background: none; border: none; color: var(--text-secondary); padding: 9px 0; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; }
   #sidebar .tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
   #sidebar .tab-body { flex: 1; overflow-y: auto; padding: 8px; }
-  #tab-filters { display: none; }
+  /* Which tab body shows is decided by `.tab-body.on` further down. An id rule
+     hiding one of them outranks that class rule, which is why the Filters tab
+     could be selected and still render nothing. */
   /* explorer tree */
   #tree details { margin-left: 0; }
   #tree details details { margin-left: 12px; }
@@ -94,6 +104,19 @@
   #tree .leaf:hover { background: var(--bg-2); color: var(--text-primary); }
   #tree .leaf.active { background: var(--accent-dim); color: var(--text-primary); }
   #tree .leaf .ic { color: var(--text-dim); margin-right: 5px; }
+  /* directory grouping: one row per directory, files nested under it */
+  #tree .tgroup { margin-bottom: 2px; }
+  #tree .tdir { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; color: var(--text-primary); cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; }
+  #tree .tdir:hover { background: var(--bg-2); }
+  #tree .tdir .caret { display: inline-block; width: 10px; color: var(--text-dim); transition: transform 0.1s; }
+  #tree .tgroup.open > .tdir .caret { transform: rotate(90deg); }
+  #tree .tdir .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  #tree .tdir .n, #tree .leaf .n { color: var(--text-dim); font-size: 10px; }
+  #tree .tfiles { display: none; }
+  #tree .tgroup.open > .tfiles { display: block; }
+  #tree .leaf { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  #tree .treetog { float: right; background: none; border: 0; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 10px; text-decoration: underline; }
+  #tree .treetog:hover { color: var(--text-primary); }
   /* filters */
   .fgroup { margin-bottom: 14px; }
   .fgroup h4 { margin: 6px 6px 6px; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
@@ -109,16 +132,22 @@
   .fgroup .mod .n { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
   /* ---- status bar ---- */
-  #statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; box-sizing: border-box; background: var(--bg-1); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 12px; z-index: 20; font-size: 11px; color: var(--text-dim); }
-  #statusbar .ready { color: #3bff6e; }
-  #statusbar .right { margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* One line, always: the hints wrap and shove the bar over the canvas
+     otherwise, and a proportional face fits fewer characters per pixel than the
+     monospaced one this was measured with. */
+  #statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; box-sizing: border-box; background: var(--bg-1); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 12px; z-index: 20; font-size: 10.5px; color: var(--text-dim); overflow: hidden; white-space: nowrap; }
+  #statusbar > span { overflow: hidden; text-overflow: ellipsis; }
+  /* Only the hint text is allowed to shrink; the state light and the counts are
+     the parts a reader looks for. */
+  #statusbar .ready { color: #3bff6e; flex: none; }
+  #statusbar .right { margin-left: auto; font-variant-numeric: tabular-nums; flex: none; }
 
   /* ---- graph container (sigma renders its own canvases inside) ---- */
   #view { position: fixed; top: 46px; bottom: 24px; left: 250px; right: 0; }
   body.sidebar-closed #view { left: 0; }
 
   /* ---- progress ---- */
-  #progress { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 30; background: var(--bg-0); flex-direction: column; gap: 14px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.03em; }
+  #progress { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 30; background: var(--bg-0); flex-direction: column; gap: 14px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.03em; }
   #progress .bar { width: 240px; height: 3px; background: var(--bg-2); border-radius: 2px; overflow: hidden; }
   #progress .bar i { display: block; height: 100%; width: 0; background: var(--spectrum); border-radius: 2px; transition: width 0.1s; }
 
@@ -146,6 +175,10 @@
   #settings-panel button { width: 100%; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-primary); padding: 7px; border-radius: 8px; cursor: pointer; margin-top: 4px; }
   #settings-panel button:hover { border-color: var(--accent); }
   /* chat */
+  /* Every floating panel hides by default and shows through `.open`. The
+     inspector had the class toggled on it but no rule to match, so clicking a
+     node filled a panel nobody could see. */
+  .fpanel.open { display: block; }
   #chat-panel { display: none; flex-direction: column; width: 380px; padding: 0; overflow: hidden; }
   #chat-panel.open { display: flex; }
   #chat-panel .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -193,6 +226,112 @@
   #filemodal .fm-line.hl { background: var(--accent-dim); }
   #filemodal .fm-no { width: 48px; text-align: right; padding-right: 12px; color: var(--text-dim); user-select: none; flex-shrink: 0; }
   #filemodal .fm-code { white-space: pre; padding-right: 16px; color: #c4c9d4; }
+  #modes { display: flex; gap: 2px; margin-left: 6px; flex: none; }
+  #modes button {
+    background: transparent; border: 1px solid var(--line, #262624); color: var(--text-dim, #9a978f);
+    font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 3px;
+  }
+  #modes button[aria-selected="true"] { background: var(--accent, #ffc600); border-color: var(--accent, #ffc600); color: #0a0a0a; }
+  #modes button:focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
+  body[data-mode="overview"] #view { right: 268px; }
+  #grammar-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+  #empty-state {
+    position: absolute; inset: 44px 0 22px 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim, #9a978f); font-size: 12px; text-align: center; padding: 0 18%; z-index: 4;
+    pointer-events: none;
+  }
+  #empty-state[hidden] { display: none; }
+  #mode-controls { display: flex; gap: 8px; margin-left: 6px; align-items: center; flex: none; }
+  #mode-controls[hidden] { display: none; }
+  #mode-controls label { display: flex; gap: 4px; align-items: center; font-size: 10px; color: var(--text-dim, #9a978f); letter-spacing: .04em; }
+  #mode-controls input {
+    background: var(--bg-2, #1a1a18); border: 1px solid var(--line, #262624); color: var(--text, #f2f2ee);
+    font: inherit; font-size: 11px; padding: 2px 5px; border-radius: 3px; width: 4.5em;
+  }
+  #mode-controls input[type="text"] { width: 10em; }
+  #mode-controls button { background: var(--bg-2, #1b1b1b); color: var(--text-secondary, #c9c6bf); border: 1px solid var(--border, #2a2a2a); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+  #mode-controls button:hover { color: var(--text-primary, #f2f2ee); border-color: var(--accent, #ffc600); }
+  #mode-controls .ctl-note { font-size: 10px; color: var(--text-dim, #9a978f); }
+  #palette {
+    position: fixed; left: 50%; top: 14vh; transform: translateX(-50%); width: min(620px, 92vw); z-index: 60;
+    background: var(--bg-1, #121212); border: 1px solid var(--line, #262624); border-radius: 5px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.6); overflow: hidden;
+  }
+  #palette[hidden] { display: none; }
+  #palette-input {
+    width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line, #262624);
+    color: var(--text, #f2f2ee); font: inherit; font-size: 13px; padding: 11px 13px; outline: none;
+  }
+  #palette-list { max-height: 46vh; overflow: auto; }
+  #palette .prow { display: flex; gap: 10px; padding: 6px 13px; cursor: pointer; font-size: 11px; align-items: baseline; }
+  #palette .prow .name { flex: none; }
+  #palette .prow .hint { color: var(--text-dim, #9a978f); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #palette .prow.on { background: var(--bg-2, #1a1a18); }
+  #palette .prow.on .name { color: var(--accent, #ffc600); }
+  #tree .leaf { display: flex; gap: 8px; padding: 2px 0; cursor: pointer; font-size: 11px; }
+  #tree .leaf .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  #tree .leaf .n { color: var(--text-dim, #9a978f); }
+  #tree .leaf:hover .name, #tree .leaf.active .name { color: var(--accent, #ffc600); }
+  .tab-body { display: none; }
+  .tab-body.on { display: block; }
+  :focus-visible { outline: 2px solid var(--accent, #ffc600); outline-offset: 2px; }
+  /* `#header a.hbtn` is (1,1,1), so an id-only selector loses to it. */
+  @media (max-width: 1560px) {
+    #header #star-btn, #header #waifu-btn { display: none; }
+    #mode-controls input[type="text"] { width: 7em; }
+  }
+  @media (max-width: 1100px) {
+    #header #chat-btn { display: none; }
+    #modes button { padding: 4px 7px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  #legend {
+    position: absolute; right: 12px; top: 56px; width: 240px; max-height: calc(100vh - 140px);
+    overflow: auto; background: var(--bg-1, #121212); border: 1px solid var(--line, #262624);
+    border-radius: 4px; padding: 10px 12px; font-size: 11px; z-index: 5;
+  }
+  #legend h4 { margin: 0 0 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim, #9a978f); }
+  #legend .row { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; }
+  #legend .row:hover .name { color: var(--accent, #ffc600); }
+  #legend .row.on .name { color: var(--accent, #ffc600); }
+  /* Size and saturation are the channel that separates a file from a method, so
+     the legend has to show the scale, not just the hues. */
+  #legend-tiers { display: flex; gap: 12px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-dim); }
+  #legend-tiers span { display: inline-flex; align-items: center; gap: 5px; }
+  #legend-tiers .swatch { border-radius: 50%; background: var(--text-secondary); display: inline-block; }
+  #legend-tiers .tier-file { width: 11px; height: 11px; opacity: 1; }
+  #legend-tiers .tier-type { width: 7px; height: 7px; opacity: 0.72; }
+  #legend-tiers .tier-fn { width: 5px; height: 5px; opacity: 0.5; }
+  #legend .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  #legend .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #legend .n { color: var(--text-dim, #9a978f); }
+  #notice {
+    position: absolute; left: 50%; transform: translateX(-50%); top: 56px; z-index: 20;
+    background: var(--bg-1, #121212); border: 1px solid var(--accent, #ffc600);
+    color: var(--text, #f2f2ee); font-size: 11px; padding: 7px 12px; border-radius: 3px;
+    max-width: 60ch;
+  }
+  .agg-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 10px 0; font-size: 11px; }
+  .agg-facts dt { color: var(--text-dim, #9a978f); }
+  .agg-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  /* The wiki link sits in this row and must read as one of the actions, not as
+     a stray underlined hyperlink wedged between buttons. */
+  .agg-actions button, .agg-actions a {
+    background: transparent; border: 1px solid var(--line, #262624); color: var(--text, #f2f2ee);
+    font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 3px; cursor: pointer;
+    text-decoration: none; display: inline-flex; align-items: center; line-height: 1.4;
+  }
+  .agg-actions button:hover, .agg-actions a:hover { border-color: var(--accent, #ffc600); color: var(--accent, #ffc600); }
+  /* Relation rows in the inspector. Without these the name and the edge
+     metadata are two bare inline spans, so they run together: "src/bigbang.rs"
+     followed immediately by "imports". */
+  .callrow { display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; border-radius: 6px; cursor: pointer; }
+  .callrow:hover { background: var(--bg-2, #1c1c1c); }
+  .callrow .cname { color: var(--text-secondary, #c9c6bf); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .callrow:hover .cname { color: var(--text-primary, #f2f2ee); }
+  .callrow .cfile { color: var(--text-dim, #9a978f); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fm-missing { padding: 28px; color: var(--text-dim, #9a978f); line-height: 1.7; }
+  .fm-missing code { color: var(--accent, #ffc600); }
   .tk-k { color: #c792ea; }
   .tk-s { color: #8fd48f; }
   .tk-c { color: #5b6273; font-style: italic; }
@@ -213,6 +352,8 @@
     <span><span class="word">aag</span><span class="sub">above all graphs</span></span>
   </a>
   <span id="repo-pill"></span>
+  <div id="modes" role="tablist" aria-label="Graph mode"></div>
+  <div id="mode-controls" hidden></div>
   <div id="search-wrap"><input id="search" type="text" placeholder="Search nodes&hellip;"></div>
   <span class="counts"><b id="c-nodes"></b> nodes &middot; <b id="c-edges"></b> edges</span>
   <button id="sidebar-btn" title="Toggle sidebar">&#9707;</button>
@@ -226,19 +367,33 @@
 </div>
 
 <div id="sidebar">
-  <div class="tabs">
-    <button id="tab-btn-explorer" class="active">Explorer</button>
-    <button id="tab-btn-filters">Filters</button>
+  <div class="tabs" role="tablist">
+    <button id="tab-btn-explorer" class="active" role="tab" aria-selected="true">Files</button>
+    <button id="tab-btn-filters" role="tab" aria-selected="false">Filters</button>
   </div>
-  <div class="tab-body" id="tab-explorer"><div id="tree"></div></div>
+  <div class="tab-body on" id="tab-explorer"><div id="tree"></div></div>
   <div class="tab-body" id="tab-filters">
-    <div class="fgroup" id="f-kinds"><h4>Node kinds</h4></div>
-    <div class="fgroup" id="f-conf"><h4>Edge confidence</h4></div>
-    <div class="fgroup" id="f-modules"><h4>Modules</h4></div>
+    <div class="fgroup" id="f-kinds"></div>
+    <div class="fgroup" id="f-rels"></div>
+    <div class="fgroup" id="f-conf"></div>
   </div>
 </div>
 
 <div id="view"></div>
+<div id="empty-state" hidden></div>
+<div id="legend" hidden>
+  <h4>Modules</h4><div id="legend-list"></div>
+  <div id="legend-tiers">
+    <span><i class="swatch tier-file"></i>file</span>
+    <span><i class="swatch tier-type"></i>type</span>
+    <span><i class="swatch tier-fn"></i>function</span>
+  </div>
+</div>
+<div id="notice" role="status" aria-live="polite" hidden></div>
+<div id="palette" role="dialog" aria-label="Command palette" hidden>
+  <input id="palette-input" type="text" placeholder="Jump to a symbol, or run a command&hellip;" spellcheck="false" autocomplete="off">
+  <div id="palette-list"></div>
+</div>
 <div id="progress"><div>organizing graph&hellip;</div><div class="bar"><i id="progress-fill"></i></div></div>
 
 <div id="settings-panel" class="fpanel">
@@ -254,7 +409,7 @@
   <button id="s-reset">Reset to defaults</button>
 </div>
 
-<div id="panel" class="fpanel"></div>
+<div id="panel" class="fpanel" role="region" aria-label="Inspector" tabindex="-1"></div>
 
 <div id="chat-panel" class="fpanel">
   <div class="chat-head">
@@ -288,16 +443,73 @@
 
 <div id="statusbar">
   <span class="ready">&#9679; ready</span>
-  <span>drag nodes &middot; scroll to zoom &middot; click node for source &middot; esc clears</span>
+  <span>click a module to open it &middot; double-click a node for its source &middot; drag &middot; scroll to zoom &middot; esc clears</span>
   <span class="right" id="status-counts"></span>
 </div>
 
-<script>/*__D3_JS__*/</script>
 <script>/*__GRAPHOLOGY_JS__*/</script>
 <script>/*__SIGMA_JS__*/</script>
-<script>
-const DATA = /*__GRAPH_DATA__*/;
-const FILES = /*__FILES_DATA__*/;
+<script type="module">
+// A module, for one reason: the payloads below are gzipped when they are large,
+// and inflating needs `await`. Module scope is safe here — sigma and
+// graphology are loaded as classic scripts above and hang off `window`, and
+// nothing outside this block reads what it declares.
+const RAW_DATA = await hydrate(/*__GRAPH_DATA__*/);
+const RAW_FILES = await hydrate(/*__FILES_DATA__*/);
+const FILES = RAW_FILES.files || RAW_FILES;
+const FILES_OMITTED = RAW_FILES.omitted || 0;
+const DATA = decodePayload(RAW_DATA);
+
+/// Unwraps a payload the exporter compressed.
+///
+/// A page for a large repository carries megabytes of graph, and it has to stay
+/// one file that opens from `file://` — a browser will not fetch a sidecar next
+/// to a local file, which is why everything is inlined. Gzip keeps the single
+/// file and removes most of its weight; `DecompressionStream` is in every
+/// current browser and needs no library. A payload that was small enough to
+/// leave as plain JSON passes straight through.
+async function hydrate(payload) {
+  if (!payload || payload.format !== "gzip-base64-1") return payload;
+  if (typeof DecompressionStream !== "function") {
+    throw new Error(
+      "this page stores its graph compressed and this browser has no DecompressionStream; " +
+        "open it in a current browser, or read .aag/graph.json directly"
+    );
+  }
+  const binary = atob(payload.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+/// Expands the columnar page payload into the object shape the rest of this
+/// page works with. The payload is columnar because an edge as four integers
+/// in parallel arrays costs a quarter of what the same edge costs as an
+/// object with four named keys, and the edge list dominates the page — see
+/// `docs/graph-experience.md`. Anything else (an older page, a hand-edited
+/// payload) passes through untouched.
+function decodePayload(raw) {
+  if (!raw || raw.format !== "columnar-1") return raw;
+  const dict = raw.dict, n = raw.nodes, e = raw.edges;
+  const nodes = n.id.map((id, i) => ({
+    id,
+    kind: dict.nodeKind[n.kind[i]],
+    name: n.name[i],
+    file: dict.file[n.file[i]],
+    startLine: n.startLine[i],
+    endLine: n.endLine[i],
+    community: n.community[i],
+    degree: n.degree[i],
+  }));
+  const edges = e.source.map((source, i) => ({
+    source,
+    target: e.target[i],
+    kind: dict.edgeKind[e.kind[i]],
+    confidence: dict.confidence[e.confidence[i]],
+  }));
+  return Object.assign({}, raw, { nodes, edges });
+}
 
 // Module (community) colors — muted, readable on the dark surface without
 // reading as neon. Assigned by module size; wraps past 16.
@@ -306,6 +518,10 @@ const PALETTE = [
   "#b8629e", "#54b8ad", "#a8944c", "#8a7ed9", "#c96a94", "#94b85e", "#c9944c", "#6aa2d9",
 ];
 const EDGE_COLOR = "#33332f";
+/// The hover plate matches the panels rather than sigma's white default, and
+/// is opaque so an edge running underneath cannot bleed through the name.
+const HOVER_PLATE = "#1c1c1c";
+const HOVER_PLATE_BORDER = "#3a3a36";
 const EDGE_HL = "#ffc600";
 
 const DEFAULT_SETTINGS = { repulsion: 8, gravity: 6, cluster: 8, nodeScale: 1, labelDensity: 4, edgeOpacity: 0.3, liveSim: false };
@@ -337,479 +553,1792 @@ for (const n of nodes) {
   n.mass = n.degree + 1;
 }
 
-// --- Community detection: deterministic label propagation ------------------
-// Each node starts as its own community and repeatedly adopts the most
-// common label among its neighbors (ties broken by smallest label, iteration
-// in id order — fully deterministic). Tiny leftover communities are folded
-// into the dominant community of their own file so stray helpers don't get
-// their own color. Surfaced in the UI as "Modules".
-function detectCommunities() {
-  const adj = new Map(nodes.map((n) => [n.id, []]));
-  for (const e of links) {
-    adj.get(e.source).push(e.target);
-    adj.get(e.target).push(e.source);
-  }
-  const label = new Map(nodes.map((n) => [n.id, n.id]));
-  const order = nodes.map((n) => n.id).sort((a, b) => a - b);
-  for (let round = 0; round < 30; round++) {
-    let changed = false;
-    for (const id of order) {
-      const counts = new Map();
-      for (const nb of adj.get(id)) {
-        const l = label.get(nb);
-        counts.set(l, (counts.get(l) || 0) + 1);
-      }
-      if (counts.size === 0) continue;
-      let best = label.get(id);
-      let bestCount = counts.get(best) || 0;
-      for (const [l, c] of counts) {
-        if (c > bestCount || (c === bestCount && l < best)) { best = l; bestCount = c; }
-      }
-      if (best !== label.get(id)) { label.set(id, best); changed = true; }
-    }
-    if (!changed) break;
-  }
+// --- Communities: taken from the payload, not recomputed -------------------
+// The exporter already detected communities, folded strays into the dominant
+// community of their own file, renumbered so id 0 is the largest, and shipped
+// a label plus cohesion/entrypoint/confidence facts per community (see
+// `docs/graph-experience.md`). The page used to redo all of that with its own
+// label propagation, which meant this page coloured by one numbering while the
+// payload's aggregates and bundles used another. One source of truth.
+const COMMUNITIES = DATA.communities || [];
+const BUNDLES = DATA.bundles || [];
+const ENTRYPOINTS = new Set(DATA.entrypoints || []);
+const communityCount = COMMUNITIES.length;
+// A symbol nothing connects to belongs to no community. Give them all one
+// shared neutral bucket instead of letting `null` reach every lookup that
+// indexes by community id.
+const UNGROUPED = communityCount;
+for (const n of nodes) if (n.community === null || n.community === undefined) n.community = UNGROUPED;
+const communityColor = (c) => (c === UNGROUPED ? "#3a3a36" : PALETTE[c % PALETTE.length]);
+const communityById = new Map(COMMUNITIES.map((c) => [c.id, c]));
 
-  const sizes = new Map();
-  for (const n of nodes) sizes.set(label.get(n.id), (sizes.get(label.get(n.id)) || 0) + 1);
+// Human-readable module names: the exporter's label (the deepest directory
+// every member shares) plus the highest-degree member, e.g.
+// "src/ · resolve_calls".
+const communityMeta = COMMUNITIES.map((community) => {
+  const top = community.representatives
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.degree - a.degree || a.id - b.id)[0];
+  return {
+    id: community.id,
+    size: community.members.length,
+    name: top ? `${community.label || "./"} · ${top.name}` : community.label || `#${community.id}`,
+    label: community.label || `#${community.id}`,
+    internalEdges: community.internalEdges,
+    externalEdges: community.externalEdges,
+    entrypoints: community.entrypoints,
+    worstConfidence: community.worstConfidence,
+    representatives: community.representatives,
+  };
+});
+communityMeta.push({
+  id: UNGROUPED,
+  size: nodes.filter((n) => n.community === UNGROUPED).length,
+  name: "unconnected",
+  label: "unconnected",
+  internalEdges: 0,
+  externalEdges: 0,
+  entrypoints: 0,
+  worstConfidence: "EXTRACTED",
+  representatives: [],
+});
 
-  const dominantByFile = new Map();
-  for (const n of nodes) {
-    const l = label.get(n.id);
-    const cur = dominantByFile.get(n.file);
-    if (!cur || sizes.get(l) > sizes.get(cur)) dominantByFile.set(n.file, l);
-  }
-  for (const n of nodes) {
-    if (sizes.get(label.get(n.id)) < 3) {
-      const dom = dominantByFile.get(n.file);
-      if (dom !== undefined && sizes.get(dom) >= 3) label.set(n.id, dom);
-    }
-  }
+// --- Visual grammar ----------------------------------------------------------
+// One channel per dimension, and nothing carried by colour alone — see
+// `docs/graph-experience.md`. Sigma's default programs draw circles and plain
+// lines, so node kind is carried by a label glyph rather than a shape, and
+// relation kind by hue plus width. Dashes and shapes would need custom WebGL
+// programs; the glyph keeps the distinction available today without one.
+const KIND_GLYPH = {
+  file: "▢",
+  doc: "◇",
+  function: "●",
+  method: "○",
+  struct: "■",
+  interface: "△",
+  endpoint: "⬡",
+  schema: "▤",
+  database_table: "▥",
+  infra_resource: "▲",
+};
+const REL_STYLE = {
+  calls: { color: "#6f6f66", width: 1 },
+  imports: { color: "#4d6b7a", width: 1 },
+  inherits: { color: "#7d5f92", width: 1.6 },
+  implements: { color: "#5f8060", width: 1.6 },
+  explains: { color: "#7d6a4a", width: 0.8 },
+  references: { color: "#4a4a44", width: 0.8 },
+};
+const CONF_WEIGHT = { EXTRACTED: 1, INFERRED: 0.72, AMBIGUOUS: 0.42 };
+const SURFACE = [10, 10, 10];
 
-  // Renumber by community size so index 0 = biggest = first palette color.
-  const finalSizes = new Map();
-  for (const n of nodes) finalSizes.set(label.get(n.id), (finalSizes.get(label.get(n.id)) || 0) + 1);
-  const ranked = [...finalSizes.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([l]) => l);
-  const indexOf = new Map(ranked.map((l, i) => [l, i]));
-  for (const n of nodes) n.community = indexOf.get(label.get(n.id));
-  return ranked.length;
+// Blends a colour toward the page background. Sigma's edge program takes no
+// per-edge alpha, so confidence has to be baked into the colour itself.
+function fade(hex, weight) {
+  const value = parseInt(hex.slice(1), 16);
+  const parts = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  const mixed = parts.map((channel, index) =>
+    Math.round(SURFACE[index] + (channel - SURFACE[index]) * weight)
+  );
+  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
-const communityCount = detectCommunities();
-const communityColor = (c) => PALETTE[c % PALETTE.length];
+/// How much an edge recedes when both ends sit in the same file. A call between
+/// two methods of one file is structure a reader already assumes; a call that
+/// crosses a file boundary is the thing they came to see.
+const INTERNAL_EDGE_INK = 0.45;
 
-// Human-readable module names: the most common directory among members
-// plus the highest-degree symbol, e.g. "src/ · resolve_calls".
-const communityMeta = [];
-for (let c = 0; c < communityCount; c++) {
-  const members = nodes.filter((n) => n.community === c);
-  const dirCount = new Map();
-  for (const m of members) {
-    const dir = m.file.includes("/") ? m.file.slice(0, m.file.lastIndexOf("/") + 1) : "./";
-    dirCount.set(dir, (dirCount.get(dir) || 0) + 1);
-  }
-  const topDir = [...dirCount.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
-  const top = members.slice().sort((a, b) => b.degree - a.degree || a.id - b.id)[0];
-  communityMeta.push({ id: c, size: members.length, name: `${topDir} · ${top.name}` });
+function edgeStyle(edge) {
+  const style = REL_STYLE[edge.kind] || REL_STYLE.calls;
+  const weight = CONF_WEIGHT[edge.confidence] ?? 0.5;
+  const internal = edge.s && edge.t && edge.s.file === edge.t.file;
+  const ink = internal ? weight * INTERNAL_EDGE_INK : weight;
+  return {
+    color: fade(style.color, ink),
+    size: style.width * (0.6 + weight * 0.7) * (internal ? 0.7 : 1.15),
+  };
 }
 
-// --- Layout: ForceAtlas2 (Barnes-Hut via d3.quadtree) + noverlap -----------
-// Per SPEC section 6: GitNexus and Graphify independently converged on
-// ForceAtlas2 — generic D3 many-body doesn't settle into legible clusters at
-// real-repo scale. Vendored implementation, no CDN. The initial layout runs
-// to convergence behind the progress bar; drag reheats a short-lived
-// simulation (see "Live simulation"). Perpetual motion is opt-in — it costs
-// CPU, and the default must never freeze a weak machine.
-const rand = mulberry32(42);
-const radiusOf = (d) =>
-  (d.kind === "file" || d.kind === "doc" ? 6 : 3.5) * settings.nodeScale +
-  Math.min(Math.sqrt(d.degree) * 1.8, 14) * settings.nodeScale;
-
-// Seed each community on a circle so clusters start — and stay — spatially
-// separated instead of relying on the forces to untangle a random init.
-const seeds = [];
-{
-  const R = 160 + 26 * Math.sqrt(nodes.length);
-  for (let c = 0; c < communityCount; c++) {
-    const angle = (2 * Math.PI * c) / communityCount;
-    seeds.push({ x: Math.cos(angle) * R, y: Math.sin(angle) * R });
-  }
-  for (const n of nodes) {
-    const s = seeds[n.community];
-    const spread = 30 + 14 * Math.sqrt(communityMeta[n.community].size);
-    const a = rand() * 2 * Math.PI;
-    const r = Math.sqrt(rand()) * spread;
-    n.x = s.x + Math.cos(a) * r;
-    n.y = s.y + Math.sin(a) * r;
-  }
+function nodeLabel(node) {
+  return `${KIND_GLYPH[node.kind] || "●"} ${node.name}`;
 }
 
-function accumulateMass(quad) {
-  if (quad.length) {
-    let m = 0, x = 0, y = 0;
-    for (let i = 0; i < 4; i++) {
-      const q = quad[i];
-      if (q && q.m) { m += q.m; x += q.x * q.m; y += q.y * q.m; }
-    }
-    quad.m = m; quad.x = x / m; quad.y = y / m;
-  } else {
-    let m = 0, q = quad;
-    do { m += q.data.mass; } while ((q = q.next));
-    quad.m = m; quad.x = quad.data.x; quad.y = quad.data.y;
-  }
+/// Long enough to identify a symbol, short enough that the label does not
+/// become a white bar across the scene: Sigma draws labels on an opaque plate,
+/// and a test function name runs past 70 characters. Only the canvas
+/// truncates — the panel and the search results have room for the real name.
+const MAX_SCENE_LABEL_CHARS = 34;
+
+function sceneLabel(node) {
+  const name = node.name || "";
+  const short =
+    name.length > MAX_SCENE_LABEL_CHARS ? `${name.slice(0, MAX_SCENE_LABEL_CHARS - 1)}\u2026` : name;
+  return `${KIND_GLYPH[node.kind] || "●"} ${short}`;
 }
 
-// `stepFloor` is the minimum per-tick displacement: 0.4 during the initial
-// layout so convergence never stalls, 0 during the live simulation so idle
-// motion stays subtle instead of jittering forever.
-function fa2Step(alpha, stepFloor = 0.4) {
-  const kr = settings.repulsion;
-  const kg = settings.gravity * 0.12;
-  const kc = settings.cluster * 0.1;
-  for (const n of nodes) { n.dx = 0; n.dy = 0; }
+/// Hover label: a dark plate with the page's border and text colours, so the
+/// name stays readable instead of vanishing into sigma's white default.
+function drawHoverLabel(context, data, settings) {
+  // No text, no plate. While one node is hovered the reducer clears the labels
+  // of everything unrelated, and a plate drawn for an empty label is a small
+  // empty box sitting next to a node for no reason.
+  if (typeof data.label !== "string" || !data.label.trim()) return;
+  const size = settings.labelSize;
+  const font = settings.labelFont;
+  const weight = settings.labelWeight || "400";
+  context.font = `${weight} ${size}px ${font}`;
+  const width = context.measureText(data.label).width;
+  const padX = 7;
+  const padY = 4;
+  const boxHeight = size + padY * 2;
+  const left = data.x + data.size + 3;
+  const top = data.y - boxHeight / 2;
+  const radius = 5;
 
-  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
-  tree.visitAfter(accumulateMass);
-  const theta2 = 1.2 * 1.2;
+  context.save();
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 1;
+  context.shadowBlur = 8;
+  context.shadowColor = "rgba(0, 0, 0, 0.6)";
+  context.beginPath();
+  context.moveTo(left + radius, top);
+  context.lineTo(left + width + padX * 2 - radius, top);
+  context.quadraticCurveTo(left + width + padX * 2, top, left + width + padX * 2, top + radius);
+  context.lineTo(left + width + padX * 2, top + boxHeight - radius);
+  context.quadraticCurveTo(
+    left + width + padX * 2,
+    top + boxHeight,
+    left + width + padX * 2 - radius,
+    top + boxHeight
+  );
+  context.lineTo(left + radius, top + boxHeight);
+  context.quadraticCurveTo(left, top + boxHeight, left, top + boxHeight - radius);
+  context.lineTo(left, top + radius);
+  context.quadraticCurveTo(left, top, left + radius, top);
+  context.closePath();
+  context.fillStyle = HOVER_PLATE;
+  context.fill();
+  context.shadowColor = "transparent";
+  context.lineWidth = 1;
+  context.strokeStyle = HOVER_PLATE_BORDER;
+  context.stroke();
 
-  for (const n of nodes) {
-    tree.visit((quad, x0, y0, x1, y1) => {
-      if (!quad.m) return true;
-      const w = x1 - x0;
-      let dx = n.x - quad.x, dy = n.y - quad.y;
-      const dist2 = dx * dx + dy * dy;
-      if ((w * w) / theta2 < dist2) {
-        // Far region: treat as one body. FA2 repulsion F ∝ mass·mass / d.
-        const f = (kr * n.mass * quad.m) / Math.max(dist2, 1);
-        n.dx += dx * f; n.dy += dy * f;
-        return true;
-      }
-      if (quad.length) return false;
-      let q = quad;
-      do {
-        if (q.data !== n) {
-          let ddx = n.x - q.data.x, ddy = n.y - q.data.y;
-          let dd2 = ddx * ddx + ddy * ddy;
-          if (dd2 < 0.01) { ddx = rand() - 0.5; ddy = rand() - 0.5; dd2 = ddx * ddx + ddy * ddy; }
-          const f = (kr * n.mass * q.data.mass) / dd2;
-          n.dx += ddx * f; n.dy += ddy * f;
-        }
-      } while ((q = q.next));
-      return true;
-    });
-  }
-
-  // Attraction: linear in distance, hub-dissuaded (divide by source mass) so
-  // god nodes don't collapse their whole neighborhood onto themselves.
-  for (const e of links) {
-    const dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
-    e.s.dx += dx / e.s.mass; e.s.dy += dy / e.s.mass;
-    e.t.dx -= dx / e.t.mass; e.t.dy -= dy / e.t.mass;
-  }
-
-  for (const n of nodes) {
-    // Gravity toward origin keeps disconnected components from drifting off.
-    // Normal FA2 gravity (unit direction × mass, NOT scaled by distance) —
-    // strong gravity crushes the community separation the seeds establish.
-    const d = Math.hypot(n.x, n.y) || 1;
-    const g = kg * n.mass;
-    n.dx -= (n.x / d) * g;
-    n.dy -= (n.y / d) * g;
-    // Community pull toward its seed — this is what keeps the colored
-    // clusters *organized* instead of interleaved.
-    const s = seeds[n.community];
-    n.dx += (s.x - n.x) * kc;
-    n.dy += (s.y - n.y) * kc;
-
-    const len = Math.hypot(n.dx, n.dy);
-    if (len > 0) {
-      const step = Math.min(len, 14 * alpha + stepFloor);
-      n.x += (n.dx / len) * step;
-      n.y += (n.dy / len) * step;
-    }
-  }
+  context.fillStyle = settings.labelColor.color || "#f2f2ee";
+  context.textBaseline = "middle";
+  context.fillText(data.label, left + padX, data.y + 0.5);
+  context.restore();
 }
 
-// Noverlap pass: after the layout settles, iteratively push overlapping
-// nodes apart so every label anchor has breathing room (the dedicated pass
-// both GitNexus and Graphify run after ForceAtlas2).
-function noverlapStep() {
-  const tree = d3.quadtree(nodes, (d) => d.x, (d) => d.y);
-  let moved = 0;
-  for (const n of nodes) {
-    const r = radiusOf(n) + 2;
-    tree.visit((quad, x0, y0, x1, y1) => {
-      if (quad.length) return x0 > n.x + r + 30 || x1 < n.x - r - 30 || y0 > n.y + r + 30 || y1 < n.y - r - 30;
-      let q = quad;
-      do {
-        const o = q.data;
-        if (o !== n && o.id > n.id) {
-          let dx = n.x - o.x, dy = n.y - o.y;
-          let dist = Math.hypot(dx, dy);
-          const min = r + radiusOf(o) + 2;
-          if (dist < min) {
-            if (dist < 0.01) { dx = rand() - 0.5; dy = rand() - 0.5; dist = Math.hypot(dx, dy); }
-            const push = (min - dist) / dist / 2;
-            n.x += dx * push; n.y += dy * push;
-            o.x -= dx * push; o.y -= dy * push;
-            moved++;
-          }
-        }
-      } while ((q = q.next));
-      return false;
-    });
-  }
-  return moved;
+/// What a reader is looking for is which files and modules reach each other. A
+/// method is where that happens, not what it is about, so the two are drawn as
+/// two tiers: containers get the size, the saturation, and the labels, and the
+/// symbols inside them stay legible without competing.
+///
+/// `tier` scales the radius; `ink` is how much of the module colour survives
+/// against the background, so a container reads as solid and a method as a
+/// tinted dot of the same family.
+const KIND_TIER = {
+  file: { tier: 1.75, ink: 0.82 },
+  doc: { tier: 1.3, ink: 0.6 },
+  schema: { tier: 1.5, ink: 0.78 },
+  database_table: { tier: 1.5, ink: 0.78 },
+  infra_resource: { tier: 1.5, ink: 0.78 },
+  endpoint: { tier: 1.15, ink: 0.72 },
+  struct: { tier: 1, ink: 0.58 },
+  interface: { tier: 1, ink: 0.58 },
+  function: { tier: 0.68, ink: 0.42 },
+  method: { tier: 0.6, ink: 0.38 },
+};
+const DEFAULT_TIER = { tier: 0.8, ink: 0.5 };
+
+function kindTier(kind) {
+  return KIND_TIER[kind] || DEFAULT_TIER;
 }
 
-// --- Sigma rendering ---------------------------------------------------------
-// WebGL render layer (sigma.js v2 + graphology, both vendored — no CDN).
-// Our own ForceAtlas2/noverlap physics keep computing positions on the plain
-// node objects; sigma just draws them. This is what lets the same page handle
-// multi-thousand-node repos where canvas 2D dropped frames.
-const container = document.getElementById("view");
-let selected = null;
-let hoveredNode = null;
-let isolatedCommunity = null;
-let searchQuery = "";
-const hiddenKinds = new Set();
-const hiddenConf = new Set();
-let renderer = null;
-let camera = null;
-
-// Sigma sizes are radii in px at zoom-neutral scale.
-const sizeOf = (n) =>
-  (n.kind === "file" || n.kind === "doc" ? 5 : 2.5) * settings.nodeScale +
-  Math.min(Math.sqrt(n.degree) * 1.2, 9) * settings.nodeScale;
-
-// WebGL edge colors carry no per-edge alpha, so the opacity slider maps to a
-// gray ramp against the #0a0a0a background instead.
-function edgeShade() {
-  const v = Math.round(18 + settings.edgeOpacity * 110);
-  return `rgb(${v},${v},${Math.max(0, v - 4)})`;
+function nodeSize(node) {
+  const { tier } = kindTier(node.kind);
+  // Degree still decides size within a tier — the busiest file is the biggest
+  // file — but it can no longer make a method outweigh the file holding it.
+  return (3 + Math.min(Math.sqrt(node.degree || 0) * 1.7, 13)) * tier * settings.nodeScale;
 }
 
-const graph = new graphology.Graph({ multi: true, type: "directed" });
-for (const n of nodes) {
-  graph.addNode(String(n.id), {
-    x: n.x, y: n.y,
-    size: sizeOf(n),
-    color: communityColor(n.community),
-    label: n.name,
-    _n: n,
-  });
-}
-{
-  let ei = 0;
-  for (const e of links) {
-    graph.addEdgeWithKey(`e${ei++}`, String(e.source), String(e.target), { size: 1, _e: e });
-  }
+/// The module colour a node is drawn in, darkened by how far the node is from
+/// being a module.
+///
+/// A module aggregate keeps the colour as it is; everything inside one is mixed
+/// toward the background, further the deeper it sits. Brightening the important
+/// things was tried first and it fights the page: the eye goes to whatever is
+/// lightest, so a screen full of lifted files has no top. Darkening the rest
+/// leaves one thing at full strength and needs no legend.
+function nodeInk(node) {
+  return fade(communityColor(node.community), kindTier(node.kind).ink);
 }
 
-function nodeVisible(n) {
-  if (hiddenKinds.has(n.kind)) return false;
-  if (isolatedCommunity !== null && n.community !== isolatedCommunity) return false;
-  if (searchQuery && !n.name.toLowerCase().includes(searchQuery) && !n.file.toLowerCase().includes(searchQuery)) return false;
+// --- Adjacency ---------------------------------------------------------------
+// Built once. Every mode walks these instead of scanning the edge list.
+const outgoing = new Map();
+const incoming = new Map();
+for (const edge of links) {
+  if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
+  if (!incoming.has(edge.target)) incoming.set(edge.target, []);
+  outgoing.get(edge.source).push(edge);
+  incoming.get(edge.target).push(edge);
+}
+const neighborsOf = new Map();
+for (const edge of links) {
+  if (!neighborsOf.has(edge.source)) neighborsOf.set(edge.source, new Set());
+  if (!neighborsOf.has(edge.target)) neighborsOf.set(edge.target, new Set());
+  neighborsOf.get(edge.source).add(edge.target);
+  neighborsOf.get(edge.target).add(edge.source);
+}
+
+function edgeAllowed(edge) {
+  return !hiddenRel.has(edge.kind) && !hiddenConf.has(edge.confidence);
+}
+function nodeAllowed(node) {
+  if (hiddenKinds.has(node.kind)) return false;
+  if (State.community !== null && node.community !== State.community) return false;
   return true;
 }
 
-// Reducers: sigma consults these on every render — all our filter/hover/
-// isolation state lives here instead of a hand-rolled draw loop.
+const isTestPath = (file) => /(^|\/)(tests?|spec|__tests__)\//i.test(file) || /[._-](test|spec)\./i.test(file);
+
+// How much a neighbour is worth showing: an explicit relation beats a guessed
+// one, a contract or entrypoint beats a leaf, and a hub beats a singleton.
+function neighborScore(node, edge) {
+  let score = CONF_WEIGHT[edge.confidence] ?? 0.5;
+  score *= edge.kind === "explains" ? 0.5 : 1;
+  if (ENTRYPOINTS.has(node.id)) score += 0.6;
+  if (node.kind === "endpoint" || node.kind === "schema") score += 0.5;
+  if (isTestPath(node.file)) score -= 0.2;
+  return score + Math.min(Math.log1p(node.degree || 0) * 0.25, 1);
+}
+
+// --- Scene engine ------------------------------------------------------------
+// Every mode produces the same shape — nodes, edges, a layout kind — and one
+// renderer draws it. The whole-repository force layout is gone: no mode needs
+// every symbol on screen at once, and the budgets in
+// `docs/graph-experience.md` say it must not try.
+const MAX_SCENE_NODES = 420;
+/// How many nodes a scene can hold before their drawn size starts coming down.
+/// Around this many at typical sizes the nodes still have room to stand apart at
+/// a zoom that fits them all.
+const SCENE_DENSITY_TARGET = 320;
+/// Past this many nodes, "expand all" is warned about before it runs: the
+/// scene budget above is what keeps the page responsive, and opening every
+/// module deliberately spends it.
+const WHOLE_GRAPH_WARN = 5000;
+
+let scene = null;
+let renderer = null;
+let sceneSpec = null;
+let selected = null;
+let hoveredNode = null;
+let sceneOmitted = 0;
+
+const IMPACT_GLYPH = { changed: "◆", direct: "◐", transitive: "○" };
+
+function nodeEntry(node, extra) {
+  const base = {
+    key: `n${node.id}`,
+    label: sceneLabel(node),
+    size: nodeSize(node),
+    color: nodeInk(node),
+    // Containers paint over symbols, so a file is never buried under the dots
+    // of its own methods.
+    zIndex: Math.round(kindTier(node.kind).tier * 10),
+    _node: node,
+    // Set here rather than per mode, so a pin is marked in every scene that
+    // happens to contain the node instead of only in the one that pinned it.
+    _pinned: State.pins.has(node.id),
+  };
+  const merged = Object.assign(base, extra || {});
+  // A pin is a promise that the node stays on screen, so it has to be findable
+  // once it is there. The label is forced past the semantic-zoom threshold and
+  // marked, and sigma highlights the node the way it highlights a selection —
+  // no geometry of our own, which is what made the kind outlines unworkable.
+  if (merged._pinned) {
+    merged.label = `\u{1F4CC} ${merged.label}`;
+    merged.forceLabel = true;
+    merged.highlighted = true;
+  }
+  // Impact state is a second dimension on the same node, so it gets its own
+  // channel — a glyph and a size step, never a hue the module already owns.
+  if (merged._impact) {
+    merged.label = `${IMPACT_GLYPH[merged._impact] || ""} ${merged.label}`;
+    if (merged._impact === "transitive") {
+      merged.size = Math.max(3, merged.size * 0.75);
+      merged.color = fade(merged.color, 0.6);
+    }
+    if (merged._test) merged.label = `${merged.label} · test`;
+  }
+  return merged;
+}
+
+// --- Overview ----------------------------------------------------------------
+function overviewSpec() {
+  const items = [];
+  const edges = [];
+  const shown = COMMUNITIES.filter((c) => State.community === null || c.id === State.community);
+  const anchorOf = new Map();
+
+  for (const community of shown) {
+    const meta = communityMeta[community.id] || {};
+    if (State.expanded.has(community.id)) {
+      for (const id of community.members) {
+        const node = byId.get(id);
+        if (node && nodeAllowed(node)) items.push(nodeEntry(node));
+      }
+      anchorOf.set(community.id, community.representatives.length ? `n${community.representatives[0]}` : null);
+    } else {
+      items.push({
+        key: `c${community.id}`,
+        label: `${meta.label || "#" + community.id} (${community.members.length})`,
+        size: 6 + Math.min(Math.sqrt(community.members.length) * 3.2, 26),
+        // The only thing on screen carrying its module colour at full strength:
+        // telling a module from a file was the part a reader could not do.
+        color: communityColor(community.id),
+        zIndex: 100,
+        _aggregate: community,
+      });
+      anchorOf.set(community.id, `c${community.id}`);
+      // A pinned node stays on screen even when its module is collapsed:
+      // that is the whole point of pinning it.
+      for (const id of community.members) {
+        if (!State.pins.has(id)) continue;
+        const node = byId.get(id);
+        if (node && nodeAllowed(node)) items.push(nodeEntry(node));
+      }
+    }
+  }
+  const present = new Set(items.map((item) => item.key));
+
+  if (State.expanded.size) {
+    let index = 0;
+    for (const edge of links) {
+      if (!edgeAllowed(edge)) continue;
+      // Both ends on screen is the only condition that matters. Requiring them
+      // to share a module drew nothing between two expanded modules, so the
+      // import that ties them together — the thing a reader opened two modules
+      // to see — was missing.
+      if (!present.has(`n${edge.source}`) || !present.has(`n${edge.target}`)) continue;
+      edges.push(Object.assign({ key: `i${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+    }
+  }
+
+  let index = 0;
+  for (const bundle of BUNDLES) {
+    if (hiddenRel.has(bundle.kind)) continue;
+    const from = anchorOf.get(bundle.a);
+    const to = anchorOf.get(bundle.b);
+    if (!from || !to || !present.has(from) || !present.has(to) || from === to) continue;
+    edges.push({
+      key: `b${index++}`,
+      from,
+      to,
+      size: Math.min(0.6 + Math.log1p(bundle.count) * 0.9, 6),
+      color: fade(
+        (REL_STYLE[bundle.kind] || REL_STYLE.calls).color,
+        bundle.ambiguous > bundle.extracted + bundle.inferred ? 0.45 : 0.9
+      ),
+      _bundle: bundle,
+    });
+  }
+  return { layout: "force", items, edges, omitted: 0, caption: `${shown.length} modules` };
+}
+
+// --- Explore -----------------------------------------------------------------
+// A ranked neighbourhood around one symbol, with upstream and downstream depth
+// controlled separately, and a hard cap that reports what it dropped.
+function exploreSpec() {
+  const root = resolveFocus(State.focus);
+  if (!root) return { layout: "force", items: [], edges: [], omitted: 0, empty: "Pick a symbol to explore." };
+
+  const depth = new Map([[root.id, 0]]);
+  const direction = new Map([[root.id, "root"]]);
+  const kept = new Set([root.id]);
+  // Where neighbours are really lost: a hub with 900 neighbours shows the top
+  // few per hop. Whatever the ranking cuts is remembered, not forgotten.
+  const overflowed = new Set();
+  let frontier = [root.id];
+  for (let hop = 1; hop <= Math.max(State.down, 0) && frontier.length; hop++) {
+    const next = [];
+    for (const id of frontier) {
+      const scored = (outgoing.get(id) || [])
+        .filter(edgeAllowed)
+        .map((edge) => ({ edge, node: byId.get(edge.target) }))
+        .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge));
+      const budget = hop === 1 ? 40 : 12;
+      const ranked = scored.filter(
+        (candidate, position) => position < budget || State.expanded.has(candidate.node.community)
+      );
+      for (const candidate of scored.slice(budget)) {
+        if (!State.expanded.has(candidate.node.community)) overflowed.add(candidate.node.id);
+      }
+      for (const candidate of ranked) {
+        kept.add(candidate.node.id);
+        depth.set(candidate.node.id, hop);
+        direction.set(candidate.node.id, "down");
+        next.push(candidate.node.id);
+      }
+    }
+    frontier = next;
+  }
+  frontier = [root.id];
+  for (let hop = 1; hop <= Math.max(State.up, 0) && frontier.length; hop++) {
+    const next = [];
+    for (const id of frontier) {
+      const scored = (incoming.get(id) || [])
+        .filter(edgeAllowed)
+        .map((edge) => ({ edge, node: byId.get(edge.source) }))
+        .filter((candidate) => candidate.node && nodeAllowed(candidate.node) && !kept.has(candidate.node.id))
+        .sort((left, right) => neighborScore(right.node, right.edge) - neighborScore(left.node, left.edge));
+      const budget = hop === 1 ? 40 : 12;
+      const ranked = scored.filter(
+        (candidate, position) => position < budget || State.expanded.has(candidate.node.community)
+      );
+      for (const candidate of scored.slice(budget)) {
+        if (!State.expanded.has(candidate.node.community)) overflowed.add(candidate.node.id);
+      }
+      for (const candidate of ranked) {
+        kept.add(candidate.node.id);
+        depth.set(candidate.node.id, hop);
+        direction.set(candidate.node.id, "up");
+        next.push(candidate.node.id);
+      }
+    }
+    frontier = next;
+  }
+  for (const id of State.pins) if (byId.has(id)) kept.add(id);
+
+  let omitted = 0;
+  let ids = [...kept];
+  let dropped = [];
+  if (ids.length > MAX_SCENE_NODES) {
+    const ranked = ids.sort(
+      (left, right) =>
+        (depth.get(left) || 0) - (depth.get(right) || 0) ||
+        (byId.get(right).degree || 0) - (byId.get(left).degree || 0)
+    );
+    // A capped neighbour is not a dropped neighbour: keep the overflow as
+    // expandable aggregates so the scene never hides work without saying where
+    // it went.
+    dropped = ranked.slice(MAX_SCENE_NODES).filter((id) => !State.expanded.has(byId.get(id).community));
+    const rescued = ranked.slice(MAX_SCENE_NODES).filter((id) => State.expanded.has(byId.get(id).community));
+    omitted = dropped.length;
+    ids = ranked.slice(0, MAX_SCENE_NODES).concat(rescued);
+  }
+  for (const id of overflowed) if (!kept.has(id)) dropped.push(id);
+  omitted = dropped.length;
+  const set = new Set(ids);
+  const items = ids.map((id) => {
+    const node = byId.get(id);
+    return nodeEntry(node, {
+      size: id === root.id ? nodeSize(node) * 1.9 + 3 : nodeSize(node),
+      _depth: depth.get(id) || 0,
+      _direction: direction.get(id),
+    });
+  });
+  const edges = [];
+  let index = 0;
+  for (const edge of links) {
+    if (!set.has(edge.source) || !set.has(edge.target) || !edgeAllowed(edge)) continue;
+    edges.push(Object.assign({ key: `e${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+  }
+
+  // One aggregate per module the cap cut into, attached where its members
+  // hung. Clicking it expands that module in place.
+  const byCommunity = new Map();
+  for (const id of dropped) {
+    const community = byId.get(id).community;
+    if (!byCommunity.has(community)) byCommunity.set(community, []);
+    byCommunity.get(community).push(id);
+  }
+  for (const [community, members] of byCommunity) {
+    const key = `m${community}`;
+    const meta = communityMeta[community] || {};
+    items.push({
+      key,
+      label: `+${members.length} more in ${meta.label || "#" + community}`,
+      size: 5 + Math.min(Math.sqrt(members.length) * 2.6, 16),
+      color: fade(communityColor(community), 0.55),
+      _overflow: { community, members },
+    });
+    // Attach to whichever shown node the overflow actually connects to.
+    const anchor = members
+      .flatMap((id) => [...(neighborsOf.get(id) || [])])
+      .find((other) => set.has(other));
+    if (anchor !== undefined) {
+      edges.push({
+        key: `o${index++}`,
+        from: key,
+        to: `n${anchor}`,
+        size: 1,
+        color: fade(EDGE_COLOR, 0.7),
+        _overflowEdge: true,
+      });
+    }
+  }
+
+  return {
+    layout: "force",
+    items,
+    edges,
+    omitted,
+    root,
+    caption: `${items.length} nodes · up ${State.up} / down ${State.down}`,
+  };
+}
+
+// --- Path --------------------------------------------------------------------
+// Directed shortest paths, drawn as layers rather than as a force graph: a
+// path has an order, and a force layout hides it.
+// Every shortest route, not just the first one found. BFS keeps *all*
+// predecessors that discovered a node at its own depth, then the paths are
+// enumerated from them — two equally short routes are two different answers,
+// and showing one silently is showing half the truth.
+/// Steps out of a node. Directed mode follows the arrows, which is the honest
+/// default for "how does A reach B". Undirected mode also walks edges
+/// backwards, because `A → X ← B` is a real connection through X even though no
+/// directed chain runs from A to B, and refusing to show it answers a question
+/// nobody asked.
+function stepsFrom(id, undirected) {
+  const forward = outgoing.get(id) || [];
+  if (!undirected) return forward.map((edge) => ({ edge, next: edge.target, reversed: false }));
+  return forward
+    .map((edge) => ({ edge, next: edge.target, reversed: false }))
+    .concat((incoming.get(id) || []).map((edge) => ({ edge, next: edge.source, reversed: true })));
+}
+
+/// One shortest route between two nodes, as a chain of steps, ignoring edges and
+/// nodes the caller has ruled out. The building block for enumerating more than
+/// the minimum-length answer.
+function bfsRoute(fromId, toId, undirected, bannedEdges, bannedNodes) {
+  if (fromId === toId) return [];
+  const cameFrom = new Map();
+  const seen = new Set([fromId]);
+  let frontier = [fromId];
+  while (frontier.length) {
+    const next = [];
+    for (const id of frontier) {
+      for (const step of stepsFrom(id, undirected)) {
+        if (bannedEdges && bannedEdges.has(step.edge)) continue;
+        if (seen.has(step.next) || (bannedNodes && bannedNodes.has(step.next))) continue;
+        const node = byId.get(step.next);
+        if (!node || !nodeAllowed(node) || !edgeAllowed(step.edge)) continue;
+        seen.add(step.next);
+        cameFrom.set(step.next, { edge: step.edge, from: id, to: step.next, reversed: step.reversed });
+        if (step.next === toId) {
+          const chain = [];
+          let cursor = toId;
+          while (cursor !== fromId) {
+            const arrival = cameFrom.get(cursor);
+            chain.unshift(arrival);
+            cursor = arrival.from;
+          }
+          return chain;
+        }
+        next.push(step.next);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+function routeSignature(chain) {
+  return chain.map((step) => `${step.from}>${step.to}`).join("|");
+}
+
+/// The `k` shortest loopless routes, shortest first — Yen's algorithm over the
+/// unweighted graph.
+///
+/// A plain breadth-first search answers only "what is the shortest way", and
+/// stops at the depth where the target first appears. That hides every longer
+/// route, which are often the interesting ones: the shortest way from a parser to
+/// an exporter may be one incidental helper both happen to call, while the route
+/// that explains the codebase is six hops through the pipeline. There is no hop
+/// limit here; the bound is on how many routes are returned, because the number
+/// of simple paths between two nodes in a real graph is astronomically large.
+function kShortestRoutes(fromId, toId, k, undirected) {
+  const first = bfsRoute(fromId, toId, undirected, null, null);
+  if (!first) return [];
+  const accepted = [first];
+  const candidates = [];
+  const known = new Set([routeSignature(first)]);
+
+  while (accepted.length < k) {
+    const previous = accepted[accepted.length - 1];
+    for (let spur = 0; spur < previous.length; spur++) {
+      const rootPath = previous.slice(0, spur);
+      const spurNode = previous[spur].from;
+      const bannedEdges = new Set();
+      // Any accepted route sharing this root must not be re-derived, so the edge
+      // it left the spur node by is off the table.
+      for (const route of accepted) {
+        if (route.length <= spur) continue;
+        if (routeSignature(route.slice(0, spur)) !== routeSignature(rootPath)) continue;
+        bannedEdges.add(route[spur].edge);
+      }
+      // The root is already spent: revisiting one of its nodes would make a loop.
+      const bannedNodes = new Set(rootPath.map((step) => step.from));
+      const tail = bfsRoute(spurNode, toId, undirected, bannedEdges, bannedNodes);
+      if (!tail) continue;
+      const candidate = rootPath.concat(tail);
+      const signature = routeSignature(candidate);
+      if (known.has(signature)) continue;
+      known.add(signature);
+      candidates.push(candidate);
+    }
+    if (!candidates.length) break;
+    candidates.sort((left, right) => left.length - right.length);
+    accepted.push(candidates.shift());
+  }
+  return accepted;
+}
+
+function pathSpec() {
+  const from = resolveFocus(State.from);
+  const to = resolveFocus(State.to);
+  if (!from || !to) {
+    return {
+      layout: "layered",
+      items: [],
+      edges: [],
+      omitted: 0,
+      empty: from || to ? "Pick the other endpoint to trace a path." : "Pick a source and a target.",
+    };
+  }
+  if (from.id === to.id) {
+    return { layout: "layered", items: [], edges: [], omitted: 0, empty: "Source and target are the same node." };
+  }
+  // Asking for a path between two symbols should answer with a path. Following
+  // the arrows is the better answer when one exists, so it is tried first, but
+  // failing to find one is not a reason to show an empty canvas: the walk falls
+  // back to ignoring direction and says that it did. Only a pair with no
+  // connection at all gets nothing, which is the one case where nothing is the
+  // honest answer.
+  let routes = kShortestRoutes(from.id, to.id, State.routes, false);
+  let ignoredDirection = false;
+  if (!routes.length && !State.arrowsOnly) {
+    routes = kShortestRoutes(from.id, to.id, State.routes, true);
+    ignoredDirection = routes.length > 0;
+  }
+  if (!routes.length) {
+    const either = State.arrowsOnly ? kShortestRoutes(from.id, to.id, 1, true) : [];
+    const stranded = [from, to].filter((node) => !(neighborsOf.get(node.id) || new Set()).size);
+    return {
+      layout: "layered",
+      items: [],
+      edges: [],
+      omitted: 0,
+      empty: either.length
+        ? `No path following the arrows, but ${from.name} and ${to.name} are connected in ${either[0].length} hops if direction is ignored — switch to "any direction".`
+        : stranded.length
+          ? `${stranded.map((node) => node.name).join(" and ")} ${stranded.length > 1 ? "have" : "has"} no edges at all in this graph, so no path can reach ${stranded.length > 1 ? "them" : "it"}.`
+          : `${from.name} and ${to.name} are in unconnected parts of the graph under the current filters.`,
+    };
+  }
+  const layerOf = new Map([[from.id, 0]]);
+  const items = [];
+  const edges = [];
+  const seen = new Set();
+  const add = (id, layer) => {
+    layerOf.set(id, Math.max(layerOf.get(id) ?? 0, layer));
+    if (seen.has(id)) return;
+    seen.add(id);
+    const node = byId.get(id);
+    const endpoint = id === from.id || id === to.id;
+    items.push(nodeEntry(node, { _layer: layer, size: nodeSize(node) * (endpoint ? 1.7 : 1.2) + 2 }));
+  };
+  add(from.id, 0);
+  routes.forEach((chain, route) => {
+    chain.forEach((step, hop) => {
+      const edge = step.edge;
+      add(step.to, hop + 1);
+      const key = `p${route}_${hop}`;
+      edges.push(
+        // Drawn along the direction the walk took, so the layered scene reads
+        // left to right; `_reversed` keeps the fact that this hop runs against
+        // the edge available to the inspector.
+        Object.assign({ key, from: `n${step.from}`, to: `n${step.to}`, _edge: edge, _hop: hop + 1, _route: route, _reversed: step.reversed }, edgeStyle(edge), {
+          // The first route is the one to read; the alternatives are thinner
+          // so a reader can tell them apart without a legend.
+          size: route === 0 ? Math.max(2.4, edgeStyle(edge).size * 2) : 1.2,
+        })
+      );
+    });
+  });
+  for (const item of items) item._layer = layerOf.get(item._node.id) ?? item._layer;
+  return {
+    layout: "layered",
+    items,
+    edges,
+    omitted: 0,
+    caption: [
+      // Routes come back shortest first, so the last one is the longest shown.
+      routes.length > 1 && routes[routes.length - 1].length !== routes[0].length
+        ? `${routes[0].length}\u2013${routes[routes.length - 1].length} hops`
+        : `${routes[0].length} hops`,
+      routes.length > 1 ? `${routes.length} routes` : null,
+      ignoredDirection ? "no route follows the arrows — showing one that ignores direction" : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    ignoredDirection,
+    routes,
+  };
+}
+
+// --- Impact ------------------------------------------------------------------
+// Dependents and dependencies separated, grouped by depth, with the things a
+// reader must act on — tests, entrypoints, contracts — ranked first.
+function impactSpec() {
+  const root = resolveFocus(State.focus);
+  if (!root) return { layout: "radial", items: [], edges: [], omitted: 0, empty: "Pick a symbol to see its blast radius." };
+
+  function walk(adjacency, pick, maxDepth) {
+    const seen = new Map();
+    let frontier = [root.id];
+    for (let hop = 1; hop <= maxDepth && frontier.length; hop++) {
+      const next = [];
+      for (const id of frontier) {
+        for (const edge of adjacency.get(id) || []) {
+          if (!edgeAllowed(edge)) continue;
+          const other = pick(edge);
+          const node = byId.get(other);
+          if (!node || !nodeAllowed(node) || other === root.id || seen.has(other)) continue;
+          seen.set(other, hop);
+          next.push(other);
+        }
+      }
+      frontier = next;
+    }
+    return seen;
+  }
+  const dependents = walk(incoming, (edge) => edge.source, Math.max(State.up, 1));
+  const dependencies = walk(outgoing, (edge) => edge.target, Math.max(State.down, 1));
+
+  const rank = (id) => {
+    const node = byId.get(id);
+    let score = 0;
+    if (isTestPath(node.file)) score -= 3;
+    if (ENTRYPOINTS.has(id)) score -= 2;
+    if (node.kind === "endpoint" || node.kind === "schema") score -= 2;
+    return score;
+  };
+  const collect = (map, side) =>
+    [...map.entries()]
+      .sort((left, right) => left[1] - right[1] || rank(left[0]) - rank(right[0]) || (byId.get(right[0]).degree || 0) - (byId.get(left[0]).degree || 0))
+      .map(([id, depth]) => ({ id, depth, side }));
+
+  const ordered = [...collect(dependents, "up"), ...collect(dependencies, "down")];
+  const budget = MAX_SCENE_NODES - 1;
+  const omitted = Math.max(0, ordered.length - budget);
+  const chosen = ordered.slice(0, budget);
+  const set = new Set([root.id, ...chosen.map((entry) => entry.id)]);
+
+  const items = [
+    nodeEntry(root, { _impact: "changed", _layer: 0, size: nodeSize(root) * 2 + 4 }),
+    ...chosen.map((entry) =>
+      nodeEntry(byId.get(entry.id), {
+        _impact: entry.depth === 1 ? "direct" : "transitive",
+        _side: entry.side,
+        _layer: entry.side === "up" ? -entry.depth : entry.depth,
+        _test: isTestPath(byId.get(entry.id).file),
+      })
+    ),
+  ];
+  const edges = [];
+  let index = 0;
+  for (const edge of links) {
+    if (!set.has(edge.source) || !set.has(edge.target) || !edgeAllowed(edge)) continue;
+    edges.push(Object.assign({ key: `x${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
+  }
+  return {
+    layout: "layered",
+    items,
+    edges,
+    omitted,
+    root,
+    caption: `${dependents.size} dependents · ${dependencies.size} dependencies`,
+    tests: [...set].filter((id) => id !== root.id && isTestPath(byId.get(id).file)).length,
+  };
+}
+
+// --- Contracts ---------------------------------------------------------------
+// Declared contract nodes beside the implementations that serve them, with the
+// unmatched cases on both sides made visible rather than hidden.
+const CONTRACT_KINDS = new Set(["endpoint", "schema", "database_table", "infra_resource"]);
+
+function contractsSpec() {
+  const contracts = nodes.filter((node) => CONTRACT_KINDS.has(node.kind) && nodeAllowed(node));
+  if (!contracts.length) {
+    return { layout: "force", items: [], edges: [], omitted: 0, empty: "This repository declares no contracts, endpoints, tables, or infrastructure resources." };
+  }
+  const items = [];
+  const edges = [];
+  const present = new Set();
+  const add = (node, extra) => {
+    if (present.has(node.id)) return;
+    present.add(node.id);
+    items.push(nodeEntry(node, extra));
+  };
+  let unmatched = 0;
+  for (const contract of contracts) {
+    const implementers = (incoming.get(contract.id) || [])
+      .filter((edge) => edge.kind === "implements" && edgeAllowed(edge))
+      .map((edge) => ({ edge, node: byId.get(edge.source) }))
+      .filter((entry) => entry.node && nodeAllowed(entry.node));
+    if (!implementers.length) unmatched++;
+    add(contract, {
+      _contract: true,
+      _declared: contract.perspective === "declared",
+      _matched: implementers.length > 0,
+      size: nodeSize(contract) * 1.5 + 3,
+    });
+    for (const entry of implementers.slice(0, 6)) {
+      add(entry.node, { _implements: contract.id });
+      edges.push(
+        Object.assign({ key: `c${edges.length}`, from: `n${entry.node.id}`, to: `n${contract.id}`, _edge: entry.edge }, edgeStyle(entry.edge), { size: 2 })
+      );
+    }
+    for (const edge of (outgoing.get(contract.id) || []).filter((e) => e.kind === "references" && edgeAllowed(e))) {
+      const referenced = byId.get(edge.target);
+      if (!referenced || !nodeAllowed(referenced)) continue;
+      add(referenced, { _schema: true });
+      edges.push(Object.assign({ key: `c${edges.length}`, from: `n${contract.id}`, to: `n${referenced.id}`, _edge: edge }, edgeStyle(edge)));
+    }
+  }
+  let omitted = 0;
+  if (items.length > MAX_SCENE_NODES) {
+    omitted = items.length - MAX_SCENE_NODES;
+    items.length = MAX_SCENE_NODES;
+  }
+  const keys = new Set(items.map((item) => item.key));
+  const declared = contracts.filter((contract) => contract.perspective === "declared").length;
+  return {
+    layout: "force",
+    items,
+    edges: edges.filter((edge) => keys.has(edge.from) && keys.has(edge.to)),
+    omitted,
+    caption: `${contracts.length} contracts · ${declared} declared · ${unmatched} without an implementation`,
+  };
+}
+
+// --- Layout ------------------------------------------------------------------
+// Two primitives: a force layout for neighbourhood-shaped scenes, and a
+// layered one for scenes that have an order (a path, an impact fan-out).
+// Both are deterministic, so a reload lands on the same picture.
+/// How coarse an approximation the repulsion pass accepts. A cell is treated as
+/// a single mass when it is further away than `size / THETA`; smaller values
+/// mean more recursion and a more exact force. 0.9 is the usual compromise.
+const BARNES_HUT_THETA = 0.9;
+
+/// Repulsion between every pair of nodes is what makes a force layout O(n²),
+/// and at repository scale that is the whole cost: 5753 nodes is 16.5 million
+/// pairs per round, times ~180 rounds. A quadtree collapses the far half of
+/// that: nodes far enough away are summed into one mass and pushed against
+/// once, which is what `d3.quadtree` used to do here before d3 was dropped.
+function buildQuadtree(points) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  // A square root cell keeps the subdivision isotropic, so "far enough away"
+  // means the same thing along both axes.
+  const size = Math.max(maxX - minX, maxY - minY, 1) * 1.01;
+  const root = makeCell(minX, minY, size);
+  for (const point of points) insertPoint(root, point, 0);
+  return root;
+}
+
+function makeCell(x, y, size) {
+  return { x, y, size, mass: 0, cx: 0, cy: 0, radius: 0, point: null, children: null };
+}
+
+const QUADTREE_MAX_DEPTH = 20;
+
+function insertPoint(cell, point, depth) {
+  cell.mass += 1;
+  cell.cx += point.x;
+  cell.cy += point.y;
+  cell.radius += point.r;
+  if (cell.children) {
+    insertPoint(childFor(cell, point), point, depth + 1);
+    return;
+  }
+  if (!cell.point) {
+    cell.point = point;
+    return;
+  }
+  // Coincident points would subdivide forever; past the depth limit a cell just
+  // holds several points and is treated as the aggregate it already is.
+  if (depth >= QUADTREE_MAX_DEPTH) return;
+  const existing = cell.point;
+  cell.point = null;
+  const half = cell.size / 2;
+  cell.children = [
+    makeCell(cell.x, cell.y, half),
+    makeCell(cell.x + half, cell.y, half),
+    makeCell(cell.x, cell.y + half, half),
+    makeCell(cell.x + half, cell.y + half, half),
+  ];
+  for (const held of [existing, point]) {
+    const child = childFor(cell, held);
+    child.mass += 1;
+    child.cx += held.x;
+    child.cy += held.y;
+    child.radius += held.r;
+    if (child.point) {
+      // Both landed in the same quadrant: push them down together.
+      const other = child.point;
+      child.point = null;
+      child.mass -= 2;
+      child.cx -= held.x + other.x;
+      child.cy -= held.y + other.y;
+      child.radius -= held.r + other.r;
+      insertPoint(child, other, depth + 1);
+      insertPoint(child, held, depth + 1);
+    } else {
+      child.point = held;
+    }
+  }
+}
+
+function childFor(cell, point) {
+  const half = cell.size / 2;
+  const right = point.x >= cell.x + half ? 1 : 0;
+  const bottom = point.y >= cell.y + half ? 1 : 0;
+  return cell.children[bottom * 2 + right];
+}
+
+/// Accumulates the repulsion the tree exerts on one point.
+function repel(cell, point, repulsion, index) {
+  if (!cell.mass) return;
+  if (cell.point === point && !cell.children) return;
+  const massX = cell.cx / cell.mass;
+  const massY = cell.cy / cell.mass;
+  let dx = point.x - massX;
+  let dy = point.y - massY;
+  let squared = dx * dx + dy * dy;
+  const leaf = !cell.children;
+  if (leaf || cell.size * cell.size < squared * BARNES_HUT_THETA * BARNES_HUT_THETA) {
+    let mass = cell.mass;
+    if (leaf && cell.point === point) {
+      // A leaf holding this point plus others: subtract its own contribution
+      // rather than skipping the whole cell.
+      mass -= 1;
+      if (mass <= 0) return;
+    }
+    if (squared < 1) {
+      // Coincident or nearly so: pick a deterministic direction instead of
+      // dividing by zero, the way the pairwise version did.
+      dx = ((index % 7) - 3) || 1;
+      dy = ((index % 5) - 2) || 1;
+      squared = dx * dx + dy * dy;
+    }
+    const distance = Math.sqrt(squared);
+    const meanRadius = cell.radius / cell.mass;
+    const force = (mass * (repulsion + 900 * (point.r + meanRadius))) / squared;
+    point.dx += (dx / distance) * force;
+    point.dy += (dy / distance) * force;
+    return;
+  }
+  for (const child of cell.children) repel(child, point, repulsion, index);
+}
+
+/// `options.seed` starts a node somewhere other than the default ring, and
+/// `options.anchors` replaces the pull toward the origin with a pull toward a
+/// point of the caller's choosing — which is how a node is kept inside its own
+/// module while its edges still shape where it sits within it.
+function forceLayout(items, edges, options) {
+  const seed = (options && options.seed) || null;
+  const anchors = (options && options.anchors) || null;
+  const positions = new Map();
+  const radius = 110 + 20 * Math.sqrt(items.length);
+  items.forEach((item, position) => {
+    const start = seed && seed.get(item.key);
+    const angle = (2 * Math.PI * position) / items.length;
+    positions.set(item.key, {
+      x: start ? start.x : Math.cos(angle) * radius,
+      y: start ? start.y : Math.sin(angle) * radius,
+      dx: 0,
+      dy: 0,
+      r: item.size,
+      anchor: anchors ? anchors.get(item.key) || null : null,
+    });
+  });
+  const points = [...positions.values()];
+  const rounds = items.length > 250 ? 140 : 240;
+  const repulsion = 6000 + settings.repulsion * 900;
+  const pull = 0.004 + settings.cluster * 0.0009;
+  const gravity = 0.0008 + settings.gravity * 0.0002;
+  for (let round = 0; round < rounds; round++) {
+    const cooling = 1 - round / rounds;
+    for (const point of points) {
+      point.dx = 0;
+      point.dy = 0;
+    }
+    const tree = buildQuadtree(points);
+    for (let i = 0; i < points.length; i++) repel(tree, points[i], repulsion, i);
+    for (const edge of edges) {
+      const a = positions.get(edge.from);
+      const b = positions.get(edge.to);
+      if (!a || !b) continue;
+      a.dx += (b.x - a.x) * pull;
+      a.dy += (b.y - a.y) * pull;
+      b.dx += (a.x - b.x) * pull;
+      b.dy += (a.y - b.y) * pull;
+    }
+    for (const point of points) {
+      const pullX = point.anchor ? (point.anchor.x - point.x) * point.anchor.strength : -point.x * gravity;
+      const pullY = point.anchor ? (point.anchor.y - point.y) * point.anchor.strength : -point.y * gravity;
+      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 + pullX;
+      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 + pullY;
+    }
+  }
+  separate(positions, items, (options && options.separateScale) || 3.1);
+  return positions;
+}
+
+// Two nodes drawn on top of each other read as one node, which is a wrong
+// answer rather than an ugly one. Overlap is local, so the pass only compares
+// each node against the ones in its own and neighbouring grid cells instead of
+// against all the others: the same reason the repulsion pass uses a quadtree.
+function separate(positions, items, scale) {
+  const points = items.map((item) => positions.get(item.key)).filter(Boolean);
+  if (points.length < 2) return;
+  let maxRadius = 0;
+  for (const point of points) if (point.r > maxRadius) maxRadius = point.r;
+  // One cell wide enough that any pair close enough to overlap shares a cell or
+  // sits in one of the eight around it.
+  const cellSize = Math.max(maxRadius * 2 * scale, 1);
+  for (let round = 0; round < 40; round++) {
+    const grid = new Map();
+    for (const point of points) {
+      const key = `${Math.floor(point.x / cellSize)},${Math.floor(point.y / cellSize)}`;
+      let bucket = grid.get(key);
+      if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+      }
+      bucket.push(point);
+    }
+    let moved = 0;
+    for (const point of points) {
+      const cellX = Math.floor(point.x / cellSize);
+      const cellY = Math.floor(point.y / cellSize);
+      for (let offsetX = -1; offsetX <= 1; offsetX++) {
+        for (let offsetY = -1; offsetY <= 1; offsetY++) {
+          const bucket = grid.get(`${cellX + offsetX},${cellY + offsetY}`);
+          if (!bucket) continue;
+          for (const other of bucket) {
+            if (other === point) continue;
+            const dx = other.x - point.x;
+            const dy = other.y - point.y;
+            const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            const wanted = (point.r + other.r) * scale;
+            if (distance >= wanted) continue;
+            const push = (wanted - distance) / 2;
+            // Exactly coincident points have no direction to be pushed along,
+            // so they would stay stacked forever. Give them one.
+            const unitX = dx === 0 && dy === 0 ? 1 : dx / distance;
+            const unitY = dx === 0 && dy === 0 ? 0 : dy / distance;
+            point.x -= unitX * push;
+            point.y -= unitY * push;
+            other.x += unitX * push;
+            other.y += unitY * push;
+            moved++;
+          }
+        }
+      }
+    }
+    if (moved === 0) break;
+  }
+}
+
+/// How hard a node is held inside its own module. Loose enough that edges still
+/// decide where it sits in the island, tight enough that the island stays one.
+const ISLAND_GRAVITY = 0.055;
+
+/// Lays the scene out as one island per module.
+///
+/// A single force pass over everything produces a disc: repulsion is uniform, so
+/// the only shape it can settle into is a circle of evenly spaced dots, and the
+/// module structure — the thing worth reading — is invisible inside it. Two
+/// passes fix that. The first lays out the modules themselves as a small graph,
+/// weighted by how many edges cross between them, so modules that talk end up
+/// near each other. The second lays out each module's own nodes, anchored to
+/// where their module landed.
+function islandLayout(items, edges) {
+  const groups = new Map();
+  for (const item of items) {
+    const community = item.community === null || item.community === undefined ? -1 : item.community;
+    if (!groups.has(community)) groups.set(community, []);
+    groups.get(community).push(item);
+  }
+  if (groups.size < 2) return forceLayout(items, edges);
+
+  const communityOf = new Map(items.map((item) => [item.key, item.community ?? -1]));
+  // Sized by the area its members need, not by how many there are: fifty large
+  // file circles want far more room than fifty method dots, and an island too
+  // small for its contents settles as a packed disc no matter how the physics is
+  // tuned, because the pull inward and the pushing apart cancel.
+  const islandRadius = (members) => {
+    let area = 0;
+    for (const member of members) area += Math.PI * Math.pow(Math.max(member.size, 3) * 2.1, 2);
+    return Math.max(40, Math.sqrt(area / Math.PI) * 1.2);
+  };
+  // A thousand nodes held as tightly as five is a blob. The pull toward the
+  // module's centre eases off as the module grows, so a large one spreads out
+  // enough for its own structure to show while a small one stays a unit.
+  const islandGravity = (count) => ISLAND_GRAVITY / (1 + Math.log2(count + 1) * 0.55);
+  // Sorted so the layout does not depend on the order the groups were met.
+  const ordered = [...groups.entries()].sort((left, right) => right[1].length - left[1].length || left[0] - right[0]);
+  const superItems = ordered.map(([community, members]) => ({
+    key: `island${community}`,
+    size: islandRadius(members),
+  }));
+  const crossings = new Map();
+  for (const edge of edges) {
+    const from = communityOf.get(edge.from);
+    const to = communityOf.get(edge.to);
+    if (from === undefined || to === undefined || from === to) continue;
+    const key = from < to ? `${from}:${to}` : `${to}:${from}`;
+    crossings.set(key, (crossings.get(key) || 0) + 1);
+  }
+  const superEdges = [];
+  for (const [key, count] of crossings) {
+    const [from, to] = key.split(":");
+    // Repeating an edge is how this force pass expresses weight: two modules
+    // joined by two hundred imports should sit closer than two joined by one.
+    const strength = Math.min(4, 1 + Math.floor(Math.log2(count + 1)));
+    for (let repeat = 0; repeat < strength; repeat++) {
+      superEdges.push({ from: `island${from}`, to: `island${to}` });
+    }
+  }
+  // Islands are pushed apart only until they stop overlapping. The default
+  // spacing is tuned for single nodes, and at island scale it left most of the
+  // canvas empty: the fit then zooms out to cover the gaps and every island
+  // collapses into a speck.
+  const centres = forceLayout(superItems, superEdges, { separateScale: 1.12 });
+
+  const seed = new Map();
+  const anchors = new Map();
+  for (const [community, members] of ordered) {
+    const centre = centres.get(`island${community}`) || { x: 0, y: 0 };
+    // Biggest first, so the hubs start near the middle of their island and the
+    // leaves start on its rim.
+    const inner = members
+      .slice()
+      .sort((left, right) => right.size - left.size || (left.key < right.key ? -1 : 1));
+    const radius = islandRadius(members) * 0.85;
+    inner.forEach((item, index) => {
+      const angle = (2 * Math.PI * index * 0.618) % (2 * Math.PI);
+      const spiral = radius * Math.sqrt((index + 0.5) / inner.length);
+      seed.set(item.key, { x: centre.x + Math.cos(angle) * spiral, y: centre.y + Math.sin(angle) * spiral });
+      anchors.set(item.key, { x: centre.x, y: centre.y, strength: islandGravity(members.length) });
+    });
+  }
+  return forceLayout(items, edges, { seed, anchors });
+}
+
+function layeredLayout(items) {
+  const layers = new Map();
+  for (const item of items) {
+    const layer = item._layer ?? 0;
+    if (!layers.has(layer)) layers.set(layer, []);
+    layers.get(layer).push(item);
+  }
+  const ordered = [...layers.keys()].sort((a, b) => a - b);
+  const positions = new Map();
+  const columnGap = 260;
+  ordered.forEach((layer, column) => {
+    const column_items = layers.get(layer);
+    const rowGap = Math.max(46, 520 / Math.max(column_items.length, 1));
+    column_items.forEach((item, row) => {
+      positions.set(item.key, {
+        x: (column - (ordered.length - 1) / 2) * columnGap,
+        y: (row - (column_items.length - 1) / 2) * rowGap,
+        r: item.size,
+      });
+    });
+  });
+  separate(positions, items, 2.2);
+  return positions;
+}
+
+// --- Layout cache ------------------------------------------------------------
+// Keyed by what actually determines the picture. A changed node set
+// invalidates rather than partially reusing: half-stale positions are worse
+// than an honest relayout.
+function layoutKey(spec) {
+  const keys = spec.items.map((item) => item.key).sort().join(",");
+  let hash = 2166136261;
+  for (let i = 0; i < keys.length; i++) {
+    hash ^= keys.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `aag-layout:${spec.layout}:${spec.items.length}:${(hash >>> 0).toString(36)}:${settings.repulsion},${settings.gravity},${settings.cluster}`;
+}
+
+/// Runs the layout off the main thread when the browser lets us.
+///
+/// The page is one self-contained file, so the worker source is assembled from
+/// the layout functions themselves — `Function.prototype.toString` rather than a
+/// second copy of the physics, which would drift. A blob worker is refused from
+/// an opaque `file://` origin in some browsers; construction is attempted once
+/// and every failure falls back to laying out on the main thread, which is
+/// slower to the eye but never wrong.
+let layoutWorker;
+let layoutWorkerBroken = false;
+let layoutJob = 0;
+const layoutJobs = new Map();
+
+/// What the physics needs and nothing else: a key, a size, a layer hint for the
+/// layered scenes, and which module the node belongs to, which is what lets the
+/// island pass group them. Built in one place so the worker and the main thread
+/// lay out the same scene.
+function layoutItems(spec) {
+  return spec.items.map((item) => ({
+    key: item.key,
+    size: item.size,
+    _layer: item._layer,
+    community: item._node
+      ? item._node.community
+      : item._aggregate
+        ? item._aggregate.id
+        : null,
+  }));
+}
+
+/// Which layout a scene gets: layered when it has an order to show, islands when
+/// its nodes carry modules, a plain force pass otherwise.
+function runLayout(layout, items, edges) {
+  if (layout === "layered") return layeredLayout(items);
+  const modules = new Set(items.map((item) => item.community));
+  return modules.size > 1 ? islandLayout(items, edges) : forceLayout(items, edges);
+}
+
+function layoutWorkerSource() {
+  const parts = [
+    `const BARNES_HUT_THETA = ${BARNES_HUT_THETA};`,
+    `const QUADTREE_MAX_DEPTH = ${QUADTREE_MAX_DEPTH};`,
+    "let settings = {};",
+    `const ISLAND_GRAVITY = ${ISLAND_GRAVITY};`,
+    buildQuadtree.toString(),
+    makeCell.toString(),
+    insertPoint.toString(),
+    childFor.toString(),
+    repel.toString(),
+    separate.toString(),
+    forceLayout.toString(),
+    islandLayout.toString(),
+    layeredLayout.toString(),
+    runLayout.toString(),
+    `self.onmessage = (event) => {
+      const job = event.data;
+      settings = job.settings;
+      try {
+        const positions = runLayout(job.layout, job.items, job.edges);
+        const flat = {};
+        for (const [key, point] of positions) flat[key] = [point.x, point.y];
+        self.postMessage({ id: job.id, flat });
+      } catch (error) {
+        self.postMessage({ id: job.id, error: String(error) });
+      }
+    };`,
+  ];
+  return parts.join("\n");
+}
+
+function ensureLayoutWorker() {
+  if (layoutWorker || layoutWorkerBroken) return layoutWorker;
+  try {
+    const blob = new Blob([layoutWorkerSource()], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    layoutWorker = new Worker(url);
+    URL.revokeObjectURL(url);
+    layoutWorker.onmessage = (event) => {
+      const pending = layoutJobs.get(event.data.id);
+      if (!pending) return;
+      layoutJobs.delete(event.data.id);
+      pending(event.data.error ? null : event.data.flat);
+    };
+    layoutWorker.onerror = () => {
+      // One failure is enough: tear it down and stay on the main thread rather
+      // than retrying per render.
+      layoutWorkerBroken = true;
+      for (const [, pending] of layoutJobs) pending(null);
+      layoutJobs.clear();
+      layoutWorker.terminate();
+      layoutWorker = null;
+    };
+  } catch (error) {
+    void error;
+    layoutWorkerBroken = true;
+    layoutWorker = null;
+  }
+  return layoutWorker;
+}
+
+/// Below this many nodes the round trip through a worker costs more than the
+/// layout itself, and a scene that pops in one frame beats one that arrives a
+/// tick later.
+const WORKER_LAYOUT_FLOOR = 300;
+
+/// The layout for a scene, from cache when it is there, off-thread when that is
+/// worth it, on the main thread otherwise.
+async function layoutFor(spec) {
+  if (!spec.items.length) return new Map();
+  const key = layoutKey(spec);
+  const stored = readLayoutCache(key);
+  if (stored) return stored;
+  const worker = spec.items.length >= WORKER_LAYOUT_FLOOR ? ensureLayoutWorker() : null;
+  if (worker) {
+    const id = ++layoutJob;
+    const flat = await new Promise((resolve) => {
+      layoutJobs.set(id, resolve);
+      worker.postMessage({
+        id,
+        layout: spec.layout,
+        settings: { ...settings },
+        // Only what the physics reads: keys, sizes, layer hints, endpoints.
+        items: layoutItems(spec),
+        edges: spec.edges.map((edge) => ({ from: edge.from, to: edge.to })),
+      });
+    });
+    if (flat) {
+      const positions = new Map(Object.entries(flat).map(([id2, value]) => [id2, { x: value[0], y: value[1], r: 6 }]));
+      writeLayoutCache(key, positions);
+      return positions;
+    }
+  }
+  return cachedLayout(spec);
+}
+
+function readLayoutCache(key) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || "null");
+    if (stored) return new Map(Object.entries(stored).map(([id, value]) => [id, { x: value[0], y: value[1], r: 6 }]));
+  } catch (error) {
+    void error;
+  }
+  return null;
+}
+
+function writeLayoutCache(key, positions) {
+  try {
+    const flat = {};
+    for (const [id, point] of positions) flat[id] = [Math.round(point.x * 100) / 100, Math.round(point.y * 100) / 100];
+    localStorage.setItem(key, JSON.stringify(flat));
+  } catch (error) {
+    void error; // a full quota is not a reason to fail a render
+  }
+}
+
+function cachedLayout(spec) {
+  const key = layoutKey(spec);
+  const stored = readLayoutCache(key);
+  if (stored) return stored;
+  const positions = runLayout(spec.layout, layoutItems(spec), spec.edges);
+  writeLayoutCache(key, positions);
+  return positions;
+}
+
+// --- Rendering ---------------------------------------------------------------
+const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function nodeReducer(key, data) {
-  const n = data._n;
-  const res = { ...data };
-  if (hiddenKinds.has(n.kind)) { res.hidden = true; return res; }
+  const result = { ...data };
   if (hoveredNode) {
-    const nb = neighborsOf.get(hoveredNode.id);
-    if (n !== hoveredNode && !(nb && nb.has(n.id))) { res.color = "#1a1a18"; res.label = null; }
-  } else if ((isolatedCommunity !== null || searchQuery) && !nodeVisible(n)) {
-    res.color = "#161614";
-    res.label = null;
+    const near = neighborsOf.get(hoveredNode.id);
+    const self = data._node && data._node.id === hoveredNode.id;
+    if (!self && !(data._node && near && near.has(data._node.id))) {
+      // Dim, never hide: a reader must still see the shape they are inside.
+      result.color = fade(data.color, 0.28);
+      result.label = null;
+    }
   }
-  if (selected && n.id === selected.id) res.highlighted = true;
-  return res;
+  if (searchQuery && data.label && !data.label.toLowerCase().includes(searchQuery)) {
+    result.color = fade(data.color, 0.3);
+  }
+  if (selected && data._node && data._node.id === selected.id) {
+    result.highlighted = true;
+    result.size = data.size * 1.35 + 2;
+    // Selecting a node is asking to look at it, so it comes back to full
+    // strength however deep its tier normally sits.
+    result.color = communityColor(data._node.community);
+  }
+  return result;
 }
+
 function edgeReducer(key, data) {
-  const e = data._e;
-  const res = { ...data };
-  if (hiddenConf.has(e.confidence)) { res.hidden = true; return res; }
-  res.color = edgeShade();
+  const result = { ...data };
   if (hoveredNode) {
-    if (e.source === hoveredNode.id || e.target === hoveredNode.id) { res.color = EDGE_HL; res.size = 1.6; }
-    else res.hidden = true;
-  } else if ((isolatedCommunity !== null || searchQuery || hiddenKinds.size > 0) && !(nodeVisible(e.s) && nodeVisible(e.t))) {
-    res.hidden = true;
+    const incidentTo = data._edge && (data._edge.source === hoveredNode.id || data._edge.target === hoveredNode.id);
+    if (incidentTo) {
+      result.color = EDGE_HL;
+      result.size = Math.max(data.size, 1.8);
+    } else {
+      // Fade rather than hide, so the surrounding structure stays legible.
+      result.color = fade(data.color, 0.22);
+    }
   }
-  return res;
+  return result;
 }
 
-function refresh() { if (renderer) renderer.refresh(); }
-function syncGraph() {
-  for (const n of nodes) graph.mergeNodeAttributes(String(n.id), { x: n.x, y: n.y });
-}
-function syncSizes() {
-  for (const n of nodes) graph.setNodeAttribute(String(n.id), "size", sizeOf(n));
+// Semantic zoom: which labels are worth drawing depends on how far out the
+// camera is, not on a fixed threshold.
+/// Roughly how many labels a zoom band should carry. Fixed pixel thresholds do
+/// not survive a change in how nodes are sized: the floor was a constant tuned
+/// against the old sizes, and after the file/symbol tiers landed it sat just
+/// above the largest node in the scene, so a view of 90 files drew no names at
+/// all. Asking for a count instead and reading the threshold off the scene's own
+/// size distribution cannot drift that way.
+function labelBudgetFor(ratio) {
+  if (ratio > 0.6) return 16;
+  if (ratio > 0.25) return 44;
+  return 140;
 }
 
-function labelThreshold() {
-  // slider 1..10 (default 4): higher density → lower rendered-size cutoff.
-  return Math.max(0.5, 13 - settings.labelDensity * 2);
+/// Semantic zoom: which labels are worth drawing depends on how far out the
+/// camera is, not on a fixed threshold.
+function applySemanticZoom() {
+  if (!renderer || !scene) return;
+  const ratio = renderer.getCamera().getState().ratio;
+  // Small scenes are never crowded, so the zoom band must not silently strip
+  // their labels: a nine-node impact fan-out with no labels answers nothing.
+  if (scene.order <= 60) {
+    if (renderer.getSetting("labelRenderedSizeThreshold") !== 0) {
+      renderer.setSetting("labelRenderedSizeThreshold", 0);
+    }
+    return;
+  }
+  const budget = Math.max(
+    4,
+    Math.round(labelBudgetFor(ratio) * (0.35 + settings.labelDensity / 6))
+  );
+  const sizes = [];
+  for (const key of scene.nodes()) {
+    const display = renderer.getNodeDisplayData(key);
+    if (display) sizes.push(renderer.scaleSize(display.size));
+  }
+  sizes.sort((left, right) => right - left);
+  // Just under the size of the last node inside the budget, so exactly that many
+  // clear the bar.
+  const floor = budget >= sizes.length ? 0 : Math.max(0, sizes[budget] - 0.01);
+  if (renderer.getSetting("labelRenderedSizeThreshold") !== floor) {
+    renderer.setSetting("labelRenderedSizeThreshold", floor);
+  }
 }
 
-function initRenderer() {
-  renderer = new Sigma(graph, container, {
-    minCameraRatio: 0.03,
-    maxCameraRatio: 20,
-    labelFont: '"JetBrains Mono", ui-monospace, monospace',
-    labelSize: 10.5,
-    labelWeight: "500",
-    labelColor: { color: "#c9c9c3" },
-    labelRenderedSizeThreshold: labelThreshold(),
-    defaultEdgeColor: edgeShade(),
+/// Every render takes a ticket. An off-thread layout can land after the user has
+/// already switched modes, and a stale scene overwriting the current one is
+/// worse than a slow one.
+let renderTicket = 0;
+
+async function renderScene(spec) {
+  const ticket = ++renderTicket;
+  const positions = await layoutFor(spec);
+  if (ticket !== renderTicket) return;
+
+  sceneSpec = spec;
+  sceneOmitted = spec.omitted || 0;
+  // Sigma shrinks a node by `1 / sqrt(zoom)`, which is deliberately sublinear:
+  // zooming out to fit a thousand nodes does not shrink them to a thousandth.
+  // Past a few hundred their combined area exceeds the viewport and they must
+  // touch whatever the layout does, so density is taken out of the node size
+  // instead — the spacing the layout produced then survives the fit.
+  const density = Math.min(1, Math.sqrt(SCENE_DENSITY_TARGET / Math.max(spec.items.length, 1)));
+  scene = new graphology.Graph({ multi: true, type: "directed" });
+  for (const item of spec.items) {
+    if (scene.hasNode(item.key)) continue;
+    scene.addNode(item.key, density === 1 ? item : { ...item, size: item.size * density });
+  }
+  for (const edge of spec.edges) {
+    if (!scene.hasNode(edge.from) || !scene.hasNode(edge.to)) continue;
+    scene.addEdgeWithKey(edge.key, edge.from, edge.to, edge);
+  }
+  for (const key of scene.nodes()) {
+    const point = positions.get(key) || { x: 0, y: 0 };
+    scene.mergeNodeAttributes(key, { x: point.x, y: point.y });
+  }
+
+  if (renderer) {
+    // Kill the old renderer before dropping the overlay: a frame that lands
+    // between the two would draw the old scene onto the new canvas.
+    renderer.removeAllListeners();
+    renderer.kill();
+  }
+  discardOverlay();
+  renderer = new Sigma(scene, document.getElementById("view"), {
+    // A mode switch or a modal can hide this container; that is a normal
+    // state here, not a misconfiguration.
+    allowInvalidContainer: true,
+    renderEdgeLabels: false,
+    // Needed for the per-node `zIndex` that keeps files above their methods.
+    zIndex: true,
+    defaultEdgeColor: EDGE_COLOR,
+    labelColor: { color: "#f2f2ee" },
+    // Sigma's default hover renderer hardcodes a white plate and then paints
+    // the label with `labelColor` on top of it, which on a dark page is white
+    // on white. Ours uses the page's own surface colour.
+    hoverRenderer: drawHoverLabel,
+    labelSize: 11,
+    labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    // Denser than sigma's default: the grid drops a label whose cell is taken,
+    // and a scene of large file circles sitting close together lost nearly all
+    // of them — every node visible, none of them named.
+    labelGridCellSize: spec.layout === "layered" ? 80 : 100,
+    labelDensity: 1.1,
+    labelRenderedSizeThreshold: 13,
     nodeReducer,
     edgeReducer,
-    allowInvalidContainer: true,
-    // Sigma's default hover chip is a white rounded box — repaint it dark to
-    // match the theme (also used for `highlighted` selected nodes).
-    hoverRenderer: (context, data, hsettings) => {
-      if (!data.label) return;
-      const size = hsettings.labelSize;
-      context.font = `${hsettings.labelWeight} ${size}px ${hsettings.labelFont}`;
-      const w = context.measureText(data.label).width + 12;
-      const x = data.x + data.size + 5;
-      const y = data.y;
-      context.fillStyle = "#121212";
-      context.fillRect(x - 3, y - size / 2 - 5, w, size + 10);
-      context.strokeStyle = "#373531";
-      context.strokeRect(x - 3, y - size / 2 - 5, w, size + 10);
-      context.fillStyle = "#f2f2ee";
-      context.fillText(data.label, x + 3, y + size / 3);
-    },
+    minCameraRatio: 0.03,
+    maxCameraRatio: 14,
   });
-  camera = renderer.getCamera();
-
   renderer.on("enterNode", ({ node }) => {
-    hoveredNode = graph.getNodeAttribute(node, "_n");
-    container.style.cursor = "pointer";
-    refresh();
+    hoveredNode = scene.getNodeAttribute(node, "_node") || null;
+    renderer.refresh();
   });
   renderer.on("leaveNode", () => {
     hoveredNode = null;
-    container.style.cursor = "default";
-    refresh();
+    renderer.refresh();
   });
   renderer.on("clickNode", ({ node }) => {
-    selected = graph.getNodeAttribute(node, "_n");
-    showPanel(selected);
-    markTreeActive();
-    refresh();
+    // A module bubble is a thing to open, so opening it is the click. The
+    // panel still appears, so nothing is lost, but seeing what is inside no
+    // longer costs a trip through a side panel button.
+    const aggregate = scene.getNodeAttribute(node, "_aggregate");
+    if (aggregate) {
+      const expanded = new Set(State.expanded);
+      expanded.has(aggregate.id) ? expanded.delete(aggregate.id) : expanded.add(aggregate.id);
+      setState({ expanded });
+      return;
+    }
+    inspect(node);
+  });
+  renderer.on("doubleClickNode", ({ node }) => {
+    // Double-click reads the code. The status bar has promised this since the
+    // first version of the page.
+    const target = scene.getNodeAttribute(node, "_node");
+    if (target && target.file) openFile(target.file, target.startLine, target.endLine);
   });
   renderer.on("clickStage", () => {
     selected = null;
-    document.getElementById("panel").style.display = "none";
-    markTreeActive();
-    refresh();
+    document.getElementById("panel").classList.remove("open");
+    renderer.refresh();
   });
+  renderer.getCamera().on("updated", () => {
+    applySemanticZoom();
+    scheduleCameraWrite();
+    // Sigma repaints a camera move without emitting `afterRender`, so an
+    // overlay bound only to that event keeps the outlines wherever the nodes
+    // used to be: the shapes stop following the graph and pile up wherever the
+    // last full render happened to leave them.
+    scheduleOverlay();
+  });
+  renderer.on("afterRender", drawGrammar);
+  window.addEventListener("resize", scheduleOverlay);
+  // Sigma has not measured the scene when the renderer is constructed, so the
+  // first fit can read stale display data. Fitting again after the first frame
+  // costs one camera write and is the difference between the scene filling the
+  // viewport and a corner of it filling the screen.
+  requestAnimationFrame(() => {
+    if (renderer && !State.cam) fitScene();
+  });
+  fitScene();
+  applySemanticZoom();
+  renderSceneStatus(spec);
+}
 
-  // Drag: the documented sigma v2 pattern — mouse captor owns the gesture,
-  // preventSigmaDefault keeps the camera from panning underneath.
-  renderer.on("downNode", (e) => {
-    dragging = graph.getNodeAttribute(e.node, "_n");
-    dragPos = [dragging.x, dragging.y];
-    startSim(0.2);
-  });
-  renderer.getMouseCaptor().on("mousemovebody", (e) => {
-    if (!dragging) return;
-    const pos = renderer.viewportToGraph(e);
-    dragPos = [pos.x, pos.y];
-    dragging.x = pos.x;
-    dragging.y = pos.y;
-    graph.mergeNodeAttributes(String(dragging.id), { x: pos.x, y: pos.y });
-    e.preventSigmaDefault();
-    e.original.preventDefault();
-    e.original.stopPropagation();
-  });
-  renderer.getMouseCaptor().on("mouseup", () => {
-    dragging = null;
-    dragPos = null;
-  });
-  renderer.getMouseCaptor().on("mousedown", () => {
-    if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
+// --- Visual grammar overlay --------------------------------------------------
+// Sigma's default programs draw circles and solid lines, so node kind and
+// relation kind had nowhere to live except a label glyph and a hue. This layer
+// draws the missing channels — an outline shape per node kind, a dash pattern
+// per relation kind — on a 2D canvas pinned over the WebGL layers and redrawn
+// after each sigma frame. A custom WebGL program would avoid the second pass;
+// at the scene sizes these modes produce (hundreds of nodes, not thousands)
+// the pass is cheaper than the shader work it would replace.
+//
+// Shapes are outlines around the node sigma already drew, not replacements, so
+// a small radius error degrades to a slightly loose ring rather than a wrong
+// picture.
+// `calls` is the common case and stays solid; everything else is
+// distinguishable without reading a legend.
+const REL_DASH = {
+  imports: [5, 4],
+  inherits: [9, 3],
+  implements: [2, 3],
+  explains: [1, 4],
+  references: [1, 6],
+};
+
+let overlayCanvas = null;
+
+function ensureOverlay() {
+  if (overlayCanvas && overlayCanvas.isConnected) return overlayCanvas;
+  overlayCanvas = document.createElement("canvas");
+  overlayCanvas.id = "grammar-overlay";
+  overlayCanvas.setAttribute("aria-hidden", "true");
+  document.getElementById("view").append(overlayCanvas);
+  return overlayCanvas;
+}
+
+/// Drops the overlay so the next scene starts on a blank one. A canvas that
+/// outlives the renderer that drew it keeps painting whatever the last frame
+/// left there: rings around nodes that have since moved or stopped existing,
+/// which read as debris in the middle of the graph.
+function discardOverlay() {
+  if (overlayCanvas && overlayCanvas.isConnected) overlayCanvas.remove();
+  overlayCanvas = null;
+}
+
+let overlayFrame = null;
+
+/// Coalesces overlay redraws into one per animation frame. A camera move emits
+/// many `updated` events per frame and the overlay only has to be right once.
+function scheduleOverlay() {
+  if (overlayFrame !== null) return;
+  overlayFrame = requestAnimationFrame(() => {
+    overlayFrame = null;
+    drawGrammar();
   });
 }
 
-function zoomToNode(n, ratio = 0.25) {
-  const p = renderer && renderer.getNodeDisplayData(String(n.id));
-  if (p) camera.animate({ x: p.x, y: p.y, ratio }, { duration: 600 });
+function drawGrammar() {
+  if (!renderer || !scene) return;
+  const host = document.getElementById("view");
+  if (!host.offsetWidth || !host.offsetHeight) return;
+  const canvas = ensureOverlay();
+  const scale = window.devicePixelRatio || 1;
+  if (canvas.width !== host.offsetWidth * scale || canvas.height !== host.offsetHeight * scale) {
+    canvas.width = host.offsetWidth * scale;
+    canvas.height = host.offsetHeight * scale;
+    canvas.style.width = `${host.offsetWidth}px`;
+    canvas.style.height = `${host.offsetHeight}px`;
+  }
+  const context = canvas.getContext("2d");
+  // Clear the whole backing store in device pixels, with no transform in
+  // effect. Clearing in CSS pixels under a scaled transform only covers the
+  // canvas while the transform and the backing size agree; when they drift,
+  // whatever was drawn into the uncleared band stays on screen.
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.setTransform(scale, 0, 0, scale, 0, 0);
+
+  context.lineWidth = 1;
+  for (const key of scene.edges()) {
+    const attributes = scene.getEdgeAttributes(key);
+    const dash = REL_DASH[attributes._edge && attributes._edge.kind];
+    if (!dash) continue;
+    const reduced = edgeReducer(key, attributes);
+    if (reduced.hidden) continue;
+    const [from, to] = scene.extremities(key);
+    const start = renderer.getNodeDisplayData(from);
+    const end = renderer.getNodeDisplayData(to);
+    if (!start || !end) continue;
+    const a = renderer.graphToViewport(start);
+    const b = renderer.graphToViewport(end);
+    context.setLineDash(dash);
+    context.strokeStyle = reduced.color || attributes.color;
+    context.beginPath();
+    context.moveTo(a.x, a.y);
+    context.lineTo(b.x, b.y);
+    context.stroke();
+  }
+
+  context.setLineDash([]);
 }
 
-function fitView(duration = 500) {
+/// Share of the viewport the scene is asked to fill, leaving room for labels,
+/// which stick out past the nodes they belong to.
+const FIT_MARGIN = 0.86;
+
+/// Frames the scene on its own content.
+///
+/// A fixed camera ratio is not a fit: it assumed every layout ends up the same
+/// size, so a dense module sat in one corner of an empty canvas while a
+/// three-node path filled the screen. The extent is measured from where the
+/// nodes actually landed, at the 2nd and 98th percentile so one stray node
+/// cannot zoom the whole scene out, and the camera converges on it in a couple
+/// of passes rather than by inverting sigma's normalisation by hand.
+function fitScene() {
   if (!renderer) return;
-  // 2nd/98th percentile bbox: stray disconnected nodes shouldn't shrink the
-  // fit for everything actually connected.
-  const xs = nodes.map((d) => d.x).sort((a, b) => a - b);
-  const ys = nodes.map((d) => d.y).sort((a, b) => a - b);
-  const at = (arr, p) => arr[Math.floor((arr.length - 1) * p)];
-  renderer.setCustomBBox({ x: [at(xs, 0.02), at(xs, 0.98)], y: [at(ys, 0.02), at(ys, 0.98)] });
-  if (duration === 0) camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-  else camera.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration });
-}
-
-// --- Interaction ------------------------------------------------------------
-const neighborsOf = new Map();
-for (const e of links) {
-  (neighborsOf.get(e.source) || neighborsOf.set(e.source, new Set()).get(e.source)).add(e.target);
-  (neighborsOf.get(e.target) || neighborsOf.set(e.target, new Set()).get(e.target)).add(e.source);
-}
-
-// --- Live simulation ---------------------------------------------------------
-// Drag (or the "Live simulation" toggle) reheats fa2Step at a small decaying
-// alpha. Default OFF: the perpetual ticker costs real CPU and the graph must
-// stay smooth on weak machines — motion is opt-in, drag always works.
-let simAlpha = 0;
-let simSleeping = true;
-let simQueued = false;
-let simTickCount = 0;
-let dragging = null;
-let dragPos = null;
-
-function simFloor() {
-  return settings.liveSim && nodes.length <= 2000 ? 0.012 : 0;
-}
-
-function startSim(alpha) {
-  simAlpha = Math.max(simAlpha, alpha);
-  if (simSleeping) { simSleeping = false; scheduleSim(); }
-}
-
-function scheduleSim() {
-  if (simQueued) return;
-  simQueued = true;
-  const run = () => { if (!simQueued) return; simQueued = false; simTick(); };
-  requestAnimationFrame(run);
-  setTimeout(run, 120);
-}
-
-function simTick() {
-  if (simSleeping) return;
-  fa2Step(simAlpha, 0);
-  if (dragging && simTickCount % 3 === 0 && nodes.length <= 2000) noverlapStep();
-  if (dragging && dragPos) { dragging.x = dragPos[0]; dragging.y = dragPos[1]; }
-  simAlpha = Math.max(simAlpha * 0.95, simFloor());
-  simTickCount++;
-  syncGraph();
-  refresh();
-  if (simAlpha <= 0.004 && !dragging) {
-    simSleeping = true;
+  if (State.cam) {
+    renderer.getCamera().setState({ x: State.cam.x, y: State.cam.y, ratio: State.cam.ratio, angle: 0 });
     return;
   }
-  scheduleSim();
+  const camera = renderer.getCamera();
+  camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  for (let pass = 0; pass < 6; pass++) {
+    const xs = [];
+    const ys = [];
+    for (const key of scene.nodes()) {
+      // A filtered-out node is still in the graph, and framing the scene around
+      // nodes nobody can see leaves the visible ones crowded into a corner.
+      if (nodeReducer(key, scene.getNodeAttributes(key)).hidden) continue;
+      const display = renderer.getNodeDisplayData(key);
+      if (!display) continue;
+      const point = renderer.framedGraphToViewport(display);
+      xs.push(point.x);
+      ys.push(point.y);
+    }
+    if (xs.length < 2) return;
+    xs.sort((left, right) => left - right);
+    ys.sort((left, right) => left - right);
+    // Nearly the whole extent: percentiles only guard against a single node
+    // stranded far away, and cutting 2% of an island cuts a visible chunk of it.
+    const low = (values) => values[Math.floor((values.length - 1) * 0.005)];
+    const high = (values) => values[Math.ceil((values.length - 1) * 0.995)];
+    const { width, height } = renderer.getDimensions();
+    const spanX = Math.max(high(xs) - low(xs), 1);
+    const spanY = Math.max(high(ys) - low(ys), 1);
+    const scale = Math.max(spanX / (width * FIT_MARGIN), spanY / (height * FIT_MARGIN));
+    const centre = renderer.viewportToFramedGraph({
+      x: (low(xs) + high(xs)) / 2,
+      y: (low(ys) + high(ys)) / 2,
+    });
+    const state = camera.getState();
+    camera.setState({ x: centre.x, y: centre.y, ratio: state.ratio * scale, angle: 0 });
+    if (Math.abs(scale - 1) < 0.02) break;
+  }
 }
 
-function stopSim() {
-  simSleeping = true;
-  simQueued = false;
-  simAlpha = 0;
+let cameraTimer = null;
+function scheduleCameraWrite() {
+  clearTimeout(cameraTimer);
+  cameraTimer = setTimeout(() => {
+    if (!renderer) return;
+    const { x, y, ratio } = renderer.getCamera().getState();
+    State.cam = { x, y, ratio };
+    writeUrl(false);
+  }, 400);
+}
+
+function renderSceneStatus(spec) {
+  const parts = [];
+  if (spec.caption) parts.push(spec.caption);
+  if (spec.omitted) parts.push(`${spec.omitted} more hidden by the scene cap`);
+  document.getElementById("status-counts").textContent =
+    `${parts.join(" · ")}${parts.length ? " · " : ""}${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
+  const empty = document.getElementById("empty-state");
+  empty.hidden = !spec.empty;
+  if (spec.empty) empty.textContent = spec.empty;
+  if (spec.omitted) notice(`Scene capped at ${MAX_SCENE_NODES} nodes — ${spec.omitted} more are hidden. Narrow the depth or filters to see them.`);
+  if (spec.ignoredDirection) {
+    notice("No route follows the arrows between these two, so this path walks some edges backwards. Switch to \u201carrows only\u201d to refuse that.");
+  }
 }
 
 // --- Panels -----------------------------------------------------------------
@@ -818,41 +2347,6 @@ function escapeHtml(s) {
 }
 function wikiSlug(path) {
   return path.replace(/[/\\.]/g, "_");
-}
-
-function showPanel(d) {
-  const panel = document.getElementById("panel");
-  panel.style.display = "block";
-  const callers = links.filter((l) => l.target === d.id);
-  const callees = links.filter((l) => l.source === d.id);
-  const list = (edges, key) =>
-    edges
-      .map((e) => e[key])
-      .filter(Boolean)
-      .map((n) => `<li><code data-node="${n.id}">${escapeHtml(n.name)}</code> — ${escapeHtml(n.file)}:${n.startLine}</li>`)
-      .join("");
-  const hasSource = Object.hasOwn(FILES, d.file);
-  const meta = communityMeta[d.community];
-  panel.innerHTML = `
-    <h2>${escapeHtml(d.kind)} <code>${escapeHtml(d.name)}</code></h2>
-    <p>${escapeHtml(d.file)}:${d.startLine}-${d.endLine} &middot; ${d.degree} connection(s)</p>
-    <p class="comm-chip"><span class="dot" style="background:${communityColor(d.community)}"></span>${escapeHtml(meta.name)} (${meta.size})</p>
-    <div class="actions">
-      ${hasSource ? `<button id="view-file-btn">View full file</button>` : ""}
-      <a class="btn" href="wiki/${wikiSlug(d.file)}.html">Wiki page</a>
-    </div>
-    <h3>Called by / imported by</h3><ul>${list(callers, "s") || "<li>none</li>"}</ul>
-    <h3>Calls / imports</h3><ul>${list(callees, "t") || "<li>none</li>"}</ul>
-  `;
-  if (hasSource) {
-    document.getElementById("view-file-btn").addEventListener("click", () => openFile(d.file, d.startLine, d.endLine));
-  }
-  for (const el of panel.querySelectorAll("code[data-node]")) {
-    el.addEventListener("click", () => {
-      const n = byId.get(Number(el.dataset.node));
-      if (n) { selected = n; showPanel(n); zoomToNode(n); markTreeActive(); refresh(); }
-    });
-  }
 }
 
 // --- Syntax highlighting (file modal) -----------------------------------------
@@ -928,8 +2422,16 @@ function highlightLine(raw, lang, st) {
 
 function openFile(file, startLine, endLine) {
   const content = FILES[file];
-  if (content === undefined) return;
   document.getElementById("fm-title").textContent = file;
+  // Beyond the page's source budget a file's text is not embedded. Say so and
+  // give the reader the location, rather than opening an empty modal.
+  if (content === undefined) {
+    document.getElementById("fm-body").innerHTML =
+      `<div class="fm-missing">Source not embedded in this page &mdash; ${FILES_OMITTED} file(s) exceeded the offline source budget.` +
+      `<br><br><code>${escapeHtml(file)}</code>${startLine ? `, line ${startLine}` : ""}<br><br>Open it in your editor to read it.</div>`;
+    document.getElementById("filemodal").style.display = "flex";
+    return;
+  }
   const lang = langOf(file);
   const st = { block: false };
   const lines = content.split("\n");
@@ -954,156 +2456,33 @@ document.getElementById("fm-close").addEventListener("click", () => {
 document.getElementById("filemodal").addEventListener("click", (event) => {
   if (event.target.id === "filemodal") event.target.style.display = "none";
 });
+// Escape unwinds one layer at a time: modal, chat, then the graph itself
+// (handled with the rest of the keyboard map further down).
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   const modal = document.getElementById("filemodal");
-  if (modal.style.display === "flex") { modal.style.display = "none"; return; }
+  if (modal.style.display === "flex") {
+    modal.style.display = "none";
+    event.stopPropagation();
+    return;
+  }
   const chat = document.getElementById("chat-panel");
-  if (chat.classList.contains("open")) { toggleChat(false); return; }
-  if (isolatedCommunity !== null) { setIsolated(null); return; }
-  selected = null;
-  document.getElementById("panel").style.display = "none";
-  markTreeActive();
-  refresh();
+  if (chat.classList.contains("open")) {
+    toggleChat(false);
+    event.stopPropagation();
+  }
 });
 
 document.getElementById("search").addEventListener("input", (event) => {
   searchQuery = event.target.value.trim().toLowerCase();
-  refresh();
+  if (renderer) renderer.refresh();
 });
 document.getElementById("search").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !searchQuery) return;
-  const hit = nodes.find((n) => nodeVisible(n) && n.name.toLowerCase().includes(searchQuery));
-  if (hit) { selected = hit; showPanel(hit); zoomToNode(hit); markTreeActive(); }
-});
-
-// --- Sidebar: explorer tree ---------------------------------------------------
-function focusNode(n) {
-  selected = n;
-  showPanel(n);
-  zoomToNode(n);
-  markTreeActive();
-  refresh();
-}
-
-function buildTree() {
-  // One entry per file/doc node; nested by directory.
-  const root = { dirs: new Map(), files: [] };
-  const entries = nodes.filter((n) => n.kind === "file" || n.kind === "doc");
-  entries.sort((a, b) => (a.file < b.file ? -1 : 1));
-  for (const n of entries) {
-    const parts = n.file.split("/");
-    let cur = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!cur.dirs.has(parts[i])) cur.dirs.set(parts[i], { dirs: new Map(), files: [] });
-      cur = cur.dirs.get(parts[i]);
-    }
-    cur.files.push({ name: parts[parts.length - 1], node: n });
-  }
-  const render = (dir, depth) => {
-    let html = "";
-    for (const [name, sub] of [...dir.dirs.entries()].sort()) {
-      html += `<details${depth < 2 ? " open" : ""}><summary>${escapeHtml(name)}/</summary>${render(sub, depth + 1)}</details>`;
-    }
-    for (const f of dir.files) {
-      const ic = f.node.kind === "doc" ? "&#9671;" : "&#9642;";
-      html += `<span class="leaf" data-node="${f.node.id}"><span class="ic">${ic}</span>${escapeHtml(f.name)}</span>`;
-    }
-    return html;
-  };
-  const tree = document.getElementById("tree");
-  tree.innerHTML = render(root, 0);
-  for (const el of tree.querySelectorAll(".leaf")) {
-    el.addEventListener("click", () => {
-      const n = byId.get(Number(el.dataset.node));
-      if (n) focusNode(n);
-    });
-  }
-}
-
-function markTreeActive() {
-  for (const el of document.querySelectorAll("#tree .leaf")) {
-    el.classList.toggle("active", selected !== null && Number(el.dataset.node) === selected.id);
-  }
-}
-
-// --- Sidebar: filters ----------------------------------------------------------
-function setIsolated(c) {
-  isolatedCommunity = c;
-  for (const el of document.querySelectorAll("#f-modules .mod")) {
-    el.classList.toggle("active", Number(el.dataset.c) === c);
-  }
-  refresh();
-}
-
-function buildFilters() {
-  // Node kinds present in this graph, files first.
-  const kindCounts = new Map();
-  for (const n of nodes) kindCounts.set(n.kind, (kindCounts.get(n.kind) || 0) + 1);
-  const kindOrder = ["file", "doc", ...[...kindCounts.keys()].filter((k) => k !== "file" && k !== "doc").sort()];
-  const fk = document.getElementById("f-kinds");
-  fk.insertAdjacentHTML(
-    "beforeend",
-    kindOrder
-      .filter((k) => kindCounts.has(k))
-      .map((k) => `<label class="frow"><input type="checkbox" checked data-kind="${k}">${k}<span class="n">${kindCounts.get(k)}</span></label>`)
-      .join("")
-  );
-  for (const box of fk.querySelectorAll("input")) {
-    box.addEventListener("change", () => {
-      box.checked ? hiddenKinds.delete(box.dataset.kind) : hiddenKinds.add(box.dataset.kind);
-      refresh();
-    });
-  }
-
-  const confCounts = new Map();
-  for (const e of links) confCounts.set(e.confidence, (confCounts.get(e.confidence) || 0) + 1);
-  const fc = document.getElementById("f-conf");
-  fc.insertAdjacentHTML(
-    "beforeend",
-    ["EXTRACTED", "INFERRED", "AMBIGUOUS"]
-      .filter((c) => confCounts.has(c))
-      .map((c) => `<label class="frow"><input type="checkbox" checked data-conf="${c}">${c.toLowerCase()}<span class="n">${confCounts.get(c)}</span></label>`)
-      .join("")
-  );
-  for (const box of fc.querySelectorAll("input")) {
-    box.addEventListener("change", () => {
-      box.checked ? hiddenConf.delete(box.dataset.conf) : hiddenConf.add(box.dataset.conf);
-      refresh();
-    });
-  }
-
-  const fm = document.getElementById("f-modules");
-  fm.insertAdjacentHTML(
-    "beforeend",
-    communityMeta
-      .map(
-        (m) =>
-          `<div class="mod" data-c="${m.id}"><span class="dot" style="background:${communityColor(m.id)}"></span><span class="name">${escapeHtml(m.name)}</span><span class="n">${m.size}</span></div>`
-      )
-      .join("")
-  );
-  for (const el of fm.querySelectorAll(".mod")) {
-    el.addEventListener("click", () => {
-      const c = Number(el.dataset.c);
-      setIsolated(isolatedCommunity === c ? null : c);
-    });
-  }
-}
-
-// Tabs
-function selectTab(which) {
-  document.getElementById("tab-btn-explorer").classList.toggle("active", which === "explorer");
-  document.getElementById("tab-btn-filters").classList.toggle("active", which === "filters");
-  document.getElementById("tab-explorer").style.display = which === "explorer" ? "block" : "none";
-  document.getElementById("tab-filters").style.display = which === "filters" ? "block" : "none";
-}
-document.getElementById("tab-btn-explorer").addEventListener("click", () => selectTab("explorer"));
-document.getElementById("tab-btn-filters").addEventListener("click", () => selectTab("filters"));
-document.getElementById("sidebar-btn").addEventListener("click", () => {
-  document.body.classList.toggle("sidebar-closed");
-  if (renderer) renderer.resize();
-  fitView(300);
+  const hit =
+    nodes.find((node) => nodeAllowed(node) && node.name.toLowerCase() === searchQuery) ||
+    nodes.find((node) => nodeAllowed(node) && node.name.toLowerCase().includes(searchQuery));
+  if (hit) setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: String(hit.id) }, { push: true });
 });
 
 // --- AI chat -----------------------------------------------------------------
@@ -1519,8 +2898,7 @@ for (const [key, { input, out, fmt }] of Object.entries(sliders)) {
     settings[key] = Number(event.target.value);
     document.getElementById(out).textContent = fmt(settings[key]);
     saveSettings();
-    if (key === "nodeScale") syncSizes();
-    if (key === "labelDensity" && renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+    if (key === "nodeScale" || key === "labelDensity") applyState();
     refresh();
   });
 }
@@ -1528,17 +2906,24 @@ document.getElementById("s-reset").addEventListener("click", () => {
   settings = { ...DEFAULT_SETTINGS };
   saveSettings();
   syncSlidersFromSettings();
-  syncSizes();
-  if (renderer) renderer.setSetting("labelRenderedSizeThreshold", labelThreshold());
+  applySemanticZoom();
   refresh();
 });
 document.getElementById("s-livesim").addEventListener("change", (event) => {
   settings.liveSim = event.target.checked;
   saveSettings();
-  if (settings.liveSim) startSim(0.03);
+
 });
-document.getElementById("s-relayout").addEventListener("click", () => runLayout(true));
-document.getElementById("fit-btn").addEventListener("click", () => fitView(500));
+document.getElementById("s-relayout").addEventListener("click", () => {
+  // Drop cached positions for the scenes this settings change affects, then
+  // rebuild: a cached layout computed under different forces is not this
+  // layout.
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("aag-layout:")) localStorage.removeItem(key);
+  }
+  applyState();
+});
+document.getElementById("fit-btn").addEventListener("click", () => setState({ cam: null }));
 document.getElementById("settings-btn").addEventListener("click", () => {
   const panel = document.getElementById("settings-panel");
   const open = panel.style.display !== "block";
@@ -1547,65 +2932,921 @@ document.getElementById("settings-btn").addEventListener("click", () => {
 });
 syncSlidersFromSettings();
 
-// --- Layout driver ----------------------------------------------------------
-// Iterations scale down with graph size; work is chunked into batches so the
-// progress bar paints and the tab never freezes, even at 5k+ nodes.
-function runLayout(isRerun) {
-  stopSim();
-  const total = nodes.length > 5000 ? 160 : nodes.length > 1000 ? 260 : 400;
-  const noverlapIters = 60;
-  const progress = document.getElementById("progress");
-  const fill = document.getElementById("progress-fill");
-  if (!isRerun) progress.style.display = "flex";
-  let iter = 0;
+// --- Mode + URL state --------------------------------------------------------
+// One store, one writer. Every state worth sharing lives in the query string,
+// so any view can be pasted into a review — schema in
+// `docs/graph-experience.md`.
+const MODE_LIST = [
+  { id: "overview", label: "Overview", hint: "Modules and how they connect" },
+  { id: "explore", label: "Explore", hint: "One symbol and its neighbourhood" },
+  { id: "path", label: "Path", hint: "How one symbol reaches another" },
+  { id: "impact", label: "Impact", hint: "What breaks if this changes" },
+  { id: "contracts", label: "Contracts", hint: "Endpoints, schemas, and who serves them" },
+];
+const MODE_IDS = MODE_LIST.map((mode) => mode.id);
 
-  function batch() {
-    const chunk = nodes.length > 5000 ? 4 : 12;
-    for (let i = 0; i < chunk && iter < total; i++, iter++) {
-      fa2Step(Math.pow(1 - iter / total, 1.6));
-    }
-    fill.style.width = `${Math.round((iter / total) * 90)}%`;
-    if (isRerun) { syncGraph(); refresh(); }
-    if (iter < total) { setTimeout(batch, 0); return; }
-    for (let i = 0; i < noverlapIters; i++) { if (noverlapStep() === 0) break; }
-    fill.style.width = "100%";
-    progress.style.display = "none";
-    syncGraph();
-    fitView(isRerun ? 500 : 0);
-    refresh();
-    if (!isRerun) applyFocusParam();
-    // Small settle kick; decays to sleep unless liveSim keeps a floor.
-    startSim(0.03);
+const State = {
+  mode: "overview",
+  focus: null,
+  from: null,
+  to: null,
+  up: 1,
+  down: 1,
+  community: null,
+  expanded: new Set(),
+  rel: null,
+  conf: null,
+  kind: null,
+  pins: new Set(),
+  arrowsOnly: false,
+  routes: 4,
+  cam: null,
+};
+
+const ALL_REL = [...new Set(links.map((edge) => edge.kind))];
+const ALL_CONF = [...new Set(links.map((edge) => edge.confidence))];
+const ALL_KIND = [...new Set(nodes.map((node) => node.kind))];
+/// The kinds that hold other code rather than being held: what a reader means by
+/// "which files talk to which". `Structure only` narrows the graph to these, so
+/// the import and reference skeleton is readable without the thousand functions
+/// hanging off it.
+const CONTAINER_KINDS = ["file", "doc", "schema", "database_table", "infra_resource", "endpoint"];
+const containersOnly = () =>
+  !!State.kind && ALL_KIND.every((kind) => State.kind.has(kind) === CONTAINER_KINDS.includes(kind));
+
+function parseSet(value, cast) {
+  if (!value) return null;
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length ? new Set(cast ? parts.map(cast) : parts) : null;
+}
+/// How many routes the path search will enumerate at most. Yen's algorithm runs
+/// one breadth-first search per spur node per accepted route, so the cost grows
+/// with this; twelve routes on a repository-sized graph is still milliseconds,
+/// and a scene with more than that in it stops being readable anyway.
+const MAX_ROUTES = 12;
+
+const clampRoutes = (value, fallback) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(MAX_ROUTES, Math.round(parsed))) : fallback;
+};
+
+const clampDepth = (value, fallback) => {
+  // `Number(null)` is 0, not NaN, so an absent parameter would silently read
+  // as depth zero and show a lone node.
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(6, Math.round(parsed))) : fallback;
+};
+
+function readUrl() {
+  const query = new URLSearchParams(location.search);
+  const mode = query.get("mode");
+  State.mode = MODE_IDS.includes(mode) ? mode : query.get("focus") ? "explore" : "overview";
+  State.focus = query.get("focus") || null;
+  State.from = query.get("from") || null;
+  State.to = query.get("to") || null;
+  State.up = clampDepth(query.get("up"), 1);
+  State.down = clampDepth(query.get("down"), 1);
+  State.community = query.has("community") ? Number(query.get("community")) : null;
+  State.expanded = parseSet(query.get("expanded"), Number) || new Set();
+  State.rel = parseSet(query.get("rel"));
+  State.conf = parseSet(query.get("conf"), (value) => value.toUpperCase());
+  State.kind = parseSet(query.get("kind"));
+  State.pins = parseSet(query.get("pin"), Number) || new Set();
+  State.arrowsOnly = query.get("dir") === "arrows";
+  State.routes = clampRoutes(query.get("routes"), 4);
+  const cam = query.get("cam");
+  if (cam) {
+    const [x, y, ratio] = cam.split(",").map(Number);
+    State.cam = [x, y, ratio].every(Number.isFinite) ? { x, y, ratio } : null;
+  } else {
+    State.cam = null;
   }
-  setTimeout(batch, 0);
 }
 
-// Deep links: graph.html?focus=<file-or-symbol> (the wiki links back here).
-function applyFocusParam() {
-  const focus = new URLSearchParams(location.search).get("focus");
-  if (!focus) return;
-  const target =
-    nodes.find((n) => n.file === focus && n.kind === "file") ||
-    nodes.find((n) => n.name === focus) ||
-    nodes.find((n) => n.file === focus);
-  if (target) focusNode(target);
+function writeUrl(push) {
+  const query = new URLSearchParams();
+  query.set("mode", State.mode);
+  if (State.focus) query.set("focus", State.focus);
+  if (State.from) query.set("from", State.from);
+  if (State.to) query.set("to", State.to);
+  if (State.up !== 1) query.set("up", String(State.up));
+  if (State.down !== 1) query.set("down", String(State.down));
+  if (State.community !== null) query.set("community", String(State.community));
+  if (State.expanded.size) query.set("expanded", [...State.expanded].sort((a, b) => a - b).join(","));
+  if (State.rel) query.set("rel", [...State.rel].join(","));
+  if (State.conf) query.set("conf", [...State.conf].join(","));
+  if (State.kind) query.set("kind", [...State.kind].join(","));
+  if (State.pins.size) query.set("pin", [...State.pins].join(","));
+  if (State.arrowsOnly) query.set("dir", "arrows");
+  if (State.routes !== 4) query.set("routes", String(State.routes));
+  if (State.cam) query.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
+  const url = `${location.pathname}?${query.toString()}`;
+  // A mode or focus change is a navigation; a filter tweak is not, or the back
+  // button would walk one checkbox at a time.
+  if (push) history.pushState(null, "", url);
+  else history.replaceState(null, "", url);
 }
+
+function setState(patch, options) {
+  const cameraKept = patch && Object.prototype.hasOwnProperty.call(patch, "cam");
+  if (!cameraKept) State.cam = null;
+  Object.assign(State, patch);
+  writeUrl(options && options.push);
+  applyState();
+}
+
+// Filters are stored as what is allowed; the reducers work on what is hidden.
+let hiddenKinds = new Set();
+let hiddenConf = new Set();
+let hiddenRel = new Set();
+let searchQuery = "";
+
+function syncFilterSets() {
+  hiddenKinds = new Set(State.kind ? ALL_KIND.filter((kind) => !State.kind.has(kind)) : []);
+  hiddenConf = new Set(State.conf ? ALL_CONF.filter((conf) => !State.conf.has(conf)) : []);
+  hiddenRel = new Set(State.rel ? ALL_REL.filter((rel) => !State.rel.has(rel)) : []);
+}
+
+function buildModeSwitcher() {
+  const host = document.getElementById("modes");
+  host.innerHTML = MODE_LIST.map(
+    (mode, index) =>
+      `<button role="tab" data-mode="${mode.id}" aria-selected="false" title="${escapeHtml(mode.hint)} (${index + 1})">${mode.label}</button>`
+  ).join("");
+  for (const button of host.querySelectorAll("button")) {
+    button.addEventListener("click", () => enterMode(button.dataset.mode));
+  }
+}
+
+function enterMode(mode) {
+  if (!MODE_IDS.includes(mode) || mode === State.mode) return;
+  setState({ mode }, { push: true });
+}
+
+let noticeTimer = null;
+// A shared link can name a symbol that has since been renamed or deleted, and
+// a scene can be capped. Say so — degrading silently is how a reader concludes
+// the tool is broken.
+function notice(message) {
+  const host = document.getElementById("notice");
+  if (!message) {
+    host.hidden = true;
+    return;
+  }
+  host.textContent = message;
+  host.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    host.hidden = true;
+  }, 6000);
+}
+
+function resolveFocus(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && byId.has(numeric)) return byId.get(numeric);
+  const exact =
+    nodes.find((node) => node.file === value && node.kind === "file") ||
+    nodes.find((node) => node.name === value) ||
+    nodes.find((node) => node.file === value);
+  if (exact) return exact;
+  // Typing is not dictation. `bigbang` should find `src/bigbang.rs`, and case
+  // should not decide whether a path resolves. Most connected wins, so the
+  // loose match lands on the symbol someone probably meant.
+  const lowered = String(value).toLowerCase();
+  const candidates = nodes.filter(
+    (node) =>
+      (node.name || "").toLowerCase() === lowered ||
+      (node.file || "").toLowerCase() === lowered ||
+      (node.file || "").toLowerCase().endsWith(`/${lowered}`) ||
+      (node.kind === "file" && (node.file || "").toLowerCase().split("/").pop()?.split(".")[0] === lowered)
+  );
+  if (!candidates.length) return null;
+  return candidates.reduce((best, node) => ((node.degree || 0) > (best.degree || 0) ? node : best));
+}
+
+// --- Inspector ---------------------------------------------------------------
+// One panel for symbols, aggregates, paths, and contracts, because a reader
+// should not have to learn a second place to look.
+function inspect(key) {
+  const attributes = scene.getNodeAttributes(key);
+  if (attributes._overflow) {
+    inspectOverflow(attributes._overflow);
+    return;
+  }
+  if (attributes._aggregate) {
+    inspectAggregate(attributes._aggregate);
+    return;
+  }
+  const node = attributes._node;
+  if (!node) return;
+  selected = node;
+  renderer.refresh();
+  inspectNode(node, attributes);
+}
+
+function factRow(term, value) {
+  return `<dt>${term}</dt><dd>${value}</dd>`;
+}
+
+function relationRows(list, label) {
+  if (!list.length) return "";
+  const rows = list
+    .slice(0, 12)
+    .map((entry) => {
+      const other = entry.node;
+      return (
+        `<div class="callrow" data-node="${other.id}" tabindex="0" role="button">` +
+        `<span class="cname">${escapeHtml(nodeLabel(other))}</span>` +
+        `<span class="cfile">${escapeHtml(entry.edge.kind)} · ${entry.edge.confidence.toLowerCase()} · ${escapeHtml(other.file)}</span></div>`
+      );
+    })
+    .join("");
+  const more = list.length > 12 ? `<p class="cc-note">${list.length - 12} more</p>` : "";
+  return `<h4>${label} (${list.length})</h4>${rows}${more}`;
+}
+
+function inspectNode(node, attributes) {
+  const panel = document.getElementById("panel");
+  const callers = (incoming.get(node.id) || [])
+    .filter(edgeAllowed)
+    .map((edge) => ({ edge, node: byId.get(edge.source) }))
+    .filter((entry) => entry.node);
+  const callees = (outgoing.get(node.id) || [])
+    .filter(edgeAllowed)
+    .map((edge) => ({ edge, node: byId.get(edge.target) }))
+    .filter((entry) => entry.node);
+  const meta = communityMeta[node.community] || {};
+  const impact = attributes && attributes._impact;
+  panel.innerHTML = `
+    <h3>${escapeHtml(nodeLabel(node))}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(node.community)}"></span>${escapeHtml(meta.label || "unconnected")}</p>
+    <dl class="agg-facts">
+      ${factRow("kind", escapeHtml(node.kind))}
+      ${factRow("location", `${escapeHtml(node.file)}:${node.startLine}`)}
+      ${factRow("perspective", escapeHtml(node.perspective || "observed"))}
+      ${factRow("degree", node.degree || 0)}
+      ${factRow("incoming / outgoing", `${callers.length} / ${callees.length}`)}
+      ${ENTRYPOINTS.has(node.id) ? factRow("entrypoint", "yes") : ""}
+      ${impact ? factRow("impact", escapeHtml(impact)) : ""}
+    </dl>
+    <div class="agg-actions">
+      <button data-act="explore">Explore here</button>
+      <button data-act="impact">Impact</button>
+      <button data-act="path-from">Path from</button>
+      <button data-act="path-to">Path to</button>
+      <button data-act="pin">${State.pins.has(node.id) ? "Unpin" : "Pin"}</button>
+      <button data-act="source">Open source</button>
+      <a href="wiki/${wikiSlug(node.file)}.html">wiki</a>
+    </div>
+    ${relationRows(callers, "Incoming")}
+    ${relationRows(callees, "Outgoing")}
+  `;
+  panel.classList.add("open");
+  const act = {
+    explore: () => setState({ mode: "explore", focus: String(node.id) }, { push: true }),
+    impact: () => setState({ mode: "impact", focus: String(node.id) }, { push: true }),
+    "path-from": () => setState({ mode: "path", from: String(node.id) }, { push: true }),
+    "path-to": () => setState({ mode: "path", to: String(node.id) }, { push: true }),
+    pin: () => {
+      const pins = new Set(State.pins);
+      pins.has(node.id) ? pins.delete(node.id) : pins.add(node.id);
+      setState({ pins });
+      // The panel was built before the toggle, so its button would keep
+      // offering "Pin" for a node that is now pinned.
+      inspectNode(node, attributes);
+    },
+    source: () => openFile(node.file, node.startLine, node.endLine),
+  };
+  for (const button of panel.querySelectorAll("[data-act]")) {
+    button.addEventListener("click", () => act[button.dataset.act] && act[button.dataset.act]());
+  }
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    const go = () => {
+      const target = byId.get(Number(row.dataset.node));
+      if (target) setState({ mode: "explore", focus: String(target.id) }, { push: true });
+    };
+    row.addEventListener("click", go);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+}
+
+// The scene cap is a budget, not a judgement: say exactly what it held back
+// and offer to show it.
+function inspectOverflow(overflow) {
+  const panel = document.getElementById("panel");
+  const meta = communityMeta[overflow.community] || {};
+  const rows = overflow.members
+    .slice(0, 20)
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(
+      (node) =>
+        `<div class="callrow" data-node="${node.id}" tabindex="0" role="button"><span class="cname">${escapeHtml(nodeLabel(node))}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
+    )
+    .join("");
+  panel.innerHTML = `
+    <h3>${overflow.members.length} more in ${escapeHtml(meta.label || "#" + overflow.community)}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(overflow.community)}"></span>held back by the ${MAX_SCENE_NODES}-node scene cap</p>
+    <div class="agg-actions">
+      <button data-act="expand">Show them</button>
+    </div>
+    ${rows}
+    ${overflow.members.length > 20 ? `<p class="cc-note">${overflow.members.length - 20} not listed</p>` : ""}
+  `;
+  panel.classList.add("open");
+  panel.querySelector('[data-act="expand"]').addEventListener("click", () => {
+    const expanded = new Set(State.expanded);
+    expanded.add(overflow.community);
+    setState({ expanded });
+  });
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    row.addEventListener("click", () => setState({ focus: row.dataset.node }, { push: true }));
+  }
+}
+
+function inspectAggregate(community) {
+  const panel = document.getElementById("panel");
+  const meta = communityMeta[community.id] || {};
+  const total = community.internalEdges + community.externalEdges;
+  const cohesion = total ? Math.round((community.internalEdges / total) * 100) : 0;
+  const representatives = community.representatives
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(
+      (node) =>
+        `<div class="callrow" data-node="${node.id}" tabindex="0" role="button"><span class="cname">${escapeHtml(nodeLabel(node))}</span><span class="cfile">${escapeHtml(node.file)}</span></div>`
+    )
+    .join("");
+  const bundles = BUNDLES.filter((bundle) => bundle.a === community.id || bundle.b === community.id)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 8)
+    .map((bundle) => {
+      const other = bundle.a === community.id ? bundle.b : bundle.a;
+      const otherMeta = communityMeta[other] || {};
+      return `<div class="callrow"><span class="cname">${bundle.kind} &times;${bundle.count}</span><span class="cfile">${escapeHtml(otherMeta.label || "#" + other)} · ${bundle.ambiguous} ambiguous</span></div>`;
+    })
+    .join("");
+  panel.innerHTML = `
+    <h3>${escapeHtml(meta.label || "#" + community.id)}</h3>
+    <p class="comm-chip"><span class="dot" style="background:${communityColor(community.id)}"></span>module aggregate</p>
+    <dl class="agg-facts">
+      ${factRow("symbols", community.members.length)}
+      ${factRow("internal edges", community.internalEdges)}
+      ${factRow("external edges", community.externalEdges)}
+      ${factRow("cohesion", `${cohesion}%`)}
+      ${factRow("entrypoints", community.entrypoints)}
+      ${factRow("worst confidence", String(community.worstConfidence || "").toLowerCase())}
+    </dl>
+    <div class="agg-actions">
+      <button data-act="toggle">${State.expanded.has(community.id) ? "Collapse" : "Expand"} in place</button>
+      <button data-act="isolate">${State.community === community.id ? "Show all" : "Isolate"}</button>
+      <button data-act="explore">Explore this module</button>
+    </div>
+    ${representatives ? `<h4>Most connected</h4>${representatives}` : ""}
+    ${bundles ? `<h4>Connects to</h4>${bundles}` : ""}
+  `;
+  panel.classList.add("open");
+  const act = {
+    toggle: () => {
+      const expanded = new Set(State.expanded);
+      expanded.has(community.id) ? expanded.delete(community.id) : expanded.add(community.id);
+      setState({ expanded });
+    },
+    isolate: () => setState({ community: State.community === community.id ? null : community.id }),
+    explore: () => {
+      const target = byId.get(community.representatives[0]);
+      setState({ mode: "explore", focus: target ? String(target.id) : null, community: community.id }, { push: true });
+    },
+  };
+  for (const button of panel.querySelectorAll("[data-act]")) {
+    button.addEventListener("click", () => act[button.dataset.act] && act[button.dataset.act]());
+  }
+  for (const row of panel.querySelectorAll("[data-node]")) {
+    row.addEventListener("click", () => {
+      const target = byId.get(Number(row.dataset.node));
+      if (target) setState({ mode: "explore", focus: String(target.id), community: community.id }, { push: true });
+    });
+  }
+}
+
+// --- Mode chrome -------------------------------------------------------------
+// Depth and endpoint controls belong to the modes that use them, and appear
+// only there.
+function renderModeControls() {
+  const host = document.getElementById("mode-controls");
+  const parts = [];
+  if (State.mode === "explore" || State.mode === "impact") {
+    parts.push(
+      `<label>upstream <input id="ctl-up" type="number" min="0" max="6" value="${State.up}"></label>`,
+      `<label>downstream <input id="ctl-down" type="number" min="0" max="6" value="${State.down}"></label>`
+    );
+  }
+  if (State.mode === "path") {
+    // A typed endpoint that resolves to nothing used to blank the field, which
+    // reads as "the app ate my input". Keep the text and let the scene explain.
+    const name = (value) => {
+      if (!value) return "";
+      const node = resolveFocus(value);
+      return node ? node.name || node.file : String(value);
+    };
+    // Typing an exact symbol name from memory is not a user interface. The
+    // same list the search box uses backs both endpoints, and "use selection"
+    // fills one from whatever is currently selected.
+    parts.push(
+      `<label>from <input id="ctl-from" type="text" list="node-names" value="${escapeHtml(name(State.from))}" placeholder="symbol or file"></label>`,
+      `<button id="ctl-from-sel" title="use the selected node">&#8593;</button>`,
+      `<label>to <input id="ctl-to" type="text" list="node-names" value="${escapeHtml(name(State.to))}" placeholder="symbol or file"></label>`,
+      `<button id="ctl-to-sel" title="use the selected node">&#8593;</button>`,
+      `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`,
+      `<label>routes <input id="ctl-routes" type="number" min="1" max="${MAX_ROUTES}" value="${State.routes}"></label>`,
+      `<button id="ctl-dir" aria-pressed="${!State.arrowsOnly}" ` +
+        `title="fall back to ignoring edge direction when no route follows the arrows, or refuse to">` +
+        `${State.arrowsOnly ? "arrows only" : "any direction"}</button>`
+    );
+  }
+  parts.push(
+    `<button id="ctl-containers" aria-pressed="${containersOnly()}" ` +
+      `title="show only files, docs and other containers, or every symbol">` +
+      `${containersOnly() ? "structure only" : "all symbols"}</button>`
+  );
+  if (State.mode === "overview") {
+    const total = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0).length;
+    const allOpen = State.expanded.size >= total && total > 0;
+    parts.push(
+      `<button id="ctl-expand-all">${allOpen ? "Collapse all" : "Expand all"} modules</button>`,
+      `<span class="ctl-note">${State.expanded.size}/${total} expanded &middot; click a bubble to open it</span>`
+    );
+  }
+  host.innerHTML = parts.join("");
+  host.hidden = !parts.length;
+  const bind = (id, apply) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener("change", () => apply(input.value));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") apply(input.value);
+    });
+  };
+  bind("ctl-up", (value) => setState({ up: clampDepth(value, State.up) }));
+  bind("ctl-down", (value) => setState({ down: clampDepth(value, State.down) }));
+  bind("ctl-routes", (value) => setState({ routes: clampRoutes(value, State.routes) }));
+  bind("ctl-from", (value) => setState({ from: value || null }, { push: true }));
+  bind("ctl-to", (value) => setState({ to: value || null }, { push: true }));
+
+  const useSelection = (field) => {
+    if (!selected) {
+      notice("Select a node first, then use the arrow to make it an endpoint.");
+      return;
+    }
+    setState({ [field]: String(selected.id) }, { push: true });
+  };
+  document.getElementById("ctl-from-sel")?.addEventListener("click", () => useSelection("from"));
+  document.getElementById("ctl-to-sel")?.addEventListener("click", () => useSelection("to"));
+  document
+    .getElementById("ctl-swap")
+    ?.addEventListener("click", () => setState({ from: State.to, to: State.from }, { push: true }));
+  document
+    .getElementById("ctl-dir")
+    ?.addEventListener("click", () => setState({ arrowsOnly: !State.arrowsOnly }, { push: true }));
+
+  document.getElementById("ctl-containers")?.addEventListener("click", () => {
+    setState({
+      kind: containersOnly() ? null : new Set(ALL_KIND.filter((kind) => CONTAINER_KINDS.includes(kind))),
+    });
+  });
+  document.getElementById("ctl-expand-all")?.addEventListener("click", () => {
+    const all = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0);
+    const open = State.expanded.size >= all.length && all.length > 0;
+    if (!open && nodes.length > WHOLE_GRAPH_WARN) {
+      // Expanding everything means rendering everything. On a repository this
+      // size that is seconds of layout and a scene nobody can read, so say so
+      // rather than appearing to hang.
+      notice(`Opening all ${nodes.length.toLocaleString()} nodes — this will be slow and dense.`);
+    }
+    setState({ expanded: open ? new Set() : new Set(all.map((meta) => meta.id)) });
+  });
+}
+
+/// Every node name, once, for the endpoint pickers. Built lazily because a
+/// large repository has tens of thousands of them and the list is only needed
+/// when someone opens Path.
+let nodeNameList = null;
+function ensureNodeNameList() {
+  if (nodeNameList) return;
+  nodeNameList = document.createElement("datalist");
+  nodeNameList.id = "node-names";
+  const seen = new Set();
+  const options = [];
+  for (const node of nodes) {
+    const label = node.name || node.file;
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    options.push(`<option value="${escapeHtml(label)}"></option>`);
+    if (options.length >= 4000) break;
+  }
+  nodeNameList.innerHTML = options.join("");
+  document.body.appendChild(nodeNameList);
+}
+
+const SPEC_BUILDERS = {
+  overview: overviewSpec,
+  explore: exploreSpec,
+  path: pathSpec,
+  impact: impactSpec,
+  contracts: contractsSpec,
+};
+
+function applyState() {
+  syncFilterSets();
+  document.body.dataset.mode = State.mode;
+  document.getElementById("legend").hidden = State.mode !== "overview";
+  for (const button of document.querySelectorAll("#modes button")) {
+    button.setAttribute("aria-selected", String(button.dataset.mode === State.mode));
+  }
+  if (State.mode === "path") ensureNodeNameList();
+  renderModeControls();
+  if (State.mode === "overview") buildLegend();
+  if (State.focus && !resolveFocus(State.focus)) {
+    notice(`No node named "${State.focus}" in this graph.`);
+  }
+  renderScene((SPEC_BUILDERS[State.mode] || overviewSpec)()).catch((error) => {
+    // A render that throws must not take the rest of the page with it.
+    notice(`Could not draw this view: ${error}`);
+  });
+  markTreeActive();
+}
+
+window.addEventListener("popstate", () => {
+  readUrl();
+  applyState();
+});
+
+// --- Legend ------------------------------------------------------------------
+function buildLegend() {
+  const host = document.getElementById("legend-list");
+  const ranked = communityMeta
+    .filter((meta) => meta.id !== UNGROUPED && meta.size > 0)
+    .slice()
+    .sort((left, right) => right.size - left.size)
+    .slice(0, 40);
+  host.innerHTML = ranked
+    .map(
+      (meta) =>
+        `<div class="row${State.community === meta.id ? " on" : ""}" data-c="${meta.id}" tabindex="0" role="button" title="${escapeHtml(meta.name)}">` +
+        `<span class="swatch" style="background:${communityColor(meta.id)}"></span>` +
+        `<span class="name">${escapeHtml(meta.label)}</span><span class="n">${meta.size}</span></div>`
+    )
+    .join("");
+  for (const row of host.querySelectorAll(".row")) {
+    const toggle = () => {
+      const id = Number(row.dataset.c);
+      setState({ community: State.community === id ? null : id });
+    };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  }
+}
+
+// --- Sidebar -----------------------------------------------------------------
+// Ranked, not alphabetical: a real repository opens on `.github/` and
+// `.history/` when the tree is sorted by name, which buries the source.
+/// How many rows the file tree will build. Past this the sidebar is a scroll
+/// bar, and the count it reports says how many were left out.
+const FILE_ROW_CAP = 2000;
+
+/// Every indexed file, with how many symbols came out of it.
+///
+/// Counting only files that produced symbols is how the tree came to list 45 of
+/// this repository's 107 indexed files: three source files export nothing the
+/// parser calls a symbol, and every documentation file is a `doc` node with no
+/// symbols under it at all. A file missing from the tree reads as a file missing
+/// from the index.
+function fileEntries() {
+  const counts = new Map();
+  for (const node of nodes) {
+    if (node.kind === "file" || node.kind === "doc") {
+      if (!counts.has(node.file)) counts.set(node.file, 0);
+      continue;
+    }
+    counts.set(node.file, (counts.get(node.file) || 0) + 1);
+  }
+  const ordered = [...counts.entries()].sort(
+    (left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1)
+  );
+  return { entries: ordered.slice(0, FILE_ROW_CAP), total: ordered.length };
+}
+
+function buildTree() {
+  const host = document.getElementById("tree");
+  const { entries, total } = fileEntries();
+  // Grouped by directory, not a flat list. A flat list of 1836 paths sorted by
+  // symbol count is a search box with extra steps; the directory is how anyone
+  // who works in the repository already thinks about it.
+  const groups = new Map();
+  for (const [file, count] of entries) {
+    const cut = file.lastIndexOf("/");
+    const directory = cut === -1 ? "." : file.slice(0, cut);
+    const leaf = cut === -1 ? file : file.slice(cut + 1);
+    if (!groups.has(directory)) groups.set(directory, { total: 0, files: [] });
+    const group = groups.get(directory);
+    group.total += count;
+    group.files.push([file, leaf, count]);
+  }
+  const ordered = [...groups.entries()].sort(
+    (left, right) => right[1].total - left[1].total || left[0].localeCompare(right[0])
+  );
+  const shown =
+    entries.length < total
+      ? `${entries.length} of ${total} files`
+      : `${total} file${total === 1 ? "" : "s"}`;
+  host.innerHTML =
+    `<p class="cc-note">${shown} in ${ordered.length} director${ordered.length === 1 ? "y" : "ies"}` +
+    `<button class="treetog" data-all="collapse">collapse all</button></p>` +
+    ordered
+      .map(([directory, group]) => {
+        const open = ordered.length <= 12 || group.total >= entries.length / 2;
+        return (
+          `<div class="tgroup${open ? " open" : ""}" data-dir="${escapeHtml(directory)}">` +
+          `<div class="tdir" tabindex="0" role="button"><span class="caret">&#9656;</span>` +
+          `<span class="name">${escapeHtml(directory)}</span><span class="n">${group.total}</span></div>` +
+          `<div class="tfiles">` +
+          group.files
+            .map(
+              ([file, leaf, count]) =>
+                `<div class="leaf" data-file="${escapeHtml(file)}" tabindex="0" role="button" title="${escapeHtml(file)}">` +
+                `<span class="name">${escapeHtml(leaf)}</span><span class="n">${count || ""}</span></div>`
+            )
+            .join("") +
+          `</div></div>`
+        );
+      })
+      .join("");
+  for (const directory of host.querySelectorAll(".tdir")) {
+    const toggle = () => directory.parentElement.classList.toggle("open");
+    directory.addEventListener("click", toggle);
+    directory.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  }
+  const all = host.querySelector(".treetog");
+  if (all) {
+    all.addEventListener("click", () => {
+      const collapsing = all.dataset.all === "collapse";
+      for (const group of host.querySelectorAll(".tgroup")) group.classList.toggle("open", !collapsing);
+      all.dataset.all = collapsing ? "expand" : "collapse";
+      all.textContent = collapsing ? "expand all" : "collapse all";
+    });
+  }
+  for (const leaf of host.querySelectorAll(".leaf")) {
+    const go = () => setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: leaf.dataset.file }, { push: true });
+    leaf.addEventListener("click", go);
+    leaf.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+}
+
+function markTreeActive() {
+  const target = resolveFocus(State.focus);
+  for (const leaf of document.querySelectorAll("#tree .leaf")) {
+    const active = !!target && leaf.dataset.file === target.file;
+    leaf.classList.toggle("active", active);
+    // A highlighted file inside a collapsed directory is a highlight nobody
+    // sees.
+    if (active) leaf.closest(".tgroup")?.classList.add("open");
+  }
+}
+
+function checkboxGroup(hostId, title, values, allowed, counts, onChange) {
+  const host = document.getElementById(hostId);
+  host.innerHTML =
+    `<h4>${title}</h4>` +
+    values
+      .map(
+        (value) =>
+          `<label class="frow"><input type="checkbox" ${!allowed || allowed.has(value) ? "checked" : ""} data-value="${escapeHtml(value)}">` +
+          `${escapeHtml(String(value).toLowerCase())}<span class="n">${counts.get(value) || 0}</span></label>`
+      )
+      .join("");
+  for (const box of host.querySelectorAll("input")) {
+    box.addEventListener("change", () => {
+      const picked = [...host.querySelectorAll("input")].filter((input) => input.checked).map((input) => input.dataset.value);
+      onChange(picked.length === values.length ? null : new Set(picked));
+    });
+  }
+}
+
+function buildFilters() {
+  const kindCounts = new Map();
+  for (const node of nodes) kindCounts.set(node.kind, (kindCounts.get(node.kind) || 0) + 1);
+  const relCounts = new Map();
+  const confCounts = new Map();
+  for (const edge of links) {
+    relCounts.set(edge.kind, (relCounts.get(edge.kind) || 0) + 1);
+    confCounts.set(edge.confidence, (confCounts.get(edge.confidence) || 0) + 1);
+  }
+  checkboxGroup("f-kinds", "Node kinds", ALL_KIND, State.kind, kindCounts, (kind) => setState({ kind }));
+  checkboxGroup("f-rels", "Relation kinds", ALL_REL, State.rel, relCounts, (rel) => setState({ rel }));
+  checkboxGroup("f-conf", "Edge confidence", ALL_CONF, State.conf, confCounts, (conf) => setState({ conf }));
+}
+
+function selectTab(which) {
+  for (const name of ["explorer", "filters"]) {
+    document.getElementById(`tab-${name}`).classList.toggle("on", name === which);
+    document.getElementById(`tab-btn-${name}`).classList.toggle("active", name === which);
+    document.getElementById(`tab-btn-${name}`).setAttribute("aria-selected", String(name === which));
+  }
+}
+
+// --- Command palette ---------------------------------------------------------
+const COMMANDS = [
+  ...MODE_LIST.map((mode) => ({ label: `Mode: ${mode.label}`, run: () => enterMode(mode.id) })),
+  { label: "Reset filters", run: () => setState({ rel: null, conf: null, kind: null, community: null }) },
+  { label: "Clear pins", run: () => setState({ pins: new Set() }) },
+  { label: "Collapse all modules", run: () => setState({ expanded: new Set() }) },
+  { label: "Fit view", run: () => setState({ cam: null }) },
+  {
+    label: "Copy shareable link",
+    run: () => navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => notice("Link copied.")),
+  },
+];
+
+let paletteIndex = 0;
+let paletteItems = [];
+
+function togglePalette(force) {
+  const host = document.getElementById("palette");
+  const open = force === undefined ? host.hidden : force;
+  host.hidden = !open;
+  if (open) {
+    const input = document.getElementById("palette-input");
+    input.value = "";
+    renderPalette("");
+    input.focus();
+  }
+}
+
+function renderPalette(query) {
+  const lowered = query.toLowerCase().trim();
+  const matches = (text) => !lowered || text.toLowerCase().includes(lowered);
+  paletteItems = [
+    ...COMMANDS.filter((command) => matches(command.label)).map((command) => ({ label: command.label, hint: "command", run: command.run })),
+    ...(lowered
+      ? nodes
+          .filter((node) => matches(node.name) || matches(node.file))
+          .slice(0, 30)
+          .map((node) => ({
+            label: nodeLabel(node),
+            hint: node.file,
+            run: () => setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: String(node.id) }, { push: true }),
+          }))
+      : []),
+  ].slice(0, 40);
+  paletteIndex = 0;
+  const list = document.getElementById("palette-list");
+  list.innerHTML = paletteItems
+    .map(
+      (item, index) =>
+        `<div class="prow${index === 0 ? " on" : ""}" data-i="${index}"><span class="name">${escapeHtml(item.label)}</span><span class="hint">${escapeHtml(item.hint)}</span></div>`
+    )
+    .join("");
+  for (const row of list.querySelectorAll(".prow")) {
+    row.addEventListener("click", () => runPalette(Number(row.dataset.i)));
+  }
+}
+
+function movePalette(delta) {
+  if (!paletteItems.length) return;
+  paletteIndex = (paletteIndex + delta + paletteItems.length) % paletteItems.length;
+  const list = document.getElementById("palette-list");
+  for (const row of list.querySelectorAll(".prow")) {
+    row.classList.toggle("on", Number(row.dataset.i) === paletteIndex);
+  }
+  const active = list.querySelector(".prow.on");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function runPalette(index) {
+  const item = paletteItems[index];
+  togglePalette(false);
+  if (item) item.run();
+}
+
+// --- Keyboard ----------------------------------------------------------------
+// Every core task is reachable without a pointer.
+function walkNeighbour(delta) {
+  const current = selected || resolveFocus(State.focus);
+  if (!current) return;
+  const ranked = [
+    ...(outgoing.get(current.id) || []).filter(edgeAllowed).map((edge) => byId.get(edge.target)),
+    ...(incoming.get(current.id) || []).filter(edgeAllowed).map((edge) => byId.get(edge.source)),
+  ].filter(Boolean);
+  if (!ranked.length) return;
+  const position = ranked.findIndex((node) => selected && node.id === selected.id);
+  const next = ranked[(position + delta + ranked.length) % ranked.length];
+  selected = next;
+  if (scene.hasNode(`n${next.id}`)) {
+    inspectNode(next, scene.getNodeAttributes(`n${next.id}`));
+    renderer.refresh();
+  } else {
+    setState({ focus: String(next.id) }, { push: true });
+  }
+}
+
+document.addEventListener("keydown", (event) => {
+  const palette = document.getElementById("palette");
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    togglePalette();
+    return;
+  }
+  if (!palette.hidden) {
+    if (event.key === "Escape") togglePalette(false);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      movePalette(1);
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      movePalette(-1);
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runPalette(paletteIndex);
+    }
+    return;
+  }
+  if (event.target.matches("input, textarea")) return;
+  if (event.key === "/") {
+    event.preventDefault();
+    document.getElementById("search").focus();
+    return;
+  }
+  const index = Number(event.key);
+  if (Number.isInteger(index) && index >= 1 && index <= MODE_IDS.length) {
+    enterMode(MODE_IDS[index - 1]);
+    return;
+  }
+  if (event.key === "ArrowRight") walkNeighbour(1);
+  if (event.key === "ArrowLeft") walkNeighbour(-1);
+  if (event.key === "Escape") {
+    if (State.mode !== "overview") enterMode("overview");
+    else {
+      selected = null;
+      document.getElementById("panel").classList.remove("open");
+      if (renderer) renderer.refresh();
+    }
+  }
+});
 
 // --- Bootstrap ----------------------------------------------------------------
 {
-  const fileCount = nodes.filter((n) => n.kind === "file").length;
+  // Documentation is indexed too, and the pill disagreeing with the file tree
+  // beside it is how a reader learns not to trust either number.
+  const fileCount = new Set(nodes.filter((node) => node.kind === "file" || node.kind === "doc").map((node) => node.file)).size;
   const repoName = "__REPO_NAME__";
-  document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> · ${fileCount} files`;
+  document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> \u00b7 ${fileCount} files`;
   document.getElementById("c-nodes").textContent = nodes.length;
   document.getElementById("c-edges").textContent = links.length;
-  document.getElementById("status-counts").textContent = `${nodes.length} nodes · ${links.length} edges · ${communityCount} modules`;
 }
-window.addEventListener("resize", () => { if (renderer) renderer.resize(); });
-initRenderer();
+
+function visible(element) {
+  return !!(element && element.offsetWidth && element.offsetHeight);
+}
+window.addEventListener("resize", () => {
+  if (renderer && visible(document.getElementById("view"))) renderer.resize();
+});
+
+document.getElementById("tab-btn-explorer").addEventListener("click", () => selectTab("explorer"));
+document.getElementById("tab-btn-filters").addEventListener("click", () => selectTab("filters"));
+document.getElementById("palette-input").addEventListener("input", (event) => renderPalette(event.target.value));
+
+readUrl();
+buildModeSwitcher();
 buildTree();
 buildFilters();
 selectTab("explorer");
-runLayout(false);
+applyState();
+writeUrl(false);
 </script>
 </body>
 </html>

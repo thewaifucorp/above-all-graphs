@@ -71,6 +71,20 @@ const TOOL_SPECS: &[ToolSpec] = &[
         implemented: true,
     },
     ToolSpec {
+        name: "pdg_query",
+        description: "Statement-level dependences inside a file: which lines depend on which, by control or by data. Pass `<file>` or `<file>:<line>` to ask what one line depends on.",
+        arg: "target",
+        arg_description: "Repo-relative file path, optionally `path:line`.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "taint",
+        description: "Source-to-sink flows in a file, followed across calls through the indexed call graph. Syntactic: a finding is a place to look, not a proven vulnerability, and no findings is not evidence of safety. Pass `<file>` or `<file>:<call hops>` (default 2).",
+        arg: "file",
+        arg_description: "Repo-relative file path, optionally `path:hops`.",
+        implemented: true,
+    },
+    ToolSpec {
         name: "rename",
         description: "Coordinated multi-file rename. Applies immediately and writes to disk — pass `name` (current) and `new_name`.",
         arg: "name",
@@ -86,9 +100,93 @@ const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "cypher",
-        description: "Direct query against the graph layer.",
+        description: "Read-only pattern query over the graph, in a documented subset of Cypher: MATCH and OPTIONAL MATCH patterns (labels, relationship types, `*1..3` hops), WHERE, UNION, RETURN with count/collect/min/max/sum/avg, DISTINCT, ORDER BY, SKIP, LIMIT. Anything outside the subset is an error that names what was expected. See docs/query.md.",
         arg: "query",
-        arg_description: "Cypher query.",
+        arg_description: "A query in the supported subset, e.g. MATCH (f:Function)-[:CALLS]->(g) WHERE f.file STARTS WITH 'src/' RETURN f.name, g.name LIMIT 20.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "route_map",
+        description: "Every HTTP endpoint this repository declares in a contract or serves in code, paired by shape, with the handler that serves it, the code that consumes it, and the mismatches: declared-but-unimplemented and served-but-undeclared.",
+        arg: "filter",
+        arg_description: "Optional substring to narrow the endpoints listed; empty lists all.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "tool_map",
+        description: "Every RPC/MCP tool this repository exposes by name, with the symbol that serves it. Recognized from `server.tool(\"name\", …)`, a `@tool`/`#[tool]` marker, or a `ToolSpec { name: … }` table entry.",
+        arg: "filter",
+        arg_description: "Optional substring to narrow the tools listed; empty lists all.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "shape_check",
+        description: "Compares each declared response shape with the fields its handler actually returns, by dotted field path (`customer.name`), following a body the handler assembled in a local variable. Syntactic: a finding is a place to look, not a proven bug.",
+        arg: "endpoint",
+        arg_description: "Optional substring to narrow which endpoints are checked; empty checks all.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "api_impact",
+        description: "Who is on the other side of one endpoint or tool: the handler that serves it, the code that consumes it, and the blast radius of changing that handler.",
+        arg: "target",
+        arg_description: "Endpoint name (`GET /pets`), tool name (`TOOL explore`), or a path.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "group_links",
+        description: "Cross-repository protocol links across a group: API producer to client, package export to import, event producer to consumer, schema to model, tool definition to invocation. Each graph is read separately and never merged; every link is a name agreeing across an ownership boundary and carries the evidence that produced it.",
+        arg: "group",
+        arg_description: "Group name, or `all` for every registered workspace.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "graph_diff",
+        description: "Compare two graph states — the workspace, a branch, a commit, or a pull request head (`pr/42`) — as `before..after` or a single state against the workspace. Reports symbols added, removed, and moved, edges gained and lost, and which symbols the rest of the code started or stopped depending on. Each ref is indexed once through a detached worktree; your checkout is never touched.",
+        arg: "states",
+        arg_description: "`main..workspace`, `pr/42`, `v0.1.0..main`, or a single ref compared against the workspace.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "pr_dashboard",
+        description: "Every open pull request ranked by what the graph says it reaches: hub symbols touched, blast radius, affected tests it does not change, failing checks, and overlaps with other open PRs. The score comes from a stated rule table, and every point is attributed to a rule.",
+        arg: "base",
+        arg_description: "Optional base branch to filter by; empty covers all open pull requests.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "pr_conflicts",
+        description: "Open pull requests that share a file (a merge conflict on the way) or share a symbol without sharing a file (both merge cleanly and still disagree — the one a diff cannot show).",
+        arg: "base",
+        arg_description: "Optional base branch to filter by; empty covers all open pull requests.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "db_drift",
+        description: "Tables this repository's DDL declares against the tables an ingested live catalog actually has, both directions reported. Ingestion itself is CLI-only (`aag db scan --url`): a connection string passed through a tool call is a credential in a transcript.",
+        arg: "path",
+        arg_description: "Ignored; the drift report covers the indexed repository.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "memory_save",
+        description: "Record work: pass `question`, `answer`, and optionally `nodes` (comma-separated symbols the answer rested on), `outcome` (worked|wrong|open), `correction`, and `revision`. Recording the supporting symbols is what lets a later recall tell you the answer is stale.",
+        arg: "question",
+        arg_description: "What was asked. Pass `answer` alongside it.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "memory_recall",
+        description: "Recall earlier work on a question: what was answered, how it turned out, and what corrected it. Every entry is checked against the current graph and marked `stale` when the symbols it rested on are gone. This is recorded experience, not extracted evidence — where it disagrees with the graph, the graph is right.",
+        arg: "question",
+        arg_description: "The question to match against remembered work.",
+        implemented: true,
+    },
+    ToolSpec {
+        name: "memory_lessons",
+        description: "Review candidates derived from repeated outcomes: what kinds of answer held up and what kept being wrong, with the entry ids behind each one and how many are still supported by the graph. A lesson is a pattern in what was recorded, not a fact about the code.",
+        arg: "subject",
+        arg_description: "Optional symbol substring to narrow the lessons; empty returns all.",
         implemented: true,
     },
     ToolSpec {
@@ -254,95 +352,30 @@ pub fn run(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Runs MCP Streamable HTTP on loopback. JSON-RPC requests are accepted at
-/// `POST /mcp`; `GET /mcp` returns 405 because this server does not emit SSE.
-/// When `api_key` is set, every request requires `Authorization: Bearer ...`.
+/// Runs the Streamable HTTP transport with default options.
+///
+/// Kept so an embedder that only wants "serve HTTP on this port" does not have
+/// to build [`crate::transport::Options`]; everything else lives there.
 ///
 /// # Errors
-/// Returns an error if the loopback listener cannot be created.
+/// As [`crate::transport::serve`].
 pub fn run_http(root: &Path, port: u16, api_key: Option<&str>) -> Result<()> {
-    use tiny_http::{Header, Method, Response, Server, StatusCode};
-
-    let root = root.to_path_buf();
-    if let Err(error) = crate::watch::reconcile(&root) {
-        tracing::warn!(%error, "startup reconciliation failed");
-    }
-    crate::watch::spawn(root.clone());
-    let server = Server::http(("127.0.0.1", port)).map_err(|error| Error::Protocol {
-        context: "MCP HTTP bind failed",
-        detail: error.to_string(),
-    })?;
-    let json_header =
-        Header::from_bytes("Content-Type", "application/json").map_err(|()| Error::Protocol {
-            context: "MCP HTTP header creation failed",
-            detail: "invalid static content-type header".into(),
-        })?;
-    eprintln!(
-        "aag MCP HTTP listening on http://{}/mcp",
-        server.server_addr()
-    );
-
-    for mut request in server.incoming_requests() {
-        if request.url() != "/mcp" {
-            let _ = request.respond(Response::empty(StatusCode(404)));
-            continue;
-        }
-        if !origin_allowed(&request) {
-            let _ = request.respond(Response::empty(StatusCode(403)));
-            continue;
-        }
-        if !authorized(&request, api_key) {
-            let _ = request.respond(Response::empty(StatusCode(401)));
-            continue;
-        }
-        if request.method() != &Method::Post {
-            let _ = request.respond(Response::empty(StatusCode(405)));
-            continue;
-        }
-        let mut body = String::new();
-        if request.as_reader().read_to_string(&mut body).is_err() {
-            let _ = request.respond(Response::empty(StatusCode(400)));
-            continue;
-        }
-        let Ok(message) = serde_json::from_str::<Value>(&body) else {
-            let response =
-                json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}});
-            let _ = request.respond(
-                Response::from_string(response.to_string())
-                    .with_status_code(400)
-                    .with_header(json_header.clone()),
-            );
-            continue;
-        };
-        if let Some(response) = handle(&root, &message) {
-            let _ = request.respond(
-                Response::from_string(response.to_string()).with_header(json_header.clone()),
-            );
-        } else {
-            let _ = request.respond(Response::empty(StatusCode(202)));
-        }
-    }
-    Ok(())
+    crate::transport::serve(
+        root,
+        &crate::transport::Options {
+            port,
+            api_key: api_key.map(str::to_string),
+            ..crate::transport::Options::default()
+        },
+    )
 }
 
-fn origin_allowed(request: &tiny_http::Request) -> bool {
-    request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Origin"))
-        .is_none_or(|header| {
-            let origin = header.value.as_str();
-            origin.starts_with("http://127.0.0.1") || origin.starts_with("http://localhost")
-        })
-}
-
-fn authorized(request: &tiny_http::Request, api_key: Option<&str>) -> bool {
-    let Some(api_key) = api_key else { return true };
-    request
-        .headers()
-        .iter()
-        .find(|header| header.field.equiv("Authorization"))
-        .is_some_and(|header| header.value.as_str() == format!("Bearer {api_key}"))
+/// Handles one JSON-RPC message against `root`, returning the response, or
+/// `None` for a notification. Shared with [`crate::transport`] so both
+/// transports answer identically.
+#[must_use]
+pub fn handle_message(root: &Path, request: &Value) -> Option<Value> {
+    handle(root, request)
 }
 
 fn handle(root: &Path, request: &Value) -> Option<Value> {
@@ -356,12 +389,23 @@ fn handle(root: &Path, request: &Value) -> Option<Value> {
     let result = match method {
         "initialize" => Ok(json!({
             "protocolVersion": "2025-11-25",
-            "capabilities": {"tools": {}},
+            "capabilities": {
+                "tools": {},
+                // The graph is one resource that changes under the client, so
+                // subscription is the capability that matters here, and the
+                // HTTP transport actually delivers on it.
+                "resources": {"subscribe": true, "listChanged": false},
+            },
             "serverInfo": {"name": "aag", "version": env!("CARGO_PKG_VERSION")},
         })),
-        "ping" => Ok(json!({})),
+        // `ping` has nothing to report, and subscription is per stream rather
+        // than per resource: there is one resource, and a client that opened a
+        // stream is already receiving its updates.
+        "ping" | "resources/subscribe" | "resources/unsubscribe" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": listed_tools(&enabled_tool_names()) })),
         "tools/call" => call_tool(root, params),
+        "resources/list" => Ok(json!({ "resources": [graph_resource()] })),
+        "resources/read" => read_resource(root, params),
         _ if id.is_none() => return None,
         _ => Err(format!("method not found: {method}")),
     };
@@ -373,6 +417,55 @@ fn handle(root: &Path, request: &Value) -> Option<Value> {
             json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}})
         }
     })
+}
+
+/// The URI of the one resource this server publishes: the indexed graph.
+pub const GRAPH_RESOURCE_URI: &str = "aag://graph";
+
+fn graph_resource() -> Value {
+    json!({
+        "uri": GRAPH_RESOURCE_URI,
+        "name": "code knowledge graph",
+        "description": "Counts and most-connected symbols for the indexed repository. \
+                        Changes whenever the index does; a client on an SSE stream is \
+                        told when.",
+        "mimeType": "application/json",
+    })
+}
+
+/// Reads the graph resource: what the index currently holds, not a dump of it.
+fn read_resource(root: &Path, params: Option<&Value>) -> std::result::Result<Value, String> {
+    let uri = params
+        .and_then(|params| params.get("uri"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if uri != GRAPH_RESOURCE_URI {
+        return Err(format!(
+            "unknown resource: {uri}. This server publishes {GRAPH_RESOURCE_URI}."
+        ));
+    }
+    let graph = crate::storage::Graph::open_existing(root).map_err(|error| error.to_string())?;
+    let nodes = graph.all_nodes().map_err(|error| error.to_string())?;
+    let edges = graph.all_edges().map_err(|error| error.to_string())?.len();
+    let files = nodes
+        .iter()
+        .filter(|node| node.kind == crate::storage::NodeKind::File)
+        .count();
+    let summary = json!({
+        "files": files,
+        "symbols": nodes.len() - files,
+        "edges": edges,
+        // The revision a reader can compare against the one carried by the
+        // `notifications/resources/updated` that woke them.
+        "revision": crate::watch::revision(),
+    });
+    Ok(json!({
+        "contents": [{
+            "uri": GRAPH_RESOURCE_URI,
+            "mimeType": "application/json",
+            "text": summary.to_string(),
+        }]
+    }))
 }
 
 fn enabled_tool_names() -> HashSet<String> {
@@ -473,6 +566,9 @@ fn call_tool(root: &Path, params: Option<&Value>) -> std::result::Result<Value, 
     if name == "rename" {
         return call_rename(root, params);
     }
+    if name == "memory_save" {
+        return call_memory_save(root, params);
+    }
     if name.starts_with("group_") {
         return call_group(params, name);
     }
@@ -510,21 +606,92 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "callers" => edges_text(root, arg, &Direction::Callers),
         "callees" => edges_text(root, arg, &Direction::Callees),
         "impact" => impact::format(root, arg),
+        "pdg_query" => {
+            let (file, line) = arg
+                .rsplit_once(':')
+                .and_then(|(file, line)| line.parse::<u32>().ok().map(|line| (file, Some(line))))
+                .unwrap_or((arg, None));
+            crate::flow::format_pdg(&root.join(file), line)
+        }
+        "taint" => {
+            // `<file>` or `<file>:<hops>`, so an agent can widen the search
+            // without a second tool.
+            let (file, depth) = arg
+                .rsplit_once(':')
+                .and_then(|(file, depth)| depth.parse::<u32>().ok().map(|depth| (file, depth)))
+                .unwrap_or((arg, 2));
+            crate::flow::format_taint(&root.join(file), depth)
+        }
         "wiki" => write_wiki(root),
         "affected" => affected_text(root, arg),
         "detect_changes" => detect_changes_text(root, arg),
-        "cypher" => cypher_text(root, arg),
+        "cypher" => crate::query::run_json(root, arg),
+        "memory_recall" => crate::memory::recall_json(root, arg),
+        "memory_lessons" => crate::memory::format_lessons(root, arg),
+        "db_drift" => crate::database::format_drift(root),
+        "route_map" => crate::api::route_map(root, arg),
+        "tool_map" => crate::api::tool_map(root, arg),
+        "shape_check" => crate::api::format_shape_check(root, arg),
+        "api_impact" => crate::api::impact(root, arg),
         "communities" => communities_text(root, arg),
         "processes" => processes_text(root, arg),
         "neighbors" => neighbors_text(root, arg),
         "shortest_path" => shortest_path_text(root, arg),
         "god_nodes" => god_nodes_text(root, arg),
         "graph_stats" => graph_stats_text(root),
+        "graph_diff" => {
+            // `before..after`, or a single state compared against the
+            // workspace — the common question is "what did this branch do".
+            let (before, after) = arg
+                .split_once("..")
+                .map_or((arg, "workspace"), |(left, right)| (left, right));
+            crate::refs::format(
+                root,
+                &crate::refs::State::parse(before),
+                &crate::refs::State::parse(after),
+            )
+        }
+        "pr_dashboard" => crate::pr::dashboard(root, arg),
+        "pr_conflicts" => crate::pr::conflicts(root, arg),
+        "pr_worktrees" => crate::pr::worktrees(root, arg),
         "list_prs" => crate::pr::list(root, arg),
         "get_pr_impact" => crate::pr::impact(root, arg),
         "triage_prs" => crate::pr::triage(root, arg),
         _ => unreachable!("dispatch only called for implemented tools"),
     }
+}
+
+fn call_memory_save(root: &Path, params: &Value) -> std::result::Result<Value, String> {
+    let arguments = params
+        .get("arguments")
+        .ok_or_else(|| "missing arguments".to_string())?;
+    let text = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let question = text("question").ok_or_else(|| "missing argument `question`".to_string())?;
+    let answer = text("answer").ok_or_else(|| "missing argument `answer`".to_string())?;
+    let record = crate::memory::Record {
+        question,
+        answer,
+        nodes: text("nodes")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect(),
+        outcome: text("outcome").unwrap_or_else(|| "open".to_string()),
+        correction: text("correction"),
+        revision: text("revision"),
+    };
+    let (text, is_error) = match crate::memory::save(root, &record) {
+        Ok(id) => (format!("saved memory entry #{id}"), false),
+        Err(error) => (error.to_string(), true),
+    };
+    Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
 }
 
 fn call_group(params: &Value, name: &str) -> std::result::Result<Value, String> {
@@ -547,6 +714,7 @@ fn call_group(params: &Value, name: &str) -> std::result::Result<Value, String> 
         "group_status" => crate::federation::status_group(group),
         "group_contracts" => crate::federation::contracts_group(group),
         "group_sync" => crate::federation::sync_group(group),
+        "group_links" => crate::federation::links_group(group),
         _ => unreachable!("group dispatcher called with non-group tool"),
     };
     let (text, is_error) = match result {
@@ -748,86 +916,6 @@ fn detect_changes_text(root: &Path, diff: &str) -> Result<String> {
             affected.join("\n")
         }
     ))
-}
-
-fn cypher_text(root: &Path, query: &str) -> Result<String> {
-    let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ");
-    let upper = normalized.to_ascii_uppercase();
-    if !upper.starts_with("MATCH ")
-        || !upper.contains(" RETURN ")
-        || [" CREATE ", " DELETE ", " SET ", " REMOVE ", " MERGE "]
-            .iter()
-            .any(|keyword| upper.contains(keyword))
-    {
-        return Err(Error::Protocol {
-            context: "Cypher query rejected",
-            detail: "only read-only MATCH ... RETURN queries are supported".into(),
-        });
-    }
-    let limit = upper
-        .rsplit_once(" LIMIT ")
-        .and_then(|(_, value)| value.parse::<usize>().ok())
-        .unwrap_or(100)
-        .min(1_000);
-    let graph = Graph::open_existing(root)?;
-    if normalized.contains("-[") || normalized.contains("]->") {
-        let nodes = graph.all_nodes()?;
-        let by_id: std::collections::HashMap<i64, _> = nodes
-            .iter()
-            .filter_map(|node| node.id.map(|id| (id, node)))
-            .collect();
-        let rows = graph
-            .all_edges()?
-            .into_iter()
-            .take(limit)
-            .filter_map(|edge| {
-                Some(json!({
-                    "source": by_id.get(&edge.src)?.name,
-                    "relationship": edge.kind.as_str(),
-                    "target": by_id.get(&edge.dst)?.name,
-                    "confidence": edge.confidence.as_str()
-                }))
-            })
-            .collect::<Vec<_>>();
-        return Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()));
-    }
-    let name_filter = cypher_string_filter(&normalized, ".name");
-    let kind_filter = cypher_string_filter(&normalized, ".kind");
-    let rows = graph
-        .all_nodes()?
-        .into_iter()
-        .filter(|node| name_filter.as_ref().is_none_or(|name| node.name == *name))
-        .filter(|node| {
-            kind_filter
-                .as_ref()
-                .is_none_or(|kind| node.kind.as_str() == kind)
-        })
-        .take(limit)
-        .map(|node| {
-            json!({
-                "id": node.id,
-                "kind": node.kind.as_str(),
-                "name": node.name,
-                "file": node.file_path,
-                "line": node.start_line
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()))
-}
-
-fn cypher_string_filter(query: &str, field: &str) -> Option<String> {
-    let start = query.find(field)? + field.len();
-    let value = query
-        .get(start..)?
-        .trim_start()
-        .strip_prefix('=')?
-        .trim_start();
-    let quote = value
-        .chars()
-        .next()
-        .filter(|character| matches!(character, '\'' | '"'))?;
-    value.get(1..)?.split(quote).next().map(str::to_string)
 }
 
 fn write_wiki(root: &Path) -> Result<String> {
@@ -1058,10 +1146,11 @@ mod tests {
     fn cypher_tool_returns_read_only_graph_rows() {
         let root = indexed_root();
         let text =
-            cypher_text(&root, "MATCH (n) WHERE n.name = 'helper' RETURN n LIMIT 5").unwrap();
+            crate::query::run_json(&root, "MATCH (n) WHERE n.name = 'helper' RETURN n LIMIT 5")
+                .unwrap();
         assert!(text.contains("helper"));
         assert!(!text.contains("caller"));
-        assert!(cypher_text(&root, "MATCH (n) DELETE n").is_err());
+        assert!(crate::query::run_json(&root, "MATCH (n) DELETE n").is_err());
     }
 
     #[test]

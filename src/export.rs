@@ -13,9 +13,11 @@
 //! open straight in a browser; `GRAPH_REPORT.md` is also kept in raw
 //! markdown alongside `report.html` for tools/agents that want it as text.
 //!
-//! `graph.html` embeds a real vendored copy of D3 (`assets/d3.v7.min.js`,
-//! BSD-3-Clause, Mike Bostock) via `include_str!`, so the page renders
-//! offline with no server and no CDN fetch.
+//! `graph.html` embeds vendored copies of sigma.js (WebGL renderer) and
+//! graphology (its graph model) via `include_str!`, so the page renders
+//! offline with no server and no CDN fetch. D3 used to be vendored here too,
+//! purely for `d3.quadtree` in the whole-repository force layout; no view
+//! renders the whole repository any more, so both are gone.
 //!
 //! Community detection (clustering symbols into the wiki's per-community
 //! pages) is not implemented in v1 — `SPEC.md`'s own risk note flags that a
@@ -23,7 +25,7 @@
 //! The wiki groups by file instead, which is a source of ground truth
 //! `crate::resolve` already has, not a heuristic guess.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -31,9 +33,8 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::storage::{Edge, Graph, Node, NodeKind};
+use crate::storage::{Edge, Graph, Node, NodeKind, Perspective, Provenance};
 
-const D3_JS: &str = include_str!("../assets/d3.v7.min.js");
 /// Vendored sigma.js (WebGL renderer) + graphology (its graph model) — the
 /// render layer scales to multi-thousand-node repos where canvas 2D chokes.
 /// d3 stays vendored too: the ForceAtlas2/noverlap physics use `d3.quadtree`.
@@ -57,8 +58,9 @@ pub fn write_default(root: &Path, aag_dir: &Path, graph: &Graph) -> Result<()> {
     let nodes = graph.all_nodes()?;
     let edges = graph.all_edges()?;
 
+    let provenance = graph.all_nodes_with_provenance()?;
     write_json(aag_dir, &nodes, &edges)?;
-    write_html(root, aag_dir, &nodes, &edges)?;
+    write_html(root, aag_dir, &nodes, &edges, &provenance)?;
     let report_md = report_markdown(root, &nodes, &edges);
     write_file(&aag_dir.join("GRAPH_REPORT.md"), &report_md)?;
     write_file(
@@ -67,7 +69,7 @@ pub fn write_default(root: &Path, aag_dir: &Path, graph: &Graph) -> Result<()> {
     )?;
     write_graphml(aag_dir, &nodes, &edges)?;
     write_cypher(aag_dir, &nodes, &edges)?;
-    let protocol_nodes = graph.all_nodes_with_provenance()?;
+    let protocol_nodes = provenance;
     let protocol_edges = graph.all_edges_with_provenance()?;
     crate::protocol::write_manifest_with_provenance(
         root,
@@ -213,14 +215,545 @@ fn graph_data_json(nodes: &[Node], edges: &[Edge]) -> Value {
     })
 }
 
+/// How much embedded source text one page may carry.
+///
+/// The file viewer inlines whole files so a node click needs no server. At
+/// repository scale that alone was ~7 MB of a 13 MB page, which the P0.3
+/// payload budget (`docs/graph-experience.md`) does not allow. Files are
+/// embedded in importance order until the budget is spent; the rest degrade
+/// to path-and-line in the viewer instead of silently bloating the page.
+const SOURCE_EMBED_BUDGET_BYTES: usize = 3 * 1024 * 1024;
+
+/// Relation kinds, in the order the columnar payload encodes them.
+const EDGE_KIND_ORDER: &[&str] = &[
+    "calls",
+    "imports",
+    "inherits",
+    "implements",
+    "explains",
+    "references",
+];
+
+/// Confidence tags, in the order the columnar payload encodes them.
+const CONFIDENCE_ORDER: &[&str] = &["EXTRACTED", "INFERRED", "AMBIGUOUS"];
+
+fn dictionary_index(order: &[&str], value: &str) -> usize {
+    order.iter().position(|entry| *entry == value).unwrap_or(0)
+}
+
+/// One collapsed community: what the Overview mode draws before anything is
+/// expanded, and what an aggregate must be able to account for.
+struct CommunitySummary {
+    id: i64,
+    label: String,
+    members: Vec<i64>,
+    internal_edges: u32,
+    external_edges: u32,
+    entrypoints: u32,
+    worst_confidence: &'static str,
+    representatives: Vec<i64>,
+}
+
+/// Makes every community label unique.
+///
+/// Communities that share a directory share a label, and a module legend with
+/// four rows called `src/` tells a reader nothing about which is which. The
+/// largest community of a colliding group keeps the plain directory — it is
+/// what someone means by "the `src` module" — and each smaller one is
+/// qualified by the file most of it lives in.
+fn disambiguate_labels(
+    labels: &mut HashMap<i64, String>,
+    communities: &[crate::analysis::Community],
+    node_files: &HashMap<i64, &str>,
+) {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for label in labels.values() {
+        *counts.entry(label.as_str()).or_default() += 1;
+    }
+    let colliding: BTreeSet<String> = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(label, _)| label.to_string())
+        .collect();
+    if colliding.is_empty() {
+        return;
+    }
+    let size: HashMap<i64, usize> = communities
+        .iter()
+        .map(|community| (community.id, community.members.len()))
+        .collect();
+    let members: HashMap<i64, &[i64]> = communities
+        .iter()
+        .map(|community| (community.id, community.members.as_slice()))
+        .collect();
+
+    let mut taken: BTreeSet<String> = labels
+        .values()
+        .filter(|label| !colliding.contains(*label))
+        .cloned()
+        .collect();
+    for label in &colliding {
+        let mut group: Vec<i64> = labels
+            .iter()
+            .filter(|(_, value)| *value == label)
+            .map(|(id, _)| *id)
+            .collect();
+        // Largest first, id as the tie-break so the naming never depends on
+        // hash order.
+        group.sort_by_key(|id| (std::cmp::Reverse(size.get(id).copied().unwrap_or(0)), *id));
+        // Two communities can share a directory *and* a dominant file — a
+        // vendored bundle split across several communities does exactly that —
+        // so the qualified names are checked against every name already handed
+        // out, and whatever is still ambiguous falls back to the id, which
+        // cannot repeat.
+        taken.insert(label.clone());
+        for id in group.into_iter().skip(1) {
+            let file = members
+                .get(&id)
+                .map(|ids| dominant_file(ids, node_files))
+                .unwrap_or_default();
+            let mut qualified = if file.is_empty() {
+                format!("{label} #{id}")
+            } else {
+                format!("{label} ({file})")
+            };
+            if taken.contains(&qualified) {
+                qualified = format!("{label} ({file} #{id})");
+            }
+            taken.insert(qualified.clone());
+            labels.insert(id, qualified);
+        }
+    }
+}
+
+/// The file holding most of a community's symbols, without its directory —
+/// `storage.rs`, not `src/storage.rs`, because the directory is already in the
+/// label being qualified.
+fn dominant_file(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for member in members {
+        if let Some(path) = node_files.get(member) {
+            *counts.entry(path).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(path, count)| (*count, std::cmp::Reverse(*path)))
+        .map(|(path, _)| {
+            path.rsplit_once('/')
+                .map_or(path, |(_, file)| file)
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// A human-meaningful name for a community: the deepest directory every
+/// member file shares, else the directory most members live in, else the most
+/// common file, else the numeric id. An opaque `community 41` tells a reader
+/// nothing.
+///
+/// The middle rung matters at real scale. A community spanning
+/// `gitnexus/src/…` and `gitnexus-web/…` shares no prefix at all, and naming
+/// it after one arbitrary member file — `language-config.ts` for 867 symbols —
+/// is worse than naming it after where most of it lives.
+fn community_label(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
+    let files: Vec<&str> = members
+        .iter()
+        .filter_map(|member| node_files.get(member).copied())
+        .collect();
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut shared: Vec<&str> = files[0].split('/').collect();
+    shared.pop();
+    for file in &files[1..] {
+        let parts: Vec<&str> = file.split('/').collect();
+        let keep = shared
+            .iter()
+            .zip(parts.iter())
+            .take_while(|(left, right)| left == right)
+            .count();
+        shared.truncate(keep);
+        if shared.is_empty() {
+            break;
+        }
+    }
+    if !shared.is_empty() {
+        return format!("{}/", shared.join("/"));
+    }
+    // No common prefix: name it after the directory holding the most members.
+    let mut directories: HashMap<&str, usize> = HashMap::new();
+    for file in &files {
+        if let Some((directory, _)) = file.rsplit_once('/') {
+            *directories.entry(directory).or_default() += 1;
+        }
+    }
+    if let Some((directory, _)) = directories
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+    {
+        return format!("{directory}/");
+    }
+    // Everything is at the repository root, so a file name is the best there is.
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for file in &files {
+        *counts.entry(file).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(file, _)| file.to_string())
+        .unwrap_or_default()
+}
+
+/// The columnar node table, one parallel array per field.
+#[derive(Default)]
+struct NodeColumns<'n> {
+    ids: Vec<i64>,
+    kinds: Vec<usize>,
+    names: Vec<&'n str>,
+    files: Vec<usize>,
+    start_lines: Vec<u32>,
+    end_lines: Vec<u32>,
+    communities: Vec<Option<i64>>,
+    degrees: Vec<u32>,
+    perspectives: Vec<&'static str>,
+}
+
+/// One inter-community bundle: the two communities, the relation kind, and
+/// how many edges of each confidence it stands for.
+type Bundle = (i64, i64, usize, [u32; 3]);
+
+/// A community with fewer members than this is not a module — it is a stray
+/// helper or two. Folding it into the dominant community of its own file
+/// keeps the palette meaningful instead of spending a colour on noise.
+const MIN_COMMUNITY_MEMBERS: usize = 3;
+
+/// Folds tiny communities into the dominant community of their own file, then
+/// renumbers by size so id 0 is the largest.
+///
+/// The page used to redo community detection client-side and renumber there,
+/// which meant the ids in this payload and the ids the page coloured by were
+/// different numbers for the same thing. One source of truth, computed here,
+/// where it can be tested.
+fn normalize_communities(
+    nodes: &[Node],
+    communities: &[crate::analysis::Community],
+) -> Vec<crate::analysis::Community> {
+    let node_files: HashMap<i64, &str> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node.file_path.as_str())))
+        .collect();
+    let mut assigned: HashMap<i64, i64> = communities
+        .iter()
+        .flat_map(|community| {
+            community
+                .members
+                .iter()
+                .map(|member| (*member, community.id))
+        })
+        .collect();
+    let sizes: HashMap<i64, usize> = communities
+        .iter()
+        .map(|community| (community.id, community.members.len()))
+        .collect();
+
+    // Which community dominates each file, among the communities its symbols
+    // belong to.
+    let mut dominant_by_file: HashMap<&str, i64> = HashMap::new();
+    for (member, community) in &assigned {
+        let Some(file) = node_files.get(member) else {
+            continue;
+        };
+        let size = sizes.get(community).copied().unwrap_or(0);
+        dominant_by_file
+            .entry(file)
+            .and_modify(|current| {
+                let current_size = sizes.get(current).copied().unwrap_or(0);
+                if size > current_size || (size == current_size && *community < *current) {
+                    *current = *community;
+                }
+            })
+            .or_insert(*community);
+    }
+
+    let members: Vec<i64> = assigned.keys().copied().collect();
+    for member in members {
+        let community = assigned[&member];
+        if sizes.get(&community).copied().unwrap_or(0) >= MIN_COMMUNITY_MEMBERS {
+            continue;
+        }
+        let Some(dominant) = node_files
+            .get(&member)
+            .and_then(|file| dominant_by_file.get(file))
+            .copied()
+            .filter(|dominant| sizes.get(dominant).copied().unwrap_or(0) >= MIN_COMMUNITY_MEMBERS)
+        else {
+            continue;
+        };
+        assigned.insert(member, dominant);
+    }
+
+    let mut grouped: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+    for (member, community) in assigned {
+        grouped.entry(community).or_default().push(member);
+    }
+    let mut ranked: Vec<(i64, Vec<i64>)> = grouped.into_iter().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .len()
+            .cmp(&left.1.len())
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    ranked
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, mut members))| {
+            members.sort_unstable();
+            crate::analysis::Community {
+                id: i64::try_from(index).unwrap_or(i64::MAX),
+                members,
+            }
+        })
+        .collect()
+}
+
+/// Summarizes each community and the bundles between them, so the Overview
+/// mode can open on ~500 aggregates instead of ~6000 raw nodes and every
+/// aggregate can still be expanded to its parts.
+fn summarize_communities(nodes: &[Node], edges: &[Edge]) -> (Vec<CommunitySummary>, Vec<Bundle>) {
+    let communities = normalize_communities(nodes, &crate::analysis::communities(nodes, edges));
+    let entrypoints = crate::analysis::entrypoints(nodes, edges);
+    let community_by_node: HashMap<i64, i64> = communities
+        .iter()
+        .flat_map(|community| {
+            community
+                .members
+                .iter()
+                .map(|member| (*member, community.id))
+        })
+        .collect();
+    let node_files: HashMap<i64, &str> = nodes
+        .iter()
+        .filter_map(|node| node.id.map(|id| (id, node.file_path.as_str())))
+        .collect();
+
+    let mut degree: HashMap<i64, u32> = HashMap::new();
+    let mut internal: HashMap<i64, u32> = HashMap::new();
+    let mut external: HashMap<i64, u32> = HashMap::new();
+    let mut worst: HashMap<i64, u8> = HashMap::new();
+    let mut bundles: BTreeMap<(i64, i64, usize), [u32; 3]> = BTreeMap::new();
+    for edge in edges {
+        *degree.entry(edge.src).or_default() += 1;
+        *degree.entry(edge.dst).or_default() += 1;
+        let (Some(&left), Some(&right)) = (
+            community_by_node.get(&edge.src),
+            community_by_node.get(&edge.dst),
+        ) else {
+            continue;
+        };
+        let severity =
+            u8::try_from(dictionary_index(CONFIDENCE_ORDER, edge.confidence.as_str())).unwrap_or(0);
+        if left == right {
+            *internal.entry(left).or_default() += 1;
+            let slot = worst.entry(left).or_default();
+            *slot = (*slot).max(severity);
+        } else {
+            *external.entry(left).or_default() += 1;
+            *external.entry(right).or_default() += 1;
+            let key = (
+                left.min(right),
+                left.max(right),
+                dictionary_index(EDGE_KIND_ORDER, edge.kind.as_str()),
+            );
+            let counts = bundles.entry(key).or_default();
+            counts[usize::from(severity)] += 1;
+        }
+    }
+
+    // Two communities in one directory would both be called `src/`, and a
+    // legend with four entries called `src/` names nothing. The biggest keeps
+    // the directory; the others are named after the file that holds most of
+    // them.
+    let mut labels: HashMap<i64, String> = communities
+        .iter()
+        .map(|community| {
+            (
+                community.id,
+                community_label(&community.members, &node_files),
+            )
+        })
+        .collect();
+    disambiguate_labels(&mut labels, &communities, &node_files);
+
+    let summaries = communities
+        .into_iter()
+        .map(|community| {
+            let mut representatives: Vec<i64> = community.members.clone();
+            representatives.sort_by_key(|member| {
+                (
+                    std::cmp::Reverse(degree.get(member).copied().unwrap_or(0)),
+                    *member,
+                )
+            });
+            representatives.truncate(5);
+            CommunitySummary {
+                label: labels
+                    .get(&community.id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", community.id)),
+                internal_edges: internal.get(&community.id).copied().unwrap_or(0),
+                external_edges: external.get(&community.id).copied().unwrap_or(0),
+                entrypoints: u32::try_from(
+                    community
+                        .members
+                        .iter()
+                        .filter(|member| entrypoints.contains(member))
+                        .count(),
+                )
+                .unwrap_or(u32::MAX),
+                worst_confidence: CONFIDENCE_ORDER
+                    [usize::from(worst.get(&community.id).copied().unwrap_or(0))],
+                representatives,
+                id: community.id,
+                members: community.members,
+            }
+        })
+        .collect();
+    let bundles = bundles
+        .into_iter()
+        .map(|((left, right, kind), counts)| (left, right, kind, counts))
+        .collect();
+    (summaries, bundles)
+}
+
+/// The page payload: the same graph as `graph_data_json`, encoded columnar
+/// and carrying the aggregates the Overview mode opens on.
+///
+/// Columnar matters because the edge list dominates the page. One edge as an
+/// object with four named keys costs ~60 bytes of JSON; as four integers in
+/// parallel arrays it costs ~14. At 88 000 edges that is the difference
+/// between a 6 MB and a 1.5 MB payload, with no information lost — the
+/// dictionaries travel with it.
+fn graph_payload_json(nodes: &[Node], edges: &[Edge], provenance: &[(Node, Provenance)]) -> Value {
+    // Declared-versus-observed is the whole point of the Contracts view: an
+    // endpoint a spec promises and an endpoint a handler actually serves are
+    // different facts about the same path.
+    let perspective_by_id: HashMap<i64, &'static str> = provenance
+        .iter()
+        .filter_map(|(node, provenance)| node.id.map(|id| (id, provenance.perspective.as_str())))
+        .collect();
+    let (communities, bundles) = summarize_communities(nodes, edges);
+    let community_by_node: HashMap<i64, i64> = communities
+        .iter()
+        .flat_map(|community| {
+            community
+                .members
+                .iter()
+                .map(|member| (*member, community.id))
+        })
+        .collect();
+    let mut degree: HashMap<i64, u32> = HashMap::new();
+    for edge in edges {
+        *degree.entry(edge.src).or_default() += 1;
+        *degree.entry(edge.dst).or_default() += 1;
+    }
+    let mut kinds: Vec<&str> = Vec::new();
+    let mut files: Vec<&str> = Vec::new();
+    let mut kind_index: HashMap<&str, usize> = HashMap::new();
+    let mut file_index: HashMap<&str, usize> = HashMap::new();
+    let mut node_columns = NodeColumns::default();
+    for node in nodes {
+        let Some(id) = node.id else { continue };
+        let kind_slot = *kind_index.entry(node.kind.as_str()).or_insert_with(|| {
+            kinds.push(node.kind.as_str());
+            kinds.len() - 1
+        });
+        let file_slot = *file_index
+            .entry(node.file_path.as_str())
+            .or_insert_with(|| {
+                files.push(node.file_path.as_str());
+                files.len() - 1
+            });
+        node_columns.ids.push(id);
+        node_columns.kinds.push(kind_slot);
+        node_columns.names.push(node.name.as_str());
+        node_columns.files.push(file_slot);
+        node_columns.start_lines.push(node.start_line);
+        node_columns.end_lines.push(node.end_line);
+        node_columns
+            .communities
+            .push(community_by_node.get(&id).copied());
+        node_columns
+            .degrees
+            .push(degree.get(&id).copied().unwrap_or(0));
+        node_columns.perspectives.push(
+            perspective_by_id
+                .get(&id)
+                .copied()
+                .unwrap_or(Perspective::Observed.as_str()),
+        );
+    }
+    let processes = crate::analysis::processes(nodes, edges);
+    let entrypoints = crate::analysis::entrypoints(nodes, edges);
+    json!({
+        "format": "columnar-1",
+        "dict": { "nodeKind": kinds, "file": files, "edgeKind": EDGE_KIND_ORDER, "confidence": CONFIDENCE_ORDER },
+        "nodes": {
+            "id": node_columns.ids,
+            "kind": node_columns.kinds,
+            "name": node_columns.names,
+            "file": node_columns.files,
+            "startLine": node_columns.start_lines,
+            "endLine": node_columns.end_lines,
+            "community": node_columns.communities,
+            "degree": node_columns.degrees,
+            "perspective": node_columns.perspectives,
+        },
+        "edges": {
+            "source": edges.iter().map(|e| e.src).collect::<Vec<_>>(),
+            "target": edges.iter().map(|e| e.dst).collect::<Vec<_>>(),
+            "kind": edges.iter().map(|e| dictionary_index(EDGE_KIND_ORDER, e.kind.as_str())).collect::<Vec<_>>(),
+            "confidence": edges.iter().map(|e| dictionary_index(CONFIDENCE_ORDER, e.confidence.as_str())).collect::<Vec<_>>(),
+        },
+        "communities": communities.iter().map(|community| json!({
+            "id": community.id,
+            "label": community.label,
+            "members": community.members,
+            "internalEdges": community.internal_edges,
+            "externalEdges": community.external_edges,
+            "entrypoints": community.entrypoints,
+            "worstConfidence": community.worst_confidence,
+            "representatives": community.representatives,
+        })).collect::<Vec<_>>(),
+        "bundles": bundles.iter().map(|(left, right, kind, counts)| json!({
+            "a": left, "b": right, "kind": EDGE_KIND_ORDER[*kind],
+            "extracted": counts[0], "inferred": counts[1], "ambiguous": counts[2],
+            "count": counts[0] + counts[1] + counts[2],
+        })).collect::<Vec<_>>(),
+        "entrypoints": entrypoints.iter().copied().collect::<Vec<_>>(),
+        "processes": processes.iter().map(|process| json!({
+            "entrypoint": process.entrypoint,
+            "steps": process.steps
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn write_json(aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Result<()> {
     let data = graph_data_json(nodes, edges);
     let pretty = serde_json::to_string_pretty(&data).unwrap_or_default();
     write_file(&aag_dir.join("graph.json"), &pretty)
 }
 
-fn write_html(root: &Path, aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Result<()> {
-    let data = graph_data_json(nodes, edges);
+fn write_html(
+    root: &Path,
+    aag_dir: &Path,
+    nodes: &[Node],
+    edges: &[Edge],
+    provenance: &[(Node, Provenance)],
+) -> Result<()> {
+    let data = graph_payload_json(nodes, edges, provenance);
     let files = source_map_json(root, nodes);
     let name = root
         .canonicalize()
@@ -228,19 +761,51 @@ fn write_html(root: &Path, aag_dir: &Path, nodes: &[Node], edges: &[Edge]) -> Re
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "repository".to_string());
     let html = GRAPH_HTML_TEMPLATE
-        .replace("/*__D3_JS__*/", D3_JS)
         .replace("/*__GRAPHOLOGY_JS__*/", GRAPHOLOGY_JS)
         .replace("/*__SIGMA_JS__*/", SIGMA_JS)
-        .replace(
-            "/*__GRAPH_DATA__*/",
-            &json_safe_for_script(&data.to_string()),
-        )
-        .replace(
-            "/*__FILES_DATA__*/",
-            &json_safe_for_script(&files.to_string()),
-        )
+        .replace("/*__GRAPH_DATA__*/", &embed(&data.to_string()))
+        .replace("/*__FILES_DATA__*/", &embed(&files.to_string()))
         .replace("__REPO_NAME__", &json_safe_for_script(&name));
     write_file(&aag_dir.join("graph.html"), &html)
+}
+
+/// Above this many bytes, an inline payload is gzipped and base64'd instead of
+/// pasted in as JSON. Below it the wrapper costs more than it saves, and a
+/// small page stays readable in a text editor.
+const COMPRESS_ABOVE: usize = 64 * 1024;
+
+/// Splices a JSON payload into the page, compressed when it is large enough to
+/// be worth it.
+///
+/// The page has to stay one self-contained file that works from `file://`, so
+/// fetching a sidecar is not an option: a browser refuses cross-origin reads of
+/// local files, which is why everything was inlined in the first place. Gzip
+/// keeps that property and takes the biggest cost out of it — the graph payload
+/// for a repository with 98 000 edges is the reason an export reached 458 MB
+/// (`docs/benchmarks.md`). The page inflates it with `DecompressionStream`,
+/// which every current browser has and which needs no library.
+fn embed(json: &str) -> String {
+    if json.len() < COMPRESS_ABOVE {
+        return json_safe_for_script(json);
+    }
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let deflated = std::io::Write::write_all(&mut encoder, json.as_bytes())
+        .and_then(|()| encoder.finish())
+        .ok();
+    let Some(deflated) = deflated else {
+        // Compression is an optimization, never a correctness requirement: a
+        // failure here falls back to the payload that always worked.
+        return json_safe_for_script(json);
+    };
+    let payload = base64_encode(&deflated);
+    format!("{{\"format\":\"gzip-base64-1\",\"data\":\"{payload}\"}}")
+}
+
+/// Base64 without a line-wrapping pass, because the result goes into one JSON
+/// string literal.
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Escapes every literal `<` in `text` to its Unicode escape sequence
@@ -266,17 +831,30 @@ fn json_safe_for_script(text: &str) -> String {
 /// UTF-8 (binary docs) are simply omitted; the panel falls back to the
 /// node's own snippet for those.
 fn source_map_json(root: &Path, nodes: &[Node]) -> Value {
-    let mut files: HashMap<&str, String> = HashMap::new();
+    // Most-referenced files first: if the budget runs out, the files a reader
+    // is most likely to click are the ones that kept their source.
+    let mut ranked: HashMap<&str, usize> = HashMap::new();
     for node in nodes {
-        let path = node.file_path.as_str();
-        if files.contains_key(path) {
+        *ranked.entry(node.file_path.as_str()).or_default() += 1;
+    }
+    let mut order: Vec<(&str, usize)> = ranked.into_iter().collect();
+    order.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0)));
+
+    let mut files: BTreeMap<&str, String> = BTreeMap::new();
+    let mut spent = 0usize;
+    let mut omitted = 0usize;
+    for (path, _) in order {
+        let Ok(content) = fs::read_to_string(root.join(path)) else {
+            continue;
+        };
+        if spent + content.len() > SOURCE_EMBED_BUDGET_BYTES && !files.is_empty() {
+            omitted += 1;
             continue;
         }
-        if let Ok(content) = fs::read_to_string(root.join(path)) {
-            files.insert(path, content);
-        }
+        spent += content.len();
+        files.insert(path, content);
     }
-    json!(files)
+    json!({ "files": files, "omitted": omitted, "budgetBytes": SOURCE_EMBED_BUDGET_BYTES })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1048,6 +1626,11 @@ mod tests {
         dir
     }
 
+    /// Node provenance for a test graph, as `write_default` would pass it.
+    fn provenance_of(graph: &Graph) -> Vec<(Node, Provenance)> {
+        graph.all_nodes_with_provenance().unwrap()
+    }
+
     fn seeded_graph() -> (Graph, Vec<Node>) {
         let graph = Graph::open_in_memory().unwrap();
         let file_a = graph
@@ -1125,6 +1708,461 @@ mod tests {
     }
 
     #[test]
+    fn columnar_payload_round_trips_every_node_and_edge() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
+
+        assert_eq!(payload["format"], "columnar-1");
+        let columns = &payload["nodes"];
+        assert_eq!(columns["id"].as_array().unwrap().len(), nodes.len());
+        // Every dictionary index must resolve, or the page decodes garbage.
+        let kind_dict = payload["dict"]["nodeKind"].as_array().unwrap();
+        let file_dict = payload["dict"]["file"].as_array().unwrap();
+        for (index, node) in nodes.iter().enumerate() {
+            let kind_slot = usize::try_from(columns["kind"][index].as_u64().unwrap()).unwrap();
+            let file_slot = usize::try_from(columns["file"][index].as_u64().unwrap()).unwrap();
+            assert_eq!(kind_dict[kind_slot], node.kind.as_str());
+            assert_eq!(file_dict[file_slot], node.file_path);
+            assert_eq!(columns["name"][index], node.name);
+        }
+        let edge_columns = &payload["edges"];
+        assert_eq!(
+            edge_columns["source"].as_array().unwrap().len(),
+            edges.len()
+        );
+        let edge_kinds = payload["dict"]["edgeKind"].as_array().unwrap();
+        let confidences = payload["dict"]["confidence"].as_array().unwrap();
+        for (index, edge) in edges.iter().enumerate() {
+            assert_eq!(edge_columns["source"][index], edge.src);
+            assert_eq!(edge_columns["target"][index], edge.dst);
+            let kind_slot = usize::try_from(edge_columns["kind"][index].as_u64().unwrap()).unwrap();
+            let confidence_slot =
+                usize::try_from(edge_columns["confidence"][index].as_u64().unwrap()).unwrap();
+            assert_eq!(edge_kinds[kind_slot], edge.kind.as_str());
+            assert_eq!(confidences[confidence_slot], edge.confidence.as_str());
+        }
+    }
+
+    /// A graph of the requested shape, wired so every node has edges.
+    fn synthetic_graph(node_count: i64, edges_per_node: i64) -> (Vec<Node>, Vec<Edge>) {
+        let nodes: Vec<Node> = (1..=node_count)
+            .map(|id| Node {
+                id: Some(id),
+                kind: if id % 7 == 0 {
+                    NodeKind::File
+                } else {
+                    NodeKind::Function
+                },
+                name: format!("symbol_number_{id}"),
+                file_path: format!("src/module_{}/file_{}.rs", id % 40, id % 400),
+                start_line: u32::try_from(id % 900).unwrap_or(1) + 1,
+                end_line: u32::try_from(id % 900).unwrap_or(1) + 9,
+                description: None,
+            })
+            .collect();
+        let mut edges = Vec::new();
+        for id in 1..=node_count {
+            for step in 1..=edges_per_node {
+                let target = ((id + step * 7) % node_count) + 1;
+                if target == id {
+                    continue;
+                }
+                edges.push(Edge {
+                    src: id,
+                    dst: target,
+                    kind: if step % 3 == 0 {
+                        EdgeKind::Imports
+                    } else {
+                        EdgeKind::Calls
+                    },
+                    confidence: if step % 2 == 0 {
+                        Confidence::Ambiguous
+                    } else {
+                        Confidence::Inferred
+                    },
+                });
+            }
+        }
+        (nodes, edges)
+    }
+
+    /// The payload budget from `docs/graph-experience.md`, enforced here rather
+    /// than measured by hand after a release. The edge list is what grows, so
+    /// this asserts cost *per edge*: a regression in the encoding shows up long
+    /// before any single repository crosses a size limit.
+    #[test]
+    fn columnar_payload_cost_per_edge_stays_within_budget() {
+        let (nodes, edges) = synthetic_graph(2_000, 10);
+        let payload = graph_payload_json(&nodes, &edges, &[]);
+        let encoded = payload["edges"].to_string().len();
+        let per_edge = f64::from(u32::try_from(encoded).unwrap_or(u32::MAX))
+            / f64::from(u32::try_from(edges.len()).unwrap_or(u32::MAX));
+        assert!(
+            per_edge < 22.0,
+            "the edge table costs {per_edge:.1} bytes per edge over {} edges; the \
+             object encoding this replaced cost about 60, and the medium-fixture \
+             page budget assumes the compact form",
+            edges.len()
+        );
+    }
+
+    /// The whole page, not just the payload: vendored libraries, template, and
+    /// the source budget together must stay inside the medium-fixture ceiling.
+    #[test]
+    fn generated_page_stays_within_the_medium_fixture_budget() {
+        const MEDIUM_BUDGET_BYTES: u64 = 6 * 1024 * 1024;
+        let root = scratch_dir();
+        let aag_dir = root.join(".aag");
+        fs::create_dir_all(&aag_dir).unwrap();
+        let (nodes, edges) = synthetic_graph(6_000, 15);
+
+        write_html(&root, &aag_dir, &nodes, &edges, &[]).unwrap();
+        let bytes = fs::metadata(aag_dir.join("graph.html")).unwrap().len();
+        assert!(
+            bytes <= MEDIUM_BUDGET_BYTES,
+            "graph.html is {bytes} bytes for {} nodes / {} edges, over the \
+             {MEDIUM_BUDGET_BYTES}-byte medium budget in docs/graph-experience.md",
+            nodes.len(),
+            edges.len()
+        );
+    }
+
+    #[test]
+    fn payload_ships_declared_versus_observed_per_node() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
+        let perspectives = payload["nodes"]["perspective"].as_array().unwrap();
+        assert_eq!(perspectives.len(), nodes.len());
+        assert!(
+            perspectives
+                .iter()
+                .all(|value| matches!(value.as_str(), Some("declared" | "observed"))),
+            "Contracts cannot separate a promised endpoint from a served one \
+             without this, so every node must carry it: {perspectives:?}"
+        );
+    }
+
+    #[test]
+    fn columnar_payload_is_smaller_than_the_object_form() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let columnar = graph_payload_json(&nodes, &edges, &provenance_of(&graph))
+            .to_string()
+            .len();
+        let objects = graph_data_json(&nodes, &edges).to_string().len();
+        assert!(
+            columnar < objects * 2,
+            "columnar {columnar} must not balloon past the object form {objects}"
+        );
+    }
+
+    #[test]
+    fn community_summary_carries_what_a_collapsed_aggregate_must_explain() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
+        let communities = payload["communities"].as_array().unwrap();
+        assert!(!communities.is_empty(), "seeded graph has a community");
+        for community in communities {
+            for field in [
+                "id",
+                "label",
+                "members",
+                "internalEdges",
+                "externalEdges",
+                "entrypoints",
+                "worstConfidence",
+                "representatives",
+            ] {
+                assert!(
+                    !community[field].is_null(),
+                    "collapsed community must expose {field}"
+                );
+            }
+            let members = community["members"].as_array().unwrap().len();
+            let representatives = community["representatives"].as_array().unwrap().len();
+            assert!(representatives <= members.min(5));
+        }
+    }
+
+    #[test]
+    fn normalized_communities_are_ranked_largest_first() {
+        let nodes: Vec<Node> = (1..=6)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: format!("f{id}.rs"),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 40,
+                members: vec![1, 2, 3],
+            },
+            crate::analysis::Community {
+                id: 7,
+                members: vec![4, 5, 6, 1],
+            },
+        ];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(normalized[0].id, 0);
+        assert!(
+            normalized[0].members.len() >= normalized[1].members.len(),
+            "id 0 must be the largest community"
+        );
+        assert_eq!(
+            normalized.iter().map(|c| c.id).collect::<Vec<_>>(),
+            vec![0, 1],
+            "ids are renumbered densely, not carried over"
+        );
+    }
+
+    #[test]
+    fn tiny_community_folds_into_the_dominant_community_of_its_file() {
+        // Three symbols share `main.rs`; two of them are in a real community,
+        // the third is alone. Alone-in-its-own-community is not a module.
+        let nodes: Vec<Node> = (1..=5)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: if id <= 4 { "main.rs" } else { "other.rs" }.into(),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 1,
+                members: vec![1, 2, 3],
+            },
+            crate::analysis::Community {
+                id: 2,
+                members: vec![4],
+            },
+        ];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(
+            normalized.len(),
+            1,
+            "the stray helper got no colour of its own"
+        );
+        assert_eq!(normalized[0].members, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn tiny_community_with_no_dominant_neighbour_survives() {
+        let nodes: Vec<Node> = (1..=2)
+            .map(|id| Node {
+                id: Some(id),
+                kind: NodeKind::Function,
+                name: format!("n{id}"),
+                file_path: format!("f{id}.rs"),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            })
+            .collect();
+        let communities = vec![crate::analysis::Community {
+            id: 9,
+            members: vec![1, 2],
+        }];
+
+        let normalized = normalize_communities(&nodes, &communities);
+        assert_eq!(normalized.len(), 1, "nothing to fold into, so it stays");
+        assert_eq!(normalized[0].members, vec![1, 2]);
+    }
+
+    #[test]
+    fn payload_node_community_matches_a_shipped_community_id() {
+        let (graph, nodes) = seeded_graph();
+        let edges = graph.all_edges().unwrap();
+        let payload = graph_payload_json(&nodes, &edges, &provenance_of(&graph));
+        let ids: HashSet<i64> = payload["communities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|community| community["id"].as_i64().unwrap())
+            .collect();
+        for value in payload["nodes"]["community"].as_array().unwrap() {
+            if let Some(id) = value.as_i64() {
+                assert!(
+                    ids.contains(&id),
+                    "node community {id} is not one of the shipped communities"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn colliding_module_labels_are_disambiguated() {
+        let files: HashMap<i64, &str> = [
+            (1, "src/a.rs"),
+            (2, "src/a.rs"),
+            (3, "src/b.rs"),
+            (4, "src/c.rs"),
+        ]
+        .into_iter()
+        .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 7,
+                members: vec![1, 2],
+            },
+            crate::analysis::Community {
+                id: 9,
+                members: vec![3],
+            },
+            crate::analysis::Community {
+                id: 11,
+                members: vec![4],
+            },
+        ];
+        let mut labels: HashMap<i64, String> = communities
+            .iter()
+            .map(|community| (community.id, community_label(&community.members, &files)))
+            .collect();
+        disambiguate_labels(&mut labels, &communities, &files);
+        // The biggest keeps the bare directory; the rest say which file they are.
+        assert_eq!(labels[&7], "src/");
+        assert_eq!(labels[&9], "src/ (b.rs)");
+        assert_eq!(labels[&11], "src/ (c.rs)");
+    }
+
+    #[test]
+    fn labels_stay_unique_when_the_dominant_file_also_collides() {
+        // A vendored bundle split across communities: same directory, same
+        // dominant file. Qualifying by file is not enough on its own.
+        let files: HashMap<i64, &str> =
+            [(1, "assets/v.js"), (2, "assets/v.js"), (3, "assets/v.js")]
+                .into_iter()
+                .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 2,
+                members: vec![1, 2],
+            },
+            crate::analysis::Community {
+                id: 3,
+                members: vec![3],
+            },
+        ];
+        let mut labels: HashMap<i64, String> = communities
+            .iter()
+            .map(|community| (community.id, community_label(&community.members, &files)))
+            .collect();
+        disambiguate_labels(&mut labels, &communities, &files);
+        let unique: HashSet<&String> = labels.values().collect();
+        assert_eq!(
+            unique.len(),
+            labels.len(),
+            "labels must be unique: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn community_label_prefers_the_shared_directory() {
+        let files: HashMap<i64, &str> = HashMap::from([(1, "src/core/a.rs"), (2, "src/core/b.rs")]);
+        assert_eq!(community_label(&[1, 2], &files), "src/core/");
+    }
+
+    #[test]
+    fn community_label_falls_back_to_the_dominant_directory() {
+        // No shared prefix across `app/` and `web/`, so the directory holding
+        // most members wins — never one arbitrary member file.
+        let files: HashMap<i64, &str> =
+            HashMap::from([(1, "app/src/a.ts"), (2, "app/src/b.ts"), (3, "web/c.ts")]);
+        assert_eq!(community_label(&[1, 2, 3], &files), "app/src/");
+    }
+
+    #[test]
+    fn community_label_falls_back_to_the_dominant_file_at_the_root() {
+        let files: HashMap<i64, &str> = HashMap::from([(1, "a.rs"), (2, "a.rs"), (3, "b.rs")]);
+        assert_eq!(community_label(&[1, 2, 3], &files), "a.rs");
+    }
+
+    #[test]
+    fn source_budget_keeps_the_most_referenced_files_and_reports_the_rest() {
+        let dir = scratch_dir();
+        let big = "x".repeat(SOURCE_EMBED_BUDGET_BYTES);
+        fs::write(dir.join("hot.rs"), &big).unwrap();
+        fs::write(dir.join("cold.rs"), "fn cold() {}").unwrap();
+        // `hot.rs` is referenced twice, so it wins the budget.
+        let nodes = vec![
+            Node {
+                id: Some(1),
+                kind: NodeKind::Function,
+                name: "one".into(),
+                file_path: "hot.rs".into(),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            },
+            Node {
+                id: Some(2),
+                kind: NodeKind::Function,
+                name: "two".into(),
+                file_path: "hot.rs".into(),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            },
+            Node {
+                id: Some(3),
+                kind: NodeKind::Function,
+                name: "three".into(),
+                file_path: "cold.rs".into(),
+                start_line: 1,
+                end_line: 1,
+                description: None,
+            },
+        ];
+
+        let payload = source_map_json(&dir, &nodes);
+        assert!(payload["files"]["hot.rs"].is_string());
+        assert!(
+            payload["files"]["cold.rs"].is_null(),
+            "the budget was already spent"
+        );
+        assert_eq!(payload["omitted"], 1);
+        assert_eq!(payload["budgetBytes"], SOURCE_EMBED_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn source_budget_embeds_one_oversized_file_rather_than_nothing() {
+        let dir = scratch_dir();
+        fs::write(
+            dir.join("huge.rs"),
+            "y".repeat(SOURCE_EMBED_BUDGET_BYTES + 1),
+        )
+        .unwrap();
+        let nodes = vec![Node {
+            id: Some(1),
+            kind: NodeKind::Function,
+            name: "one".into(),
+            file_path: "huge.rs".into(),
+            start_line: 1,
+            end_line: 1,
+            description: None,
+        }];
+
+        let payload = source_map_json(&dir, &nodes);
+        assert!(
+            payload["files"]["huge.rs"].is_string(),
+            "an empty viewer is worse than one oversized file"
+        );
+    }
+
+    #[test]
     fn json_safe_for_script_escapes_angle_brackets() {
         let escaped = json_safe_for_script("</script>alert(1)</script>");
         assert!(!escaped.contains('<'), "escaped was: {escaped}");
@@ -1150,7 +2188,7 @@ mod tests {
         .unwrap();
         let (_graph, nodes) = seeded_graph();
 
-        write_html(&root, &aag_dir, &nodes, &[]).unwrap();
+        write_html(&root, &aag_dir, &nodes, &[], &[]).unwrap();
         let html = fs::read_to_string(aag_dir.join("graph.html")).unwrap();
 
         assert!(
@@ -1305,7 +2343,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_html_embeds_d3_and_data() {
+    fn graph_html_embeds_its_renderer_and_data() {
         let (graph, _) = seeded_graph();
         let root = scratch_dir();
         let aag_dir = root.join(".aag");
@@ -1314,8 +2352,15 @@ mod tests {
         write_default(&root, &aag_dir, &graph).unwrap();
 
         let html = fs::read_to_string(aag_dir.join("graph.html")).unwrap();
-        assert!(html.contains("d3js.org"), "vendored D3 must be embedded");
+        assert!(
+            html.contains("Sigma") && html.contains("graphology"),
+            "the vendored renderer and graph model must be embedded"
+        );
         assert!(html.contains("\"caller\""), "graph data must be inlined");
+        assert!(
+            !html.contains("d3js.org"),
+            "D3 existed only for the retired whole-repository force layout"
+        );
         assert!(
             !html.contains("__GRAPH_DATA__"),
             "placeholder must be substituted"

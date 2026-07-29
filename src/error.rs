@@ -120,4 +120,13 @@ pub enum Error {
         /// How many distinct symbols share it.
         count: usize,
     },
+
+    /// A graph query was outside the supported subset, malformed, or too large
+    /// to evaluate — see `crate::query`.
+    #[error("query: {detail}")]
+    Query {
+        /// Human-readable diagnostic, with a line and column when the problem
+        /// is at a known place in the query text.
+        detail: String,
+    },
 }

@@ -207,6 +207,12 @@ pub enum NodeKind {
     DatabaseTable,
     /// A Terraform or other infrastructure-as-code resource.
     InfraResource,
+    /// A column of a table read from a live database catalog.
+    DatabaseColumn,
+    /// A UI component declared by a single-file component (`.vue`, `.svelte`,
+    /// `.astro`). The file is the declaration, and the template is where one
+    /// component reaches another.
+    Component,
 }
 
 impl NodeKind {
@@ -224,6 +230,8 @@ impl NodeKind {
             Self::Schema => "schema",
             Self::DatabaseTable => "database_table",
             Self::InfraResource => "infra_resource",
+            Self::DatabaseColumn => "database_column",
+            Self::Component => "component",
         }
     }
 
@@ -238,6 +246,8 @@ impl NodeKind {
             "schema" => Self::Schema,
             "database_table" => Self::DatabaseTable,
             "infra_resource" => Self::InfraResource,
+            "database_column" => Self::DatabaseColumn,
+            "component" => Self::Component,
             _ => Self::Interface,
         }
     }
@@ -664,6 +674,68 @@ impl Graph {
     /// Removes only globally resolved edges before rebuilding them from raw references.
     /// # Errors
     /// Returns a storage error if deletion fails.
+    /// Symbol names a file declares. The incremental path needs them twice:
+    /// before a re-index, to know which other files' references pointed here,
+    /// and after, to know which ones now can.
+    ///
+    /// # Errors
+    /// Returns a storage error when the query fails.
+    pub fn names_in_file(&self, file_path: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM nodes WHERE file_path = ?1 AND kind != 'file'")
+            .map_err(|source| Error::Storage {
+                context: "prepare names-in-file query",
+                source,
+            })?;
+        let rows = stmt
+            .query_map((file_path,), |row| row.get::<_, String>(0))
+            .map_err(|source| Error::Storage {
+                context: "run names-in-file query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read name",
+                source,
+            })?);
+        }
+        Ok(out)
+    }
+
+    /// Drops resolved edges originating in `files`, leaving every other
+    /// resolution in place.
+    ///
+    /// This is what makes an incremental pass incremental: re-resolving one
+    /// file must not throw away the other 400 000 edges first.
+    ///
+    /// # Errors
+    /// Returns a storage error when the delete fails.
+    pub fn clear_resolved_edges_in_files(&self, files: &[String]) -> Result<()> {
+        for file in files {
+            self.conn
+                .execute(
+                    "DELETE FROM edges
+                     WHERE (kind IN ('imports', 'calls', 'explains')
+                            OR (kind = 'implements' AND perspective = 'declared'))
+                       AND src IN (SELECT id FROM nodes WHERE file_path = ?1)",
+                    (file,),
+                )
+                .map_err(|source| Error::Storage {
+                    context: "clear resolved edges for one file",
+                    source,
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Drops every name-resolved edge in the graph — the full pass's first
+    /// step. [`clear_resolved_edges_in_files`](Self::clear_resolved_edges_in_files)
+    /// is the incremental counterpart.
+    ///
+    /// # Errors
+    /// Returns a storage error when the delete fails.
     pub fn clear_resolved_edges(&self) -> Result<()> {
         self.conn
             .execute(
@@ -679,12 +751,18 @@ impl Graph {
     }
 
     /// Marks that a full index has populated the incremental reference cache.
+    ///
+    /// The value is the reference *format* version, not a boolean: raw
+    /// references now carry structured JSON (import source/name/alias, call
+    /// receiver, declared inheritance) that older databases do not have, so
+    /// bumping it makes a stale cache read as not-ready and forces one full
+    /// reindex instead of silently resolving against half a format.
     /// # Errors
     /// Returns a storage error if the metadata write fails.
     pub fn mark_incremental_ready(&self) -> Result<()> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('raw_references', '1')",
+                "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('raw_references', '2')",
                 (),
             )
             .map_err(|source| Error::Storage {
@@ -699,7 +777,7 @@ impl Graph {
     /// Returns a storage error if the metadata query fails.
     pub fn incremental_ready(&self) -> Result<bool> {
         self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM index_metadata WHERE key = 'raw_references' AND value = '1')",
+            "SELECT EXISTS(SELECT 1 FROM index_metadata WHERE key = 'raw_references' AND value = '2')",
             (),
             |row| row.get(0),
         ).map_err(|source| Error::Storage { context: "read incremental index state", source })
@@ -1136,6 +1214,30 @@ impl Graph {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 source => Err(Error::Storage {
                     context: "find node by name",
+                    source,
+                }),
+            })
+    }
+
+    /// Finds a node by name within one file. Two files can declare the same
+    /// name, so a caller that knows the file gets the right one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Storage`] if the query fails.
+    pub fn find_in_file(&self, name: &str, file_path: &str) -> Result<Option<Node>> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, name, file_path, start_line, end_line, description
+                 FROM nodes WHERE name = ?1 AND file_path = ?2 LIMIT 1",
+                (name, file_path),
+                Self::row_to_node,
+            )
+            .map(Some)
+            .or_else(|source| match source {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                source => Err(Error::Storage {
+                    context: "find node by name and file",
                     source,
                 }),
             })

@@ -9,26 +9,7 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::Bigbang {
-            path,
-            force,
-            no_viz,
-            obsidian,
-            obsidian_dir,
-            no_install,
-        } => {
-            let obsidian_dir =
-                obsidian_dir.or_else(|| obsidian.then(|| path.join(".aag").join("obsidian")));
-            aag::bigbang::run(
-                &path,
-                &aag::bigbang::Options {
-                    force,
-                    no_viz,
-                    obsidian_dir,
-                    no_install,
-                },
-            )?;
-        }
+        command @ Command::Bigbang { .. } => run_bigbang(command)?,
         Command::Sync { path, file, no_viz } => {
             aag::sync::run(&path, file.as_deref(), no_viz)?;
         }
@@ -40,17 +21,32 @@ fn main() -> anyhow::Result<()> {
         Command::Ui { port, no_open } => aag::hub::run(port, no_open)?,
         Command::Uninstall { path } => aag::install::uninstall(&path)?,
         Command::Hook { event } => {
-            let (path, hook_event) = match event {
-                aag::cli::HookEvent::PreEdit { path } => (path, aag::hook::Event::PreEdit),
-                aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
-                aag::cli::HookEvent::SessionStart { path } => {
-                    (path, aag::hook::Event::SessionStart)
-                }
-            };
+            let (path, hook_event) = hook_target(event);
             aag::hook::run(&path, hook_event, &mut std::io::stdin().lock());
         }
         Command::Explore { query, path } => aag::explore::run(&path, &query)?,
         Command::Impact { symbol, path } => aag::impact::run(&path, &symbol)?,
+        Command::Flow { file, function } => {
+            println!("{}", aag::flow::format_file(&file, &function)?);
+        }
+        Command::Pdg { file, line } => {
+            println!("{}", aag::flow::format_pdg(&file, line)?);
+        }
+        Command::Taint { file, depth } => {
+            println!("{}", aag::flow::format_taint(&file, depth)?);
+        }
+        Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
+        Command::Api { command } => print_api(command)?,
+        command @ Command::Bench { .. } => run_bench(command)?,
+        Command::GraphDiff {
+            before,
+            after,
+            path,
+        } => aag::refs::run_diff(&path, &before, &after)?,
+        Command::Areas { path } => aag::areas::run(&path)?,
+        Command::Pr { command } => print_pr(command)?,
+        Command::Db { command } => print_db(command)?,
+        Command::Memory { command } => run_memory(command)?,
         Command::Communities { query, path } => {
             println!("{}", aag::analysis::communities_format(&path, &query)?);
         }
@@ -62,14 +58,7 @@ fn main() -> anyhow::Result<()> {
             let count = aag::semantic::build(&path)?;
             println!("embedded {count} nodes");
         }
-        Command::Mcp {
-            path,
-            transport,
-            port,
-            api_key,
-        } => {
-            run_mcp(&path, &transport, port, api_key.as_deref())?;
-        }
+        served @ Command::Mcp { .. } => run_mcp(served)?,
         Command::Describe {
             doc,
             description,
@@ -100,17 +89,219 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_mcp(
-    path: &std::path::Path,
-    transport: &str,
-    port: u16,
-    api_key: Option<&str>,
-) -> anyhow::Result<()> {
+/// Serves MCP over the chosen transport. Takes the whole command so `main`
+/// stays a router rather than growing the HTTP option list twice.
+fn run_mcp(command: Command) -> anyhow::Result<()> {
+    let Command::Mcp {
+        path,
+        transport,
+        port,
+        api_key,
+        bind,
+        stateless,
+        max_body,
+        rate_limit,
+    } = command
+    else {
+        return Ok(());
+    };
     if transport == "http" {
-        aag::mcp::run_http(path, port, api_key)?;
+        aag::transport::serve(
+            &path,
+            &aag::transport::Options {
+                bind,
+                port,
+                api_key,
+                stateless,
+                max_body,
+                rate_per_minute: rate_limit,
+            },
+        )?;
     } else {
-        aag::mcp::run(path)?;
+        aag::mcp::run(&path)?;
     }
+    Ok(())
+}
+
+/// Which repository a hook fires against, and which lifecycle point it is.
+fn hook_target(event: aag::cli::HookEvent) -> (std::path::PathBuf, aag::hook::Event) {
+    match event {
+        aag::cli::HookEvent::PreEdit { path } => (path, aag::hook::Event::PreEdit),
+        aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
+        aag::cli::HookEvent::SessionStart { path } => (path, aag::hook::Event::SessionStart),
+    }
+}
+
+/// Runs one work-memory operation.
+fn run_memory(command: aag::cli::MemoryCommand) -> anyhow::Result<()> {
+    use aag::cli::MemoryCommand;
+    match command {
+        MemoryCommand::Save {
+            question,
+            answer,
+            nodes,
+            outcome,
+            correction,
+            revision,
+            path,
+        } => {
+            let id = aag::memory::save(
+                &path,
+                &aag::memory::Record {
+                    question,
+                    answer,
+                    nodes: nodes
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string)
+                        .collect(),
+                    outcome,
+                    correction,
+                    revision,
+                },
+            )?;
+            println!("saved memory entry #{id}");
+        }
+        MemoryCommand::Correct {
+            id,
+            outcome,
+            correction,
+            path,
+        } => {
+            aag::memory::correct(&path, id, &outcome, correction.as_deref())?;
+            println!("updated memory entry #{id}");
+        }
+        MemoryCommand::Recall { question, path } => {
+            println!("{}", aag::memory::format_recall(&path, &question)?);
+        }
+        MemoryCommand::Lessons { path } => {
+            println!("{}", aag::memory::format_lessons(&path, "")?);
+        }
+    }
+    Ok(())
+}
+
+fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
+    let text = match view {
+        aag::cli::ApiView::Routes { filter, path } => aag::api::route_map(&path, &filter)?,
+        aag::cli::ApiView::Tools { filter, path } => aag::api::tool_map(&path, &filter)?,
+        aag::cli::ApiView::Shapes { filter, path } => aag::api::format_shape_check(&path, &filter)?,
+        aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
+        aag::cli::ApiView::Spec {
+            filter,
+            path,
+            include_declared,
+            out,
+        } => {
+            let document = aag::api::spec(&path, &filter, include_declared)?;
+            match out {
+                Some(target) => {
+                    std::fs::write(&target, &document)?;
+                    format!("wrote {}", target.display())
+                }
+                None => document,
+            }
+        }
+    };
+    println!("{text}");
+    Ok(())
+}
+
+/// `aag bigbang` — index, export, and wire up every detected agent. Takes the
+/// parsed command rather than six loose flags, three of which are booleans.
+fn run_bigbang(command: Command) -> anyhow::Result<()> {
+    let Command::Bigbang {
+        path,
+        force,
+        no_viz,
+        obsidian,
+        obsidian_dir,
+        no_install,
+    } = command
+    else {
+        unreachable!("run_bigbang is only reached from the Bigbang arm")
+    };
+    let obsidian_dir =
+        obsidian_dir.or_else(|| obsidian.then(|| path.join(".aag").join("obsidian")));
+    aag::bigbang::run(
+        &path,
+        &aag::bigbang::Options {
+            force,
+            no_viz,
+            obsidian_dir,
+            no_install,
+        },
+    )?;
+    Ok(())
+}
+
+/// `aag bench` — measure, or print what was already measured.
+fn run_bench(command: Command) -> anyhow::Result<()> {
+    let Command::Bench {
+        repo,
+        run_kind,
+        repetitions,
+        out,
+        report,
+        skip_export,
+    } = command
+    else {
+        unreachable!("run_bench is only reached from the Bench arm")
+    };
+    let kind = aag::bench::RunKind::parse(&run_kind)?;
+    if report {
+        print!("{}", aag::bench::report(&out, kind)?);
+        print!("\n{}", aag::bench::caveats());
+        return Ok(());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    aag::bench::run(
+        &aag::bench::Options {
+            repo,
+            run_kind: kind,
+            repetitions,
+            out,
+            skip_export,
+        },
+        now,
+    )?;
+    Ok(())
+}
+
+fn print_pr(command: aag::cli::PrView) -> anyhow::Result<()> {
+    let text = match command {
+        aag::cli::PrView::Dashboard { base, path } => aag::pr::dashboard(&path, &base)?,
+        aag::cli::PrView::Conflicts { base, path } => aag::pr::conflicts(&path, &base)?,
+        aag::cli::PrView::Worktrees { base, path } => aag::pr::worktrees(&path, &base)?,
+        aag::cli::PrView::Impact { number, path } => aag::pr::impact(&path, &number)?,
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn print_db(command: aag::cli::DbCommand) -> anyhow::Result<()> {
+    let text = match command {
+        aag::cli::DbCommand::Scan { url, path } => aag::database::scan(&path, &url)?,
+        aag::cli::DbCommand::Drift { path } => aag::database::format_drift(&path)?,
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn print_query(path: &std::path::Path, query: &str, json: bool) -> anyhow::Result<()> {
+    let answer = aag::query::run(path, query)?;
+    println!(
+        "{}",
+        if json {
+            answer.to_json()
+        } else {
+            answer.to_table()
+        }
+    );
     Ok(())
 }
 
@@ -134,6 +325,7 @@ fn handle_group(command: GroupCommand) -> anyhow::Result<()> {
         GroupCommand::Add { name, repository } => aag::federation::add(&name, &repository)?,
         GroupCommand::Remove { name, repository } => aag::federation::remove(&name, &repository)?,
         GroupCommand::List { name } => aag::federation::list_group(name.as_deref())?,
+        GroupCommand::Links { name } => aag::federation::links_group(&name)?,
         GroupCommand::Query { name, query } => aag::federation::query_group(&name, &query)?,
         GroupCommand::Status { name } => aag::federation::status_group(&name)?,
         GroupCommand::Contracts { name } => aag::federation::contracts_group(&name)?,

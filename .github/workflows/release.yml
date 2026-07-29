@@ -55,23 +55,92 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           Compress-Archive -Path aag.exe -DestinationPath aag-${{ matrix.target }}.zip
+
+      # The semantic build is the same binary plus embeddings. `ort` links
+      # onnxruntime statically, so the artifact stays a single self-contained
+      # file — no sidecar library, nothing for a user to install. It ships as
+      # a separate asset because it is ~4x the size and most users never
+      # enable it (`AAG_SEMANTIC=1 npm i -g @waifucorp/aag` opts in).
+      - name: Build with semantic search
+        run: cargo build --release --features semantic --target ${{ matrix.target }}
+      - name: Package semantic (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf aag-semantic-${{ matrix.target }}.tar.gz aag
+      - name: Package semantic (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path aag.exe -DestinationPath aag-semantic-${{ matrix.target }}.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: aag-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/aag-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/aag-${{ matrix.target }}.zip
+            target/${{ matrix.target }}/release/aag-semantic-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/aag-semantic-${{ matrix.target }}.zip
           if-no-files-found: error
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # One checksum file for every asset, so a download can be verified
+      # without trusting the transport or the mirror it came through.
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # The npm wrapper's postinstall downloads `v<package.json version>`, so
+      # publishing a package whose version has no matching release would give
+      # every installer a 404. Fail here instead.
+      - name: Package version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME:-${{ inputs.tag }}}"
+          npm_version="v$(node -p "require('./npm/package.json').version")"
+          crate_version="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          echo "tag=$tag npm=$npm_version crate=$crate_version"
+          test "$tag" = "$npm_version" || { echo "npm/package.json is $npm_version, tag is $tag"; exit 1; }
+          test "$tag" = "$crate_version" || { echo "Cargo.toml is $crate_version, tag is $tag"; exit 1; }
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+  # Publishing is a separate job so a failed npm publish never blocks the
+  # GitHub release the binaries are already attached to. It is skipped
+  # entirely when no token is configured, which keeps forks green.
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Installer tests
+        run: node --test "npm/*.test.js"
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not configured — skipping publish"
+            exit 0
+          fi
+          cd npm && npm publish --access public --provenance

@@ -4,7 +4,12 @@ wiki: src/parse.rs
 
 `src/parse.rs` is the tree-sitter based structural parsing layer. It turns one file's source text into a `ParsedFile`: the symbols the file declares plus *raw*, unresolved cross-references. "Raw" means the module never turns a call to `bar` into an edge pointing at a specific node id — that resolution, along with tagging edges `EXTRACTED`/`INFERRED`/`AMBIGUOUS`, is `crate::resolve`'s job. This split keeps each language's parser dumb and swappable without touching the storage layer.
 
-The default frontend covers Rust, JavaScript, TypeScript, Python, Java, C, C++, C#, Go, PHP, Ruby, Swift, Kotlin, Dart, Scala, Shell, Lua, R, Elixir, and Objective-C. Rust and JavaScript keep dedicated high-precision walkers. The other 18 use the shared Tree-sitter language pack plus an AST fallback, producing the same `ParsedFile` contract for structure, imports, and calls. Grammars download on first use and remain cached for offline runs.
+The frontend covers 39 languages. Rust and JavaScript keep dedicated high-precision walkers; the rest use the shared Tree-sitter language pack plus an AST fallback, producing the same `ParsedFile` contract for structure, imports, and calls. A language is listed only once a test in `src/parse.rs` shows a snippet of it yielding a declaration — a grammar existing in the pack is not coverage.
+
+Two families need more than a table entry:
+
+- **Single-file components** (`.vue`, `.svelte`, `.astro`). The script block comes back as one opaque node, so it is extracted and handed to the JavaScript frontend with line numbers shifted back. The markup is indexed too: the file itself becomes a `NodeKind::Component` named after its stem, and each component element in the template becomes a call from it to the component that element names. `PascalCase` and `kebab-case` are components; `div` is not; `svelte:*` control elements are not; and an element whose name is computed (`<component :is="x">`) names nothing and is skipped.
+- **Groovy**, whose grammar is a loose command soup. Declarations are recovered by shape: a `func` — an identifier with an argument list — followed by a brace is a method, which covers `def greet() { … }`, `String greet(who) { … }`, and `static int add(a, b) { … }` equally, while `greet(1)` has the same `func` and no brace and stays a call. `class`/`interface`/`trait` followed by a word is a type.
 
 `ParsedFile` holds three fields:
 
@@ -14,7 +19,7 @@ The default frontend covers Rust, JavaScript, TypeScript, Python, Java, C, C++, 
 
 The `LanguageParser` trait is the extension point: `extensions` reports which file extensions (without the dot) a parser handles, and `parse` turns `file_path` and `source` into a `ParsedFile`, returning `Error::Parse` on failure. `parse_file` is the entry point callers use: it picks a registered parser by matching the file's extension against each parser's `extensions`, runs it, and returns `Ok(None)` for files with no registered parser — callers skip those rather than treating them as an error.
 
-Currently only `RustParser` is registered, backed by `tree_sitter_rust`. It handles the `rs` extension. Its `parse` method builds a tree-sitter `Parser`, parses the source into a tree, then walks the tree with the internal `walk` function starting from `tree.root_node()`.
+`RustParser`, backed by `tree_sitter_rust`, is the reference implementation of that trait and handles the `rs` extension. Its `parse` method builds a tree-sitter `Parser`, parses the source into a tree, then walks the tree with the internal `walk` function starting from `tree.root_node()`.
 
 `walk` is a recursive-descent traversal that threads two bits of state through the tree: `in_impl`, which marks whether the walk is inside an `impl` block so nested `function_item` nodes get tagged `NodeKind::Method` instead of `NodeKind::Function`; and `current_owner`, the enclosing function/method name that any `call_expression` found inside its body gets attributed to. It matches on node kind:
 

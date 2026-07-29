@@ -71,7 +71,38 @@ pub fn communities(nodes: &[Node], edges: &[Edge]) -> Vec<Community> {
         .collect()
 }
 
+/// Symbols a program actually enters through: a language's `main`, and any
+/// handler wired to an HTTP endpoint.
+///
+/// This is a stronger signal than "nothing calls it", which in a library
+/// makes every public function look like an entrypoint.
+#[must_use]
+pub fn entrypoints(nodes: &[Node], edges: &[Edge]) -> BTreeSet<i64> {
+    let endpoints: HashSet<i64> = nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Endpoint)
+        .filter_map(|node| node.id)
+        .collect();
+    let mut found: BTreeSet<i64> = nodes
+        .iter()
+        .filter(|node| {
+            node.kind == NodeKind::Function && matches!(node.name.as_str(), "main" | "Main")
+        })
+        .filter_map(|node| node.id)
+        .collect();
+    for edge in edges {
+        if edge.kind == EdgeKind::Implements && endpoints.contains(&edge.dst) {
+            found.insert(edge.src);
+        }
+    }
+    found
+}
+
 /// Detect call-graph roots and their reachable execution processes.
+///
+/// Roots are the detected entrypoints when the repository has any; a
+/// repository with none (a library) falls back to "callable that nothing
+/// calls", which is weaker but still shows the call forest.
 #[must_use]
 pub fn processes(nodes: &[Node], edges: &[Edge]) -> Vec<Process> {
     let callable: BTreeSet<i64> = nodes
@@ -87,8 +118,21 @@ pub fn processes(nodes: &[Node], edges: &[Edge]) -> Vec<Process> {
             outgoing.entry(edge.src).or_default().push(edge.dst);
         }
     }
+    let declared: BTreeSet<i64> = entrypoints(nodes, edges)
+        .into_iter()
+        .filter(|id| callable.contains(id))
+        .collect();
+    let roots: BTreeSet<i64> = if declared.is_empty() {
+        callable
+            .iter()
+            .filter(|id| !incoming.contains(id))
+            .copied()
+            .collect()
+    } else {
+        declared
+    };
     let mut found = Vec::new();
-    for root in callable.iter().filter(|id| !incoming.contains(id)) {
+    for root in &roots {
         let mut queue = VecDeque::from([*root]);
         let mut visited = HashSet::new();
         let mut steps = Vec::new();

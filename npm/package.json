@@ -1,6 +1,6 @@
 {
   "name": "@waifucorp/aag",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AboveAllGraphs — code knowledge graph that installs itself, stays fresh, and works with every coding agent. This package only downloads the prebuilt Rust binary for your platform; nothing is compiled.",
   "license": "MIT",
   "repository": {
@@ -15,6 +15,7 @@
     "postinstall": "node install.js"
   },
   "files": ["bin/aag.js", "install.js"],
+  "//semantic": "AAG_SEMANTIC=1 npm i -g @waifucorp/aag installs the build with local embeddings (larger, self-contained).",
   "os": ["linux", "darwin", "win32"],
   "cpu": ["x64", "arm64"],
   "engines": {

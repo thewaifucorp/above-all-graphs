@@ -24,6 +24,24 @@ use crate::storage::Graph;
 /// (default ~2s)").
 const DEBOUNCE: Duration = Duration::from_secs(2);
 
+/// Bumped every time the index in this process changes. A transport holding a
+/// stream open reads it to know there is something to tell the client about,
+/// which is cheaper and less fragile than every stream watching the filesystem
+/// on its own.
+static REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many times the index has changed since this process started.
+#[must_use]
+pub fn revision() -> u64 {
+    REVISION.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Records that the index changed. Called after every successful pass, and by
+/// anything else that rewrites the graph in this process.
+pub fn mark_indexed() {
+    REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
 /// Directories whose changes never trigger a reindex — `.aag` in
 /// particular, since writing `graph.db` during a reindex would otherwise
 /// immediately trigger the next one. Same list the indexer skips.
@@ -53,6 +71,7 @@ pub fn reconcile(root: &Path) -> Result<()> {
         edges = summary.edges,
         "reconciled index on connect"
     );
+    mark_indexed();
     Ok(())
 }
 
@@ -135,14 +154,17 @@ fn reindex(root: &Path, events: &[DebouncedEvent]) {
             resolve::index_file(&graph, root, path)
         });
     match result {
-        Ok(summary) => tracing::info!(
-            changed_paths = changed.len(),
-            files = summary.files,
-            docs = summary.docs,
-            nodes = summary.nodes,
-            edges = summary.edges,
-            "reindexed after file change"
-        ),
+        Ok(summary) => {
+            mark_indexed();
+            tracing::info!(
+                changed_paths = changed.len(),
+                files = summary.files,
+                docs = summary.docs,
+                nodes = summary.nodes,
+                edges = summary.edges,
+                "reindexed after file change"
+            );
+        }
         Err(error) => tracing::warn!(%error, "reindex failed"),
     }
 }

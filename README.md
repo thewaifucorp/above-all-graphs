@@ -40,9 +40,12 @@ No API key, no native compile step, no config file, nothing to keep in sync by h
 
 ```bash
 npm install -g @waifucorp/aag
+
+# with local semantic search (larger, still one self-contained file):
+AAG_SEMANTIC=1 npm install -g @waifucorp/aag
 ```
 
-That's it — postinstall downloads the prebuilt binary for your platform (linux/macos/windows, x64 + arm64) from [GitHub Releases](https://github.com/thewaifucorp/above-all-graphs/releases); nothing compiles.
+That's it — postinstall downloads the prebuilt binary for your platform (linux/macos/windows, x64 + arm64) from [GitHub Releases](https://github.com/thewaifucorp/above-all-graphs/releases); nothing compiles. The semantic build is the same binary with embeddings and onnxruntime linked statically — 55 MB against 25 MB, which is why it is opt-in. See [semantic search](docs/semantic-search.md).
 
 Building from source instead:
 
@@ -69,6 +72,10 @@ aag embeddings --path .
 
 ## The UI
 
+![The graph, overview mode: modules aggregated, edges between them](docs/images/graph-overview.png)
+
+![Explore mode focused on one file: its imports, its callers, and the types it declares](docs/images/graph-explore.png)
+
 `aag ui` starts a local server (127.0.0.1 only) and opens your browser:
 
 - **One bar of lib-level chrome**: workspace picker, stats, a `+ index` button to index a new repo without touching the terminal.
@@ -92,6 +99,13 @@ Built-in multi-provider AI chat (Anthropic, OpenAI, Azure, Gemini, OpenRouter, M
 | opencode    | `opencode.json`           | —                                                | `AGENTS.md` (fenced)      |
 | Codex       | `~/.codex/config.toml`    | —                                                | 7 skills (`.agents/skills/`) + `AGENTS.md` |
 | Antigravity | (UI-managed)              | —                                                | `AGENTS.md` (fenced)      |
+| VS Code / Copilot | `.vscode/mcp.json` (`servers`) | —                                   | `.github/copilot-instructions.md` (fenced) |
+| Windsurf    | `~/.codeium/windsurf/mcp_config.json` | —                                    | `.windsurf/rules/aag.md`  |
+| Zed         | `.zed/settings.json` (`context_servers`) | —                                 | `AGENTS.md` (fenced)      |
+| Roo Code    | `.roo/mcp.json`           | —                                                | `.roo/rules/aag.md`       |
+| Cline       | (VS Code globalStorage — left to its UI) | —                                 | `.clinerules/aag.md`      |
+| Crush       | `.crush.json` (`mcp`)     | —                                                | `AGENTS.md` (fenced)      |
+| goose       | `~/.config/goose/config.yaml` | —                                            | `.goosehints` (fenced)    |
 
 Idempotent (re-running never duplicates), additive (your existing hooks/servers/rules survive untouched), reversible (`aag uninstall` removes exactly what was written). Agents without hook systems stay fresh anyway — the MCP server reconciles on connect and runs the native watcher.
 
@@ -170,3 +184,15 @@ This repo dogfoods itself: the `aag` hooks are active here.
 ## License
 
 MIT
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — the pipeline, module by module, and the invariants
+- [Compatibility matrix](docs/compatibility.md) — languages, agents, platforms, features, external tools
+- [Benchmarks](docs/benchmarks.md) — measured scale and operations, with the limits they exposed
+- [Example corpora](docs/corpora.md) — the external repositories measured, and how to reproduce
+- [Migration notes](docs/migration.md) — what changes between versions, and what you have to do
+- [Capability coverage](docs/capability-coverage.md) — what is claimed, what is not, and why
+
+Quickstart in other languages: [português do Brasil](docs/quickstart.pt-BR.md) ·
+[español](docs/quickstart.es.md) · [简体中文](docs/quickstart.zh-CN.md)

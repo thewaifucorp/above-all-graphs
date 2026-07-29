@@ -1,6 +1,6 @@
 [package]
 name = "aag"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "AboveAllGraphs — code knowledge graph, always fresh, MCP-native."
 license = "MIT"
@@ -32,6 +32,19 @@ notify = "8"
 notify-debouncer-mini = "0.7"
 tiny_http = "0.12"
 fastembed = { version = "5.17.3", optional = true }
+postgres = "0.19"
+tokio-postgres-rustls = "0.14.0"
+rustls = "0.23.42"
+webpki-roots = "1.0.9"
+pdf-extract = "0.12.0"
+calamine = "0.36.1"
+zip = "8.6.0"
+quick-xml = "0.41.0"
+kamadak-exif = "0.6.1"
+imagesize = "0.15.0"
+serde = { version = "1.0.229", features = ["derive"] }
+flate2 = "1.1.9"
+base64 = "0.23.0"
 
 [features]
 default = []
@@ -39,3 +52,6 @@ semantic = ["dep:fastembed"]
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+
+[dev-dependencies]
+rust_xlsxwriter = "0.96.0"

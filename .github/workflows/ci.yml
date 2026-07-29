@@ -16,3 +16,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test
+      # The npm wrapper is how most users get the binary, and its asset
+      # selection is the difference between installing embeddings and
+      # silently not installing them.
+      - run: node --test "npm/*.test.js"
