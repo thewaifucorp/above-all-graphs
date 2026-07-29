@@ -19,4 +19,6 @@ jobs:
       # The npm wrapper is how most users get the binary, and its asset
       # selection is the difference between installing embeddings and
       # silently not installing them.
-      - run: node --test "npm/*.test.js"
+      # Unquoted so the shell expands it. Node 24 stopped expanding the
+      # pattern itself, and a quoted glob became "Could not find npm/*.test.js".
+      - run: node --test npm/*.test.js
