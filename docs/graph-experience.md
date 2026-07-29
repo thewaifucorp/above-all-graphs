@@ -725,6 +725,24 @@ The fit also had to stop framing hidden nodes: a filtered-out node is still in
 the graph, and `structure only` left the visible files crowded into a corner
 around the empty space where the functions were.
 
+### Landed: a module no longer looks like a file
+
+The tiers separated a file from a method, but a module aggregate and a file were
+still the same big coloured circle, so the one thing the Overview is for — is
+this a module or a file? — took a click to answer.
+
+- **A module is pastel.** An aggregate is lifted toward white past every file's
+  brightness and painted above them, so it reads as the level above rather than
+  as another node of the same kind.
+- **Importance inside the file tier is saturation, not whiteness.** A file's
+  colour is pushed up in saturation and lightness in proportion to
+  `sqrt(degree / peak degree)`: the handful of files a module actually turns on
+  are the vivid ones. Mixing toward white was tried first and reads as washed
+  out — the opposite of important.
+
+That leaves three readable levels: pastel and largest is a module, vivid is a
+file worth opening, dim is code inside one.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),
