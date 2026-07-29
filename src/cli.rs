@@ -183,6 +183,23 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// Compare two graph states: the workspace, a branch, a commit, or a
+    /// pull request's head. Each ref is indexed once into `.aag/refs/`,
+    /// through a detached worktree that never touches your checkout.
+    GraphDiff {
+        /// Earlier state: `workspace`, a git ref, or `pr/<number>`.
+        #[arg(default_value = "HEAD")]
+        before: String,
+
+        /// Later state: `workspace`, a git ref, or `pr/<number>`.
+        #[arg(default_value = "workspace")]
+        after: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+
     /// The repository's areas, as detected from the graph — the same
     /// clustering the generated area skills are built from.
     Areas {

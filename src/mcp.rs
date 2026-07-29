@@ -141,6 +141,13 @@ const TOOL_SPECS: &[ToolSpec] = &[
         implemented: true,
     },
     ToolSpec {
+        name: "graph_diff",
+        description: "Compare two graph states — the workspace, a branch, a commit, or a pull request head (`pr/42`) — as `before..after` or a single state against the workspace. Reports symbols added, removed, and moved, edges gained and lost, and which symbols the rest of the code started or stopped depending on. Each ref is indexed once through a detached worktree; your checkout is never touched.",
+        arg: "states",
+        arg_description: "`main..workspace`, `pr/42`, `v0.1.0..main`, or a single ref compared against the workspace.",
+        implemented: true,
+    },
+    ToolSpec {
         name: "pr_dashboard",
         description: "Every open pull request ranked by what the graph says it reaches: hub symbols touched, blast radius, affected tests it does not change, failing checks, and overlaps with other open PRs. The score comes from a stated rule table, and every point is attributed to a rule.",
         arg: "base",
@@ -632,6 +639,18 @@ fn dispatch(root: &Path, name: &str, arg: &str) -> Result<String> {
         "shortest_path" => shortest_path_text(root, arg),
         "god_nodes" => god_nodes_text(root, arg),
         "graph_stats" => graph_stats_text(root),
+        "graph_diff" => {
+            // `before..after`, or a single state compared against the
+            // workspace — the common question is "what did this branch do".
+            let (before, after) = arg
+                .split_once("..")
+                .map_or((arg, "workspace"), |(left, right)| (left, right));
+            crate::refs::format(
+                root,
+                &crate::refs::State::parse(before),
+                &crate::refs::State::parse(after),
+            )
+        }
         "pr_dashboard" => crate::pr::dashboard(root, arg),
         "pr_conflicts" => crate::pr::conflicts(root, arg),
         "pr_worktrees" => crate::pr::worktrees(root, arg),

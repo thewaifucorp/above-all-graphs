@@ -420,8 +420,26 @@ P2 gates expand reach after the core is measurable and dependable.
     `aag embeddings` and cached by `fastembed`, so the first run needs network
     and an air-gapped machine needs that cache primed by hand. Bundling the
     model would triple an asset most users never install.
-- 17. Add branch-aware indexes and explicit comparisons between workspace,
-    branch, commit, and PR graph states.
+- 17. **Closed.** Branch-aware indexes and graph-state comparison
+    (`src/refs.rs`): `aag graph-diff <before> <after>` and the MCP tool
+    `graph_diff` compare any two of the workspace, a branch, a commit, a tag,
+    and a pull request head (`pr/42`, resolved through `gh`). See
+    [graph diff](graph-diff.md).
+    A ref is indexed through `git worktree add --detach` into
+    `.aag/refs/<commit>.db` — the working tree is never touched, stashed, or
+    checked out, the scratch worktree is removed even when indexing fails, and
+    snapshots are cached by resolved commit with the eight most recent kept.
+    The report is symbols added, removed, and moved, edges gained and lost,
+    files added and removed, and the fan-in shifts that say which symbol the
+    rest of the code just started leaning on. Keying by `kind name` rather than
+    node id is what makes a moved symbol read as moved instead of as a deletion
+    plus an addition.
+    Not claimed: two same-named symbols of the same kind merge into one entry,
+    so a rename plus a move in one commit reads as an add and a remove; the
+    first diff against a large repository pays for a full index; `pr/<n>` needs
+    `gh` and network; a shallow clone cannot check out a commit it does not
+    have; and comparison is structural — two states with identical symbols and
+    edges compare equal even when a function body changed completely.
 - 18. Improve public onboarding and proof: architecture docs, benchmark history,
    compatibility matrix, migration notes, example corpora, screenshots,
    multilingual quickstarts, and release automation for every supported

@@ -25,6 +25,7 @@ CI (`.github/workflows/ci.yml`) enforces fmt + clippy `-D warnings` + tests. Rel
 - `database.rs` — live PostgreSQL catalog into the graph; credentials never stored
 - `pr.rs` — pull requests ranked by what the graph says they reach; `gh` only at the edges
 - `areas.rs` — generated per-area skills from communities; deterministic, pruned, `aag areas`
+- `refs.rs` — per-ref snapshots via detached worktree + `aag graph-diff` between states
 - `export.rs` — the offline site (graph.html/wiki/report) + GraphML/Cypher/Obsidian
 - `mcp.rs` — stdio JSON-RPC; `explore` listed by default, rest via `AAG_MCP_TOOLS`
 - Skill templates live in `assets/skills/`, embedded via `include_str!`

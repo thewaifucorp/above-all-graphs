@@ -34,6 +34,7 @@ pub mod pr;
 pub mod protocol;
 pub mod query;
 pub mod refactor;
+pub mod refs;
 pub mod resolve;
 pub mod semantic;
 pub mod storage;
