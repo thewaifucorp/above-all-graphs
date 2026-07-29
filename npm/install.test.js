@@ -50,3 +50,17 @@ test("semantic is opt-in, from either the env var or the npm flag", () => {
   assert.strictEqual(wantsSemantic({ AAG_SEMANTIC: "0" }), false);
   assert.strictEqual(wantsSemantic({ AAG_SEMANTIC: "" }), false);
 });
+
+test("a platform without a semantic build falls back to the plain asset", () => {
+  // `ort` publishes no prebuilt onnxruntime for Intel macOS, so the release
+  // has no semantic asset for it. Asking anyway must not resolve to a name
+  // that 404s.
+  assert.equal(
+    assetFor("darwin-x64", true),
+    "aag-x86_64-apple-darwin.tar.gz",
+  );
+  assert.equal(
+    assetFor("darwin-arm64", true),
+    "aag-semantic-aarch64-apple-darwin.tar.gz",
+  );
+});
