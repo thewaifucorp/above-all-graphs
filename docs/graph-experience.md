@@ -530,6 +530,53 @@ first pass either dropped or never wired to a control anyone could find.
   under a scaled transform only covers the canvas while the transform and the
   backing size agree.
 
+### Landed: a layout that survives repository scale, plus pin and path
+
+- **Repulsion goes through a quadtree again.** Every node pushing every other
+  node is what made the layout O(n²): 5753 nodes is 16.5 million pairs per
+  round, times ~180 rounds. Distant nodes are now summed into one mass and
+  pushed against once — the optimisation `d3.quadtree` used to provide before d3
+  was dropped, reimplemented in ~110 lines rather than vendored, because
+  `graphology-layout-forceatlas2` publishes no browser build and shimming its
+  `require` graph is more code than the algorithm.
+
+  Measured in-page on the same machine, synthetic scenes at 2 edges per node:
+
+  | nodes | pairwise | quadtree |
+  |---|---|---|
+  | 420 | 153 ms | 74 ms |
+  | 1 685 | 2 589 ms | 318 ms |
+  | 3 000 | 7 956 ms | 628 ms |
+  | 5 753 (bastion's size) | 52 850 ms | 1 367 ms |
+  | 10 000 | not measured | 2 531 ms |
+
+  "Expand all modules" at bastion's size went from freezing the tab for the best
+  part of a minute to about a second and a half.
+
+- **Overlap separation is gridded.** It was the second O(n²) pass, 40 rounds of
+  it. Overlap is local, so each node is now compared against its own cell and
+  the eight around it. Exactly coincident points also get a direction to be
+  pushed along; without one they divided by a zero-length vector and stayed
+  stacked forever.
+
+- **Pin marks something.** The state was wired — toggled, persisted in `?pin=`,
+  and honoured when Explore builds its scene — but the only visual effect was
+  `result.type = "circle"`, which is sigma's default type, so pinning changed
+  nothing on screen. A pinned node now carries a 📌 in its label, keeps that
+  label past the semantic-zoom threshold, and is highlighted the way a selection
+  is: sigma's own channels, no geometry of ours to keep in sync. Pins are marked
+  in every mode, and Overview shows a pinned node individually even when its
+  module is collapsed. The inspector's button also re-reads after the toggle,
+  instead of still offering "Pin" for a node that is now pinned.
+
+- **Path can ignore direction.** The walk followed `outgoing` only, so
+  `A → X ← B` reported nothing at all: a real connection through X, refused
+  because no directed chain runs end to end. There is now a toggle — *following
+  arrows* / *any direction* (`?dir=any`) — and when a directed search comes back
+  empty the page checks the undirected one before reporting failure, so "no path"
+  and "no path following the arrows, but one hop if you ignore them" are
+  different answers. Hops walked against an edge are marked in the caption.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

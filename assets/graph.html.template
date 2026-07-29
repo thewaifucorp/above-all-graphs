@@ -761,8 +761,20 @@ function nodeEntry(node, extra) {
     size: nodeSize(node),
     color: communityColor(node.community),
     _node: node,
+    // Set here rather than per mode, so a pin is marked in every scene that
+    // happens to contain the node instead of only in the one that pinned it.
+    _pinned: State.pins.has(node.id),
   };
   const merged = Object.assign(base, extra || {});
+  // A pin is a promise that the node stays on screen, so it has to be findable
+  // once it is there. The label is forced past the semantic-zoom threshold and
+  // marked, and sigma highlights the node the way it highlights a selection —
+  // no geometry of our own, which is what made the kind outlines unworkable.
+  if (merged._pinned) {
+    merged.label = `\u{1F4CC} ${merged.label}`;
+    merged.forceLabel = true;
+    merged.highlighted = true;
+  }
   // Impact state is a second dimension on the same node, so it gets its own
   // channel — a glyph and a size step, never a hue the module already owns.
   if (merged._impact) {
@@ -800,6 +812,13 @@ function overviewSpec() {
         _aggregate: community,
       });
       anchorOf.set(community.id, `c${community.id}`);
+      // A pinned node stays on screen even when its module is collapsed:
+      // that is the whole point of pinning it.
+      for (const id of community.members) {
+        if (!State.pins.has(id)) continue;
+        const node = byId.get(id);
+        if (node && nodeAllowed(node)) items.push(nodeEntry(node));
+      }
     }
   }
   const present = new Set(items.map((item) => item.key));
@@ -926,7 +945,6 @@ function exploreSpec() {
       size: id === root.id ? nodeSize(node) * 1.9 + 3 : nodeSize(node),
       _depth: depth.get(id) || 0,
       _direction: direction.get(id),
-      _pinned: State.pins.has(id),
     });
   });
   const edges = [];
@@ -987,7 +1005,20 @@ function exploreSpec() {
 // predecessors that discovered a node at its own depth, then the paths are
 // enumerated from them — two equally short routes are two different answers,
 // and showing one silently is showing half the truth.
-function shortestPaths(fromId, toId, limit) {
+/// Steps out of a node. Directed mode follows the arrows, which is the honest
+/// default for "how does A reach B". Undirected mode also walks edges
+/// backwards, because `A → X ← B` is a real connection through X even though no
+/// directed chain runs from A to B, and refusing to show it answers a question
+/// nobody asked.
+function stepsFrom(id, undirected) {
+  const forward = outgoing.get(id) || [];
+  if (!undirected) return forward.map((edge) => ({ edge, next: edge.target, reversed: false }));
+  return forward
+    .map((edge) => ({ edge, next: edge.target, reversed: false }))
+    .concat((incoming.get(id) || []).map((edge) => ({ edge, next: edge.source, reversed: true })));
+}
+
+function shortestPaths(fromId, toId, limit, undirected) {
   const depth = new Map([[fromId, 0]]);
   const arrivals = new Map();
   let frontier = [fromId];
@@ -995,26 +1026,28 @@ function shortestPaths(fromId, toId, limit) {
   while (frontier.length && !reached) {
     const next = [];
     for (const id of frontier) {
-      for (const edge of outgoing.get(id) || []) {
-        if (!edgeAllowed(edge)) continue;
-        const node = byId.get(edge.target);
+      for (const step of stepsFrom(id, undirected)) {
+        if (!edgeAllowed(step.edge)) continue;
+        const node = byId.get(step.next);
         if (!node || !nodeAllowed(node)) continue;
         const hop = depth.get(id) + 1;
-        const known = depth.get(edge.target);
+        const known = depth.get(step.next);
         if (known !== undefined && known < hop) continue;
         if (known === undefined) {
-          depth.set(edge.target, hop);
-          next.push(edge.target);
+          depth.set(step.next, hop);
+          next.push(step.next);
         }
-        if (!arrivals.has(edge.target)) arrivals.set(edge.target, []);
-        arrivals.get(edge.target).push(edge);
-        if (edge.target === toId) reached = true;
+        if (!arrivals.has(step.next)) arrivals.set(step.next, []);
+        arrivals.get(step.next).push({ edge: step.edge, from: id, reversed: step.reversed });
+        if (step.next === toId) reached = true;
       }
     }
     frontier = next;
   }
   if (!arrivals.has(toId)) return [];
 
+  // Each hop records where it was reached from, which is not the edge's source
+  // once an edge may be walked backwards.
   const routes = [];
   const walk = (id, chain, seen) => {
     if (routes.length >= (limit || 4)) return;
@@ -1022,13 +1055,13 @@ function shortestPaths(fromId, toId, limit) {
       routes.push(chain.slice());
       return;
     }
-    for (const edge of arrivals.get(id) || []) {
-      if (depth.get(edge.source) !== depth.get(id) - 1 || seen.has(edge.source)) continue;
-      seen.add(edge.source);
-      chain.unshift(edge);
-      walk(edge.source, chain, seen);
+    for (const arrival of arrivals.get(id) || []) {
+      if (depth.get(arrival.from) !== depth.get(id) - 1 || seen.has(arrival.from)) continue;
+      seen.add(arrival.from);
+      chain.unshift({ edge: arrival.edge, from: arrival.from, to: id, reversed: arrival.reversed });
+      walk(arrival.from, chain, seen);
       chain.shift();
-      seen.delete(edge.source);
+      seen.delete(arrival.from);
     }
   };
   walk(toId, [], new Set([toId]));
@@ -1050,14 +1083,20 @@ function pathSpec() {
   if (from.id === to.id) {
     return { layout: "layered", items: [], edges: [], omitted: 0, empty: "Source and target are the same node." };
   }
-  const routes = shortestPaths(from.id, to.id);
+  const routes = shortestPaths(from.id, to.id, 4, State.undirected);
   if (!routes.length) {
+    // Before reporting nothing, check whether direction is what is in the way.
+    // "There is no path" and "there is no path *following the arrows*" are
+    // different answers, and only one of them is actionable.
+    const either = State.undirected ? [] : shortestPaths(from.id, to.id, 1, true);
     return {
       layout: "layered",
       items: [],
       edges: [],
       omitted: 0,
-      empty: `No directed path from ${from.name} to ${to.name} under the current filters.`,
+      empty: either.length
+        ? `No directed path from ${from.name} to ${to.name}, but they are connected in ${either[0].length} hops if direction is ignored — turn on "any direction".`
+        : `No path from ${from.name} to ${to.name} under the current filters${State.undirected ? "" : ", in either direction"}.`,
     };
   }
   const layerOf = new Map([[from.id, 0]]);
@@ -1074,11 +1113,15 @@ function pathSpec() {
   };
   add(from.id, 0);
   routes.forEach((chain, route) => {
-    chain.forEach((edge, hop) => {
-      add(edge.target, hop + 1);
+    chain.forEach((step, hop) => {
+      const edge = step.edge;
+      add(step.to, hop + 1);
       const key = `p${route}_${hop}`;
       edges.push(
-        Object.assign({ key, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge, _hop: hop + 1, _route: route }, edgeStyle(edge), {
+        // Drawn along the direction the walk took, so the layered scene reads
+        // left to right; `_reversed` keeps the fact that this hop runs against
+        // the edge available to the inspector.
+        Object.assign({ key, from: `n${step.from}`, to: `n${step.to}`, _edge: edge, _hop: hop + 1, _route: route, _reversed: step.reversed }, edgeStyle(edge), {
           // The first route is the one to read; the alternatives are thinner
           // so a reader can tell them apart without a legend.
           size: route === 0 ? Math.max(2.4, edgeStyle(edge).size * 2) : 1.2,
@@ -1092,10 +1135,14 @@ function pathSpec() {
     items,
     edges,
     omitted: 0,
-    caption:
-      routes.length > 1
-        ? `${routes[0].length} hops · ${routes.length} equally short routes`
-        : `${routes[0].length} hops`,
+    caption: [
+      `${routes[0].length} hops`,
+      routes.length > 1 ? `${routes.length} equally short routes` : null,
+      State.undirected ? "any direction" : null,
+      State.undirected && routes.some((chain) => chain.some((step) => step.reversed)) ? "walks some edges backwards" : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     routes,
   };
 }
@@ -1240,44 +1287,150 @@ function contractsSpec() {
 // Two primitives: a force layout for neighbourhood-shaped scenes, and a
 // layered one for scenes that have an order (a path, an impact fan-out).
 // Both are deterministic, so a reload lands on the same picture.
+/// How coarse an approximation the repulsion pass accepts. A cell is treated as
+/// a single mass when it is further away than `size / THETA`; smaller values
+/// mean more recursion and a more exact force. 0.9 is the usual compromise.
+const BARNES_HUT_THETA = 0.9;
+
+/// Repulsion between every pair of nodes is what makes a force layout O(n²),
+/// and at repository scale that is the whole cost: 5753 nodes is 16.5 million
+/// pairs per round, times ~180 rounds. A quadtree collapses the far half of
+/// that: nodes far enough away are summed into one mass and pushed against
+/// once, which is what `d3.quadtree` used to do here before d3 was dropped.
+function buildQuadtree(points) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  // A square root cell keeps the subdivision isotropic, so "far enough away"
+  // means the same thing along both axes.
+  const size = Math.max(maxX - minX, maxY - minY, 1) * 1.01;
+  const root = makeCell(minX, minY, size);
+  for (const point of points) insertPoint(root, point, 0);
+  return root;
+}
+
+function makeCell(x, y, size) {
+  return { x, y, size, mass: 0, cx: 0, cy: 0, radius: 0, point: null, children: null };
+}
+
+const QUADTREE_MAX_DEPTH = 20;
+
+function insertPoint(cell, point, depth) {
+  cell.mass += 1;
+  cell.cx += point.x;
+  cell.cy += point.y;
+  cell.radius += point.r;
+  if (cell.children) {
+    insertPoint(childFor(cell, point), point, depth + 1);
+    return;
+  }
+  if (!cell.point) {
+    cell.point = point;
+    return;
+  }
+  // Coincident points would subdivide forever; past the depth limit a cell just
+  // holds several points and is treated as the aggregate it already is.
+  if (depth >= QUADTREE_MAX_DEPTH) return;
+  const existing = cell.point;
+  cell.point = null;
+  const half = cell.size / 2;
+  cell.children = [
+    makeCell(cell.x, cell.y, half),
+    makeCell(cell.x + half, cell.y, half),
+    makeCell(cell.x, cell.y + half, half),
+    makeCell(cell.x + half, cell.y + half, half),
+  ];
+  for (const held of [existing, point]) {
+    const child = childFor(cell, held);
+    child.mass += 1;
+    child.cx += held.x;
+    child.cy += held.y;
+    child.radius += held.r;
+    if (child.point) {
+      // Both landed in the same quadrant: push them down together.
+      const other = child.point;
+      child.point = null;
+      child.mass -= 2;
+      child.cx -= held.x + other.x;
+      child.cy -= held.y + other.y;
+      child.radius -= held.r + other.r;
+      insertPoint(child, other, depth + 1);
+      insertPoint(child, held, depth + 1);
+    } else {
+      child.point = held;
+    }
+  }
+}
+
+function childFor(cell, point) {
+  const half = cell.size / 2;
+  const right = point.x >= cell.x + half ? 1 : 0;
+  const bottom = point.y >= cell.y + half ? 1 : 0;
+  return cell.children[bottom * 2 + right];
+}
+
+/// Accumulates the repulsion the tree exerts on one point.
+function repel(cell, point, repulsion, index) {
+  if (!cell.mass) return;
+  if (cell.point === point && !cell.children) return;
+  const massX = cell.cx / cell.mass;
+  const massY = cell.cy / cell.mass;
+  let dx = point.x - massX;
+  let dy = point.y - massY;
+  let squared = dx * dx + dy * dy;
+  const leaf = !cell.children;
+  if (leaf || cell.size * cell.size < squared * BARNES_HUT_THETA * BARNES_HUT_THETA) {
+    let mass = cell.mass;
+    if (leaf && cell.point === point) {
+      // A leaf holding this point plus others: subtract its own contribution
+      // rather than skipping the whole cell.
+      mass -= 1;
+      if (mass <= 0) return;
+    }
+    if (squared < 1) {
+      // Coincident or nearly so: pick a deterministic direction instead of
+      // dividing by zero, the way the pairwise version did.
+      dx = ((index % 7) - 3) || 1;
+      dy = ((index % 5) - 2) || 1;
+      squared = dx * dx + dy * dy;
+    }
+    const distance = Math.sqrt(squared);
+    const meanRadius = cell.radius / cell.mass;
+    const force = (mass * (repulsion + 900 * (point.r + meanRadius))) / squared;
+    point.dx += (dx / distance) * force;
+    point.dy += (dy / distance) * force;
+    return;
+  }
+  for (const child of cell.children) repel(child, point, repulsion, index);
+}
+
 function forceLayout(items, edges) {
   const positions = new Map();
   const radius = 110 + 20 * Math.sqrt(items.length);
-  const index = new Map(items.map((item, position) => [item.key, position]));
   items.forEach((item, position) => {
     const angle = (2 * Math.PI * position) / items.length;
     positions.set(item.key, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, dx: 0, dy: 0, r: item.size });
   });
+  const points = [...positions.values()];
   const rounds = items.length > 250 ? 140 : 240;
   const repulsion = 6000 + settings.repulsion * 900;
   const pull = 0.004 + settings.cluster * 0.0009;
   const gravity = 0.0008 + settings.gravity * 0.0002;
   for (let round = 0; round < rounds; round++) {
     const cooling = 1 - round / rounds;
-    for (const point of positions.values()) {
+    for (const point of points) {
       point.dx = 0;
       point.dy = 0;
     }
-    for (let i = 0; i < items.length; i++) {
-      const a = positions.get(items[i].key);
-      for (let j = i + 1; j < items.length; j++) {
-        const b = positions.get(items[j].key);
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let squared = dx * dx + dy * dy;
-        if (squared < 1) {
-          dx = i - j || 1;
-          dy = 1;
-          squared = 2;
-        }
-        const distance = Math.sqrt(squared);
-        const force = (repulsion + 900 * (a.r + b.r)) / squared;
-        a.dx += (dx / distance) * force;
-        a.dy += (dy / distance) * force;
-        b.dx -= (dx / distance) * force;
-        b.dy -= (dy / distance) * force;
-      }
-    }
+    const tree = buildQuadtree(points);
+    for (let i = 0; i < points.length; i++) repel(tree, points[i], repulsion, i);
     for (const edge of edges) {
       const a = positions.get(edge.from);
       const b = positions.get(edge.to);
@@ -1287,36 +1440,65 @@ function forceLayout(items, edges) {
       b.dx += (a.x - b.x) * pull;
       b.dy += (a.y - b.y) * pull;
     }
-    for (const point of positions.values()) {
+    for (const point of points) {
       point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 - point.x * gravity;
       point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 - point.y * gravity;
     }
   }
   separate(positions, items, 3.1);
-  void index;
   return positions;
 }
 
 // Two nodes drawn on top of each other read as one node, which is a wrong
-// answer rather than an ugly one.
+// answer rather than an ugly one. Overlap is local, so the pass only compares
+// each node against the ones in its own and neighbouring grid cells instead of
+// against all the others: the same reason the repulsion pass uses a quadtree.
 function separate(positions, items, scale) {
+  const points = items.map((item) => positions.get(item.key)).filter(Boolean);
+  if (points.length < 2) return;
+  let maxRadius = 0;
+  for (const point of points) if (point.r > maxRadius) maxRadius = point.r;
+  // One cell wide enough that any pair close enough to overlap shares a cell or
+  // sits in one of the eight around it.
+  const cellSize = Math.max(maxRadius * 2 * scale, 1);
   for (let round = 0; round < 40; round++) {
+    const grid = new Map();
+    for (const point of points) {
+      const key = `${Math.floor(point.x / cellSize)},${Math.floor(point.y / cellSize)}`;
+      let bucket = grid.get(key);
+      if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+      }
+      bucket.push(point);
+    }
     let moved = 0;
-    for (let i = 0; i < items.length; i++) {
-      const a = positions.get(items[i].key);
-      for (let j = i + 1; j < items.length; j++) {
-        const b = positions.get(items[j].key);
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const wanted = (a.r + b.r) * scale;
-        if (distance >= wanted) continue;
-        const push = (wanted - distance) / 2;
-        a.x -= (dx / distance) * push;
-        a.y -= (dy / distance) * push;
-        b.x += (dx / distance) * push;
-        b.y += (dy / distance) * push;
-        moved++;
+    for (const point of points) {
+      const cellX = Math.floor(point.x / cellSize);
+      const cellY = Math.floor(point.y / cellSize);
+      for (let offsetX = -1; offsetX <= 1; offsetX++) {
+        for (let offsetY = -1; offsetY <= 1; offsetY++) {
+          const bucket = grid.get(`${cellX + offsetX},${cellY + offsetY}`);
+          if (!bucket) continue;
+          for (const other of bucket) {
+            if (other === point) continue;
+            const dx = other.x - point.x;
+            const dy = other.y - point.y;
+            const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            const wanted = (point.r + other.r) * scale;
+            if (distance >= wanted) continue;
+            const push = (wanted - distance) / 2;
+            // Exactly coincident points have no direction to be pushed along,
+            // so they would stay stacked forever. Give them one.
+            const unitX = dx === 0 && dy === 0 ? 1 : dx / distance;
+            const unitY = dx === 0 && dy === 0 ? 0 : dy / distance;
+            point.x -= unitX * push;
+            point.y -= unitY * push;
+            other.x += unitX * push;
+            other.y += unitY * push;
+            moved++;
+          }
+        }
       }
     }
     if (moved === 0) break;
@@ -1402,7 +1584,6 @@ function nodeReducer(key, data) {
     result.highlighted = true;
     result.size = data.size * 1.35 + 2;
   }
-  if (data._pinned) result.type = "circle";
   return result;
 }
 
@@ -2279,6 +2460,7 @@ const State = {
   conf: null,
   kind: null,
   pins: new Set(),
+  undirected: false,
   cam: null,
 };
 
@@ -2314,6 +2496,7 @@ function readUrl() {
   State.conf = parseSet(query.get("conf"), (value) => value.toUpperCase());
   State.kind = parseSet(query.get("kind"));
   State.pins = parseSet(query.get("pin"), Number) || new Set();
+  State.undirected = query.get("dir") === "any";
   const cam = query.get("cam");
   if (cam) {
     const [x, y, ratio] = cam.split(",").map(Number);
@@ -2337,6 +2520,7 @@ function writeUrl(push) {
   if (State.conf) query.set("conf", [...State.conf].join(","));
   if (State.kind) query.set("kind", [...State.kind].join(","));
   if (State.pins.size) query.set("pin", [...State.pins].join(","));
+  if (State.undirected) query.set("dir", "any");
   if (State.cam) query.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
   const url = `${location.pathname}?${query.toString()}`;
   // A mode or focus change is a navigation; a filter tweak is not, or the back
@@ -2510,6 +2694,9 @@ function inspectNode(node, attributes) {
       const pins = new Set(State.pins);
       pins.has(node.id) ? pins.delete(node.id) : pins.add(node.id);
       setState({ pins });
+      // The panel was built before the toggle, so its button would keep
+      // offering "Pin" for a node that is now pinned.
+      inspectNode(node, attributes);
     },
     source: () => openFile(node.file, node.startLine, node.endLine),
   };
@@ -2658,7 +2845,9 @@ function renderModeControls() {
       `<button id="ctl-from-sel" title="use the selected node">&#8593;</button>`,
       `<label>to <input id="ctl-to" type="text" list="node-names" value="${escapeHtml(name(State.to))}" placeholder="symbol or file"></label>`,
       `<button id="ctl-to-sel" title="use the selected node">&#8593;</button>`,
-      `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`
+      `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`,
+      `<button id="ctl-dir" aria-pressed="${State.undirected}" title="follow edge direction, or ignore it">` +
+        `${State.undirected ? "any direction" : "following arrows"}</button>`
     );
   }
   if (State.mode === "overview") {
@@ -2696,6 +2885,9 @@ function renderModeControls() {
   document
     .getElementById("ctl-swap")
     ?.addEventListener("click", () => setState({ from: State.to, to: State.from }, { push: true }));
+  document
+    .getElementById("ctl-dir")
+    ?.addEventListener("click", () => setState({ undirected: !State.undirected }, { push: true }));
 
   document.getElementById("ctl-expand-all")?.addEventListener("click", () => {
     const all = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0);
