@@ -690,6 +690,41 @@ is about.
   since a proportional face fits fewer characters per pixel than the monospaced
   one they were measured with.
 
+### Landed: one island per module, instead of a disc of dots
+
+A single force pass over everything can only settle into a disc. Repulsion is
+uniform, so the shape carries no information: the module structure — the thing
+worth reading — disappears inside an evenly spaced circle of nodes.
+
+`islandLayout` runs two passes. The first lays out the modules themselves as a
+small graph, with an edge repeated per doubling of the crossings between two
+modules, so modules that talk end up near each other. The second lays out each
+module's own nodes, seeded on a golden-angle spiral from its centre — hubs
+first — and anchored there while their edges decide where they sit inside it.
+
+Four things had to be true for it to read as a graph rather than as blobs:
+
+- **Islands are sized by the area their members need**, not by how many there
+  are. Fifty file circles want far more room than fifty method dots, and an
+  island too small for its contents settles as a packed disc no matter how the
+  physics is tuned, because the inward pull and the outward pushing cancel.
+- **The pull inward eases off as a module grows** (`ISLAND_GRAVITY` divided by
+  `log2(count)`), so a thousand-node module spreads enough to show its own shape
+  while a five-node one stays a unit.
+- **Islands are pushed apart only until they stop overlapping.** The default
+  spacing is tuned for single nodes; at island scale it left most of the canvas
+  empty, and the fit then zoomed out until every island was a speck.
+- **Node size comes down as a scene gets dense.** Sigma shrinks a node by
+  `1 / sqrt(zoom)`, deliberately sublinear, so zooming out to fit a thousand
+  nodes does not shrink them to a thousandth: past a few hundred their combined
+  area exceeds the viewport and they must overlap whatever the layout does.
+  Taking density out of the size instead is what lets the layout's spacing
+  survive the fit.
+
+The fit also had to stop framing hidden nodes: a filtered-out node is still in
+the graph, and `structure only` left the visible files crowded into a corner
+around the empty space where the functions were.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

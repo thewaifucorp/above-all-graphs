@@ -814,6 +814,10 @@ function neighborScore(node, edge) {
 // every symbol on screen at once, and the budgets in
 // `docs/graph-experience.md` say it must not try.
 const MAX_SCENE_NODES = 420;
+/// How many nodes a scene can hold before their drawn size starts coming down.
+/// Around this many at typical sizes the nodes still have room to stand apart at
+/// a zoom that fits them all.
+const SCENE_DENSITY_TARGET = 320;
 /// Past this many nodes, "expand all" is warned about before it runs: the
 /// scene budget above is what keeps the page responsive, and opening every
 /// module deliberately spends it.
@@ -1542,12 +1546,26 @@ function repel(cell, point, repulsion, index) {
   for (const child of cell.children) repel(child, point, repulsion, index);
 }
 
-function forceLayout(items, edges) {
+/// `options.seed` starts a node somewhere other than the default ring, and
+/// `options.anchors` replaces the pull toward the origin with a pull toward a
+/// point of the caller's choosing — which is how a node is kept inside its own
+/// module while its edges still shape where it sits within it.
+function forceLayout(items, edges, options) {
+  const seed = (options && options.seed) || null;
+  const anchors = (options && options.anchors) || null;
   const positions = new Map();
   const radius = 110 + 20 * Math.sqrt(items.length);
   items.forEach((item, position) => {
+    const start = seed && seed.get(item.key);
     const angle = (2 * Math.PI * position) / items.length;
-    positions.set(item.key, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, dx: 0, dy: 0, r: item.size });
+    positions.set(item.key, {
+      x: start ? start.x : Math.cos(angle) * radius,
+      y: start ? start.y : Math.sin(angle) * radius,
+      dx: 0,
+      dy: 0,
+      r: item.size,
+      anchor: anchors ? anchors.get(item.key) || null : null,
+    });
   });
   const points = [...positions.values()];
   const rounds = items.length > 250 ? 140 : 240;
@@ -1572,11 +1590,13 @@ function forceLayout(items, edges) {
       b.dy += (a.y - b.y) * pull;
     }
     for (const point of points) {
-      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 - point.x * gravity;
-      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 - point.y * gravity;
+      const pullX = point.anchor ? (point.anchor.x - point.x) * point.anchor.strength : -point.x * gravity;
+      const pullY = point.anchor ? (point.anchor.y - point.y) * point.anchor.strength : -point.y * gravity;
+      point.x += Math.max(-30, Math.min(30, point.dx)) * cooling * 0.25 + pullX;
+      point.y += Math.max(-30, Math.min(30, point.dy)) * cooling * 0.25 + pullY;
     }
   }
-  separate(positions, items, 3.1);
+  separate(positions, items, (options && options.separateScale) || 3.1);
   return positions;
 }
 
@@ -1636,6 +1656,92 @@ function separate(positions, items, scale) {
   }
 }
 
+/// How hard a node is held inside its own module. Loose enough that edges still
+/// decide where it sits in the island, tight enough that the island stays one.
+const ISLAND_GRAVITY = 0.055;
+
+/// Lays the scene out as one island per module.
+///
+/// A single force pass over everything produces a disc: repulsion is uniform, so
+/// the only shape it can settle into is a circle of evenly spaced dots, and the
+/// module structure — the thing worth reading — is invisible inside it. Two
+/// passes fix that. The first lays out the modules themselves as a small graph,
+/// weighted by how many edges cross between them, so modules that talk end up
+/// near each other. The second lays out each module's own nodes, anchored to
+/// where their module landed.
+function islandLayout(items, edges) {
+  const groups = new Map();
+  for (const item of items) {
+    const community = item.community === null || item.community === undefined ? -1 : item.community;
+    if (!groups.has(community)) groups.set(community, []);
+    groups.get(community).push(item);
+  }
+  if (groups.size < 2) return forceLayout(items, edges);
+
+  const communityOf = new Map(items.map((item) => [item.key, item.community ?? -1]));
+  // Sized by the area its members need, not by how many there are: fifty large
+  // file circles want far more room than fifty method dots, and an island too
+  // small for its contents settles as a packed disc no matter how the physics is
+  // tuned, because the pull inward and the pushing apart cancel.
+  const islandRadius = (members) => {
+    let area = 0;
+    for (const member of members) area += Math.PI * Math.pow(Math.max(member.size, 3) * 2.1, 2);
+    return Math.max(40, Math.sqrt(area / Math.PI) * 1.2);
+  };
+  // A thousand nodes held as tightly as five is a blob. The pull toward the
+  // module's centre eases off as the module grows, so a large one spreads out
+  // enough for its own structure to show while a small one stays a unit.
+  const islandGravity = (count) => ISLAND_GRAVITY / (1 + Math.log2(count + 1) * 0.55);
+  // Sorted so the layout does not depend on the order the groups were met.
+  const ordered = [...groups.entries()].sort((left, right) => right[1].length - left[1].length || left[0] - right[0]);
+  const superItems = ordered.map(([community, members]) => ({
+    key: `island${community}`,
+    size: islandRadius(members),
+  }));
+  const crossings = new Map();
+  for (const edge of edges) {
+    const from = communityOf.get(edge.from);
+    const to = communityOf.get(edge.to);
+    if (from === undefined || to === undefined || from === to) continue;
+    const key = from < to ? `${from}:${to}` : `${to}:${from}`;
+    crossings.set(key, (crossings.get(key) || 0) + 1);
+  }
+  const superEdges = [];
+  for (const [key, count] of crossings) {
+    const [from, to] = key.split(":");
+    // Repeating an edge is how this force pass expresses weight: two modules
+    // joined by two hundred imports should sit closer than two joined by one.
+    const strength = Math.min(4, 1 + Math.floor(Math.log2(count + 1)));
+    for (let repeat = 0; repeat < strength; repeat++) {
+      superEdges.push({ from: `island${from}`, to: `island${to}` });
+    }
+  }
+  // Islands are pushed apart only until they stop overlapping. The default
+  // spacing is tuned for single nodes, and at island scale it left most of the
+  // canvas empty: the fit then zooms out to cover the gaps and every island
+  // collapses into a speck.
+  const centres = forceLayout(superItems, superEdges, { separateScale: 1.12 });
+
+  const seed = new Map();
+  const anchors = new Map();
+  for (const [community, members] of ordered) {
+    const centre = centres.get(`island${community}`) || { x: 0, y: 0 };
+    // Biggest first, so the hubs start near the middle of their island and the
+    // leaves start on its rim.
+    const inner = members
+      .slice()
+      .sort((left, right) => right.size - left.size || (left.key < right.key ? -1 : 1));
+    const radius = islandRadius(members) * 0.85;
+    inner.forEach((item, index) => {
+      const angle = (2 * Math.PI * index * 0.618) % (2 * Math.PI);
+      const spiral = radius * Math.sqrt((index + 0.5) / inner.length);
+      seed.set(item.key, { x: centre.x + Math.cos(angle) * spiral, y: centre.y + Math.sin(angle) * spiral });
+      anchors.set(item.key, { x: centre.x, y: centre.y, strength: islandGravity(members.length) });
+    });
+  }
+  return forceLayout(items, edges, { seed, anchors });
+}
+
 function layeredLayout(items) {
   const layers = new Map();
   for (const item of items) {
@@ -1688,11 +1794,37 @@ let layoutWorkerBroken = false;
 let layoutJob = 0;
 const layoutJobs = new Map();
 
+/// What the physics needs and nothing else: a key, a size, a layer hint for the
+/// layered scenes, and which module the node belongs to, which is what lets the
+/// island pass group them. Built in one place so the worker and the main thread
+/// lay out the same scene.
+function layoutItems(spec) {
+  return spec.items.map((item) => ({
+    key: item.key,
+    size: item.size,
+    _layer: item._layer,
+    community: item._node
+      ? item._node.community
+      : item._aggregate
+        ? item._aggregate.id
+        : null,
+  }));
+}
+
+/// Which layout a scene gets: layered when it has an order to show, islands when
+/// its nodes carry modules, a plain force pass otherwise.
+function runLayout(layout, items, edges) {
+  if (layout === "layered") return layeredLayout(items);
+  const modules = new Set(items.map((item) => item.community));
+  return modules.size > 1 ? islandLayout(items, edges) : forceLayout(items, edges);
+}
+
 function layoutWorkerSource() {
   const parts = [
     `const BARNES_HUT_THETA = ${BARNES_HUT_THETA};`,
     `const QUADTREE_MAX_DEPTH = ${QUADTREE_MAX_DEPTH};`,
     "let settings = {};",
+    `const ISLAND_GRAVITY = ${ISLAND_GRAVITY};`,
     buildQuadtree.toString(),
     makeCell.toString(),
     insertPoint.toString(),
@@ -1700,13 +1832,14 @@ function layoutWorkerSource() {
     repel.toString(),
     separate.toString(),
     forceLayout.toString(),
+    islandLayout.toString(),
     layeredLayout.toString(),
+    runLayout.toString(),
     `self.onmessage = (event) => {
       const job = event.data;
       settings = job.settings;
       try {
-        const positions =
-          job.layout === "layered" ? layeredLayout(job.items) : forceLayout(job.items, job.edges);
+        const positions = runLayout(job.layout, job.items, job.edges);
         const flat = {};
         for (const [key, point] of positions) flat[key] = [point.x, point.y];
         self.postMessage({ id: job.id, flat });
@@ -1770,7 +1903,7 @@ async function layoutFor(spec) {
         layout: spec.layout,
         settings: { ...settings },
         // Only what the physics reads: keys, sizes, layer hints, endpoints.
-        items: spec.items.map((item) => ({ key: item.key, size: item.size, _layer: item._layer })),
+        items: layoutItems(spec),
         edges: spec.edges.map((edge) => ({ from: edge.from, to: edge.to })),
       });
     });
@@ -1807,7 +1940,7 @@ function cachedLayout(spec) {
   const key = layoutKey(spec);
   const stored = readLayoutCache(key);
   if (stored) return stored;
-  const positions = spec.layout === "layered" ? layeredLayout(spec.items) : forceLayout(spec.items, spec.edges);
+  const positions = runLayout(spec.layout, layoutItems(spec), spec.edges);
   writeLayoutCache(key, positions);
   return positions;
 }
@@ -1908,10 +2041,16 @@ async function renderScene(spec) {
 
   sceneSpec = spec;
   sceneOmitted = spec.omitted || 0;
+  // Sigma shrinks a node by `1 / sqrt(zoom)`, which is deliberately sublinear:
+  // zooming out to fit a thousand nodes does not shrink them to a thousandth.
+  // Past a few hundred their combined area exceeds the viewport and they must
+  // touch whatever the layout does, so density is taken out of the node size
+  // instead — the spacing the layout produced then survives the fit.
+  const density = Math.min(1, Math.sqrt(SCENE_DENSITY_TARGET / Math.max(spec.items.length, 1)));
   scene = new graphology.Graph({ multi: true, type: "directed" });
   for (const item of spec.items) {
     if (scene.hasNode(item.key)) continue;
-    scene.addNode(item.key, item);
+    scene.addNode(item.key, density === 1 ? item : { ...item, size: item.size * density });
   }
   for (const edge of spec.edges) {
     if (!scene.hasNode(edge.from) || !scene.hasNode(edge.to)) continue;
@@ -1998,6 +2137,13 @@ async function renderScene(spec) {
   });
   renderer.on("afterRender", drawGrammar);
   window.addEventListener("resize", scheduleOverlay);
+  // Sigma has not measured the scene when the renderer is constructed, so the
+  // first fit can read stale display data. Fitting again after the first frame
+  // costs one camera write and is the difference between the scene filling the
+  // viewport and a corner of it filling the screen.
+  requestAnimationFrame(() => {
+    if (renderer && !State.cam) fitScene();
+  });
   fitScene();
   applySemanticZoom();
   renderSceneStatus(spec);
@@ -2122,10 +2268,13 @@ function fitScene() {
   }
   const camera = renderer.getCamera();
   camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 6; pass++) {
     const xs = [];
     const ys = [];
     for (const key of scene.nodes()) {
+      // A filtered-out node is still in the graph, and framing the scene around
+      // nodes nobody can see leaves the visible ones crowded into a corner.
+      if (nodeReducer(key, scene.getNodeAttributes(key)).hidden) continue;
       const display = renderer.getNodeDisplayData(key);
       if (!display) continue;
       const point = renderer.framedGraphToViewport(display);
@@ -2135,8 +2284,10 @@ function fitScene() {
     if (xs.length < 2) return;
     xs.sort((left, right) => left - right);
     ys.sort((left, right) => left - right);
-    const low = (values) => values[Math.floor((values.length - 1) * 0.02)];
-    const high = (values) => values[Math.ceil((values.length - 1) * 0.98)];
+    // Nearly the whole extent: percentiles only guard against a single node
+    // stranded far away, and cutting 2% of an island cuts a visible chunk of it.
+    const low = (values) => values[Math.floor((values.length - 1) * 0.005)];
+    const high = (values) => values[Math.ceil((values.length - 1) * 0.995)];
     const { width, height } = renderer.getDimensions();
     const spanX = Math.max(high(xs) - low(xs), 1);
     const spanY = Math.max(high(ys) - low(ys), 1);
