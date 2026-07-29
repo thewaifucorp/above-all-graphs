@@ -608,6 +608,31 @@ first pass either dropped or never wired to a control anyone could find.
   distinguishes the two ways it happens: an endpoint with no edges at all is
   named as such, otherwise they are in unconnected parts of the graph.
 
+### Landed: routes of any length, not just the shortest
+
+Breadth-first search answers "what is the shortest way" and stops at the depth
+where the target first appears, which hides every longer route. Those are often
+the interesting ones: the shortest way from a parser to an exporter may be one
+incidental helper both happen to call, while the route that explains the codebase
+is six hops through the pipeline.
+
+The walk is Yen's algorithm now — the `k` shortest loopless routes, shortest
+first. **There is no hop limit.** The bound is on how many routes come back,
+because the number of simple paths between two nodes in a real graph is
+astronomically large; `routes` in the Path toolbar takes 1 to 12 (`?routes=`),
+default 4. The caption reports a range when the routes differ in length
+(`1–2 hops · 7 routes`).
+
+Measured in-page on this repository, k = 12, ignoring direction: 7 ms for a pair
+one hop apart, 7 ms across the export subsystem, 14 ms from `bigbang` to
+`write_file`, 1 ms between two files. Yen runs one breadth-first search per spur
+node per accepted route, so the cost scales with `k` and with route length, not
+with how far apart the endpoints are.
+
+`write_default` → `write_file` used to draw a single edge. It now draws the
+direct call plus the six two-hop routes through `write_index`, `write_wiki_html`,
+`write_cypher`, `write_graphml`, `write_html`, and `write_json`.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

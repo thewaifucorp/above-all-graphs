@@ -1018,54 +1018,91 @@ function stepsFrom(id, undirected) {
     .concat((incoming.get(id) || []).map((edge) => ({ edge, next: edge.source, reversed: true })));
 }
 
-function shortestPaths(fromId, toId, limit, undirected) {
-  const depth = new Map([[fromId, 0]]);
-  const arrivals = new Map();
+/// One shortest route between two nodes, as a chain of steps, ignoring edges and
+/// nodes the caller has ruled out. The building block for enumerating more than
+/// the minimum-length answer.
+function bfsRoute(fromId, toId, undirected, bannedEdges, bannedNodes) {
+  if (fromId === toId) return [];
+  const cameFrom = new Map();
+  const seen = new Set([fromId]);
   let frontier = [fromId];
-  let reached = false;
-  while (frontier.length && !reached) {
+  while (frontier.length) {
     const next = [];
     for (const id of frontier) {
       for (const step of stepsFrom(id, undirected)) {
-        if (!edgeAllowed(step.edge)) continue;
+        if (bannedEdges && bannedEdges.has(step.edge)) continue;
+        if (seen.has(step.next) || (bannedNodes && bannedNodes.has(step.next))) continue;
         const node = byId.get(step.next);
-        if (!node || !nodeAllowed(node)) continue;
-        const hop = depth.get(id) + 1;
-        const known = depth.get(step.next);
-        if (known !== undefined && known < hop) continue;
-        if (known === undefined) {
-          depth.set(step.next, hop);
-          next.push(step.next);
+        if (!node || !nodeAllowed(node) || !edgeAllowed(step.edge)) continue;
+        seen.add(step.next);
+        cameFrom.set(step.next, { edge: step.edge, from: id, to: step.next, reversed: step.reversed });
+        if (step.next === toId) {
+          const chain = [];
+          let cursor = toId;
+          while (cursor !== fromId) {
+            const arrival = cameFrom.get(cursor);
+            chain.unshift(arrival);
+            cursor = arrival.from;
+          }
+          return chain;
         }
-        if (!arrivals.has(step.next)) arrivals.set(step.next, []);
-        arrivals.get(step.next).push({ edge: step.edge, from: id, reversed: step.reversed });
-        if (step.next === toId) reached = true;
+        next.push(step.next);
       }
     }
     frontier = next;
   }
-  if (!arrivals.has(toId)) return [];
+  return null;
+}
 
-  // Each hop records where it was reached from, which is not the edge's source
-  // once an edge may be walked backwards.
-  const routes = [];
-  const walk = (id, chain, seen) => {
-    if (routes.length >= (limit || 4)) return;
-    if (id === fromId) {
-      routes.push(chain.slice());
-      return;
+function routeSignature(chain) {
+  return chain.map((step) => `${step.from}>${step.to}`).join("|");
+}
+
+/// The `k` shortest loopless routes, shortest first — Yen's algorithm over the
+/// unweighted graph.
+///
+/// A plain breadth-first search answers only "what is the shortest way", and
+/// stops at the depth where the target first appears. That hides every longer
+/// route, which are often the interesting ones: the shortest way from a parser to
+/// an exporter may be one incidental helper both happen to call, while the route
+/// that explains the codebase is six hops through the pipeline. There is no hop
+/// limit here; the bound is on how many routes are returned, because the number
+/// of simple paths between two nodes in a real graph is astronomically large.
+function kShortestRoutes(fromId, toId, k, undirected) {
+  const first = bfsRoute(fromId, toId, undirected, null, null);
+  if (!first) return [];
+  const accepted = [first];
+  const candidates = [];
+  const known = new Set([routeSignature(first)]);
+
+  while (accepted.length < k) {
+    const previous = accepted[accepted.length - 1];
+    for (let spur = 0; spur < previous.length; spur++) {
+      const rootPath = previous.slice(0, spur);
+      const spurNode = previous[spur].from;
+      const bannedEdges = new Set();
+      // Any accepted route sharing this root must not be re-derived, so the edge
+      // it left the spur node by is off the table.
+      for (const route of accepted) {
+        if (route.length <= spur) continue;
+        if (routeSignature(route.slice(0, spur)) !== routeSignature(rootPath)) continue;
+        bannedEdges.add(route[spur].edge);
+      }
+      // The root is already spent: revisiting one of its nodes would make a loop.
+      const bannedNodes = new Set(rootPath.map((step) => step.from));
+      const tail = bfsRoute(spurNode, toId, undirected, bannedEdges, bannedNodes);
+      if (!tail) continue;
+      const candidate = rootPath.concat(tail);
+      const signature = routeSignature(candidate);
+      if (known.has(signature)) continue;
+      known.add(signature);
+      candidates.push(candidate);
     }
-    for (const arrival of arrivals.get(id) || []) {
-      if (depth.get(arrival.from) !== depth.get(id) - 1 || seen.has(arrival.from)) continue;
-      seen.add(arrival.from);
-      chain.unshift({ edge: arrival.edge, from: arrival.from, to: id, reversed: arrival.reversed });
-      walk(arrival.from, chain, seen);
-      chain.shift();
-      seen.delete(arrival.from);
-    }
-  };
-  walk(toId, [], new Set([toId]));
-  return routes;
+    if (!candidates.length) break;
+    candidates.sort((left, right) => left.length - right.length);
+    accepted.push(candidates.shift());
+  }
+  return accepted;
 }
 
 function pathSpec() {
@@ -1089,14 +1126,14 @@ function pathSpec() {
   // back to ignoring direction and says that it did. Only a pair with no
   // connection at all gets nothing, which is the one case where nothing is the
   // honest answer.
-  let routes = shortestPaths(from.id, to.id, 4, false);
+  let routes = kShortestRoutes(from.id, to.id, State.routes, false);
   let ignoredDirection = false;
   if (!routes.length && !State.arrowsOnly) {
-    routes = shortestPaths(from.id, to.id, 4, true);
+    routes = kShortestRoutes(from.id, to.id, State.routes, true);
     ignoredDirection = routes.length > 0;
   }
   if (!routes.length) {
-    const either = State.arrowsOnly ? shortestPaths(from.id, to.id, 1, true) : [];
+    const either = State.arrowsOnly ? kShortestRoutes(from.id, to.id, 1, true) : [];
     const stranded = [from, to].filter((node) => !(neighborsOf.get(node.id) || new Set()).size);
     return {
       layout: "layered",
@@ -1147,8 +1184,11 @@ function pathSpec() {
     edges,
     omitted: 0,
     caption: [
-      `${routes[0].length} hops`,
-      routes.length > 1 ? `${routes.length} equally short routes` : null,
+      // Routes come back shortest first, so the last one is the longest shown.
+      routes.length > 1 && routes[routes.length - 1].length !== routes[0].length
+        ? `${routes[0].length}\u2013${routes[routes.length - 1].length} hops`
+        : `${routes[0].length} hops`,
+      routes.length > 1 ? `${routes.length} routes` : null,
       ignoredDirection ? "no route follows the arrows — showing one that ignores direction" : null,
     ]
       .filter(Boolean)
@@ -2601,6 +2641,7 @@ const State = {
   kind: null,
   pins: new Set(),
   arrowsOnly: false,
+  routes: 4,
   cam: null,
 };
 
@@ -2613,6 +2654,18 @@ function parseSet(value, cast) {
   const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
   return parts.length ? new Set(cast ? parts.map(cast) : parts) : null;
 }
+/// How many routes the path search will enumerate at most. Yen's algorithm runs
+/// one breadth-first search per spur node per accepted route, so the cost grows
+/// with this; twelve routes on a repository-sized graph is still milliseconds,
+/// and a scene with more than that in it stops being readable anyway.
+const MAX_ROUTES = 12;
+
+const clampRoutes = (value, fallback) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(MAX_ROUTES, Math.round(parsed))) : fallback;
+};
+
 const clampDepth = (value, fallback) => {
   // `Number(null)` is 0, not NaN, so an absent parameter would silently read
   // as depth zero and show a lone node.
@@ -2637,6 +2690,7 @@ function readUrl() {
   State.kind = parseSet(query.get("kind"));
   State.pins = parseSet(query.get("pin"), Number) || new Set();
   State.arrowsOnly = query.get("dir") === "arrows";
+  State.routes = clampRoutes(query.get("routes"), 4);
   const cam = query.get("cam");
   if (cam) {
     const [x, y, ratio] = cam.split(",").map(Number);
@@ -2661,6 +2715,7 @@ function writeUrl(push) {
   if (State.kind) query.set("kind", [...State.kind].join(","));
   if (State.pins.size) query.set("pin", [...State.pins].join(","));
   if (State.arrowsOnly) query.set("dir", "arrows");
+  if (State.routes !== 4) query.set("routes", String(State.routes));
   if (State.cam) query.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
   const url = `${location.pathname}?${query.toString()}`;
   // A mode or focus change is a navigation; a filter tweak is not, or the back
@@ -2986,6 +3041,7 @@ function renderModeControls() {
       `<label>to <input id="ctl-to" type="text" list="node-names" value="${escapeHtml(name(State.to))}" placeholder="symbol or file"></label>`,
       `<button id="ctl-to-sel" title="use the selected node">&#8593;</button>`,
       `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`,
+      `<label>routes <input id="ctl-routes" type="number" min="1" max="${MAX_ROUTES}" value="${State.routes}"></label>`,
       `<button id="ctl-dir" aria-pressed="${!State.arrowsOnly}" ` +
         `title="fall back to ignoring edge direction when no route follows the arrows, or refuse to">` +
         `${State.arrowsOnly ? "arrows only" : "any direction"}</button>`
@@ -3011,6 +3067,7 @@ function renderModeControls() {
   };
   bind("ctl-up", (value) => setState({ up: clampDepth(value, State.up) }));
   bind("ctl-down", (value) => setState({ down: clampDepth(value, State.down) }));
+  bind("ctl-routes", (value) => setState({ routes: clampRoutes(value, State.routes) }));
   bind("ctl-from", (value) => setState({ from: value || null }, { push: true }));
   bind("ctl-to", (value) => setState({ to: value || null }, { push: true }));
 
