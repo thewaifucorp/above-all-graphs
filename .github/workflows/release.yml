@@ -137,10 +137,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - name: Installer tests
-        run: node --test "npm/*.test.js"
+        # Unquoted: the shell expands it. Node 24 no longer expands the
+        # pattern itself, which failed this step with "Could not find
+        # npm/*.test.js" and left the npm publish undone on a green release.
+        run: node --test npm/*.test.js
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
