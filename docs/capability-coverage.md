@@ -99,13 +99,20 @@ P2 gates expand reach after the core is measurable and dependable.
    (`scripts/track_cd_consumer.py`): the contract's transfer matrix — floor,
    reference manifest, `aag` slice, LLM-only manifest, and raw repository
    access — against a compact and a frontier consumer, with the model and task
-   held constant and every call's dollar cost recorded. Raw access is as
-   accurate as the graph or slightly better on this task family; what the graph
-   buys is one turn instead of three, 4.6 s instead of 11.8 s, and a third to a
-   half the cost. The floor scores zero, so the tasks are not guessable, and an
-   LLM-compiled manifest scores zero at twice the graph's price. A separate
-   8-task × 2-repetition run supplies dispersion (aag 0.599 ± 0.270, raw
-   0.721 ± 0.098). The published C/D runs cost $15.78.
+   held constant and every call's dollar cost recorded. The graph answers every
+   task exactly on both tiers (F1 1.000) in one turn, at $0.014 and $0.064 per
+   task; raw repository search reaches 0.857 and 0.982 but takes five to six
+   turns and roughly four times the money; an LLM-compiled manifest manages
+   0.500 and 0.674 at the highest frontier price; the floor is 0.000, so the
+   tasks are not guessable.
+   The first version of that matrix reported the opposite, because the oracle
+   attributed each call to the nearest enclosing function *and* to every
+   enclosing class, inflating every answer key with a phantom caller and
+   capping a correct answer at 0.667. The defect was in the benchmark, not the
+   engine. Per the contract's append-only rule the original records stay in
+   place, superseded by the `-v2` files, and
+   [benchmarks](benchmarks.md#a-correction-and-what-caused-it) explains what
+   happened. All C/D runs together cost $20.64.
    **Track E, scale and operations** (`src/bench.rs`, `aag bench`): four
    external corpora from 57 to 15 361 files, with run classes in separate
    immutable paths, dogfood forced to `pilot` whatever was requested, and

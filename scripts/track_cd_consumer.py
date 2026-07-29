@@ -70,47 +70,79 @@ def python_files(repo: pathlib.Path) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
+class _Attribution(ast.NodeVisitor):
+    """Attributes each call to the *nearest enclosing function*, and to nothing
+    else.
+
+    The first version of this walked every function *and every class* and
+    attributed a call to all of them, so a call inside a method counted as a
+    call by the method and by its class. That inflated every answer key by a
+    phantom caller and capped the measured F1 near 0.67 no matter which
+    producer was under test — it made a correct answer look two-thirds right.
+    A benchmark that punishes the right answer is worse than no benchmark.
+    """
+
+    def __init__(self) -> None:
+        self.definitions: dict[str, set[str]] = defaultdict(set)
+        self.callers: dict[str, set[str]] = defaultdict(set)
+        self.file = ""
+        self.stack: list[str] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        self.definitions[node.name].add(self.file)
+        # A class body is not a caller. Its methods are.
+        self.generic_visit(node)
+
+    def _function(self, node) -> None:
+        self.definitions[node.name].add(self.file)
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_FunctionDef = _function  # noqa: N815
+    visit_AsyncFunctionDef = _function  # noqa: N815
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        target = node.func
+        called = (
+            target.id
+            if isinstance(target, ast.Name)
+            else target.attr
+            if isinstance(target, ast.Attribute)
+            else None
+        )
+        if called and self.stack and called != self.stack[-1]:
+            self.callers[called].add(self.stack[-1])
+        self.generic_visit(node)
+
+
 def index_repository(repo: pathlib.Path) -> tuple[dict, dict]:
-    """`name -> files defining it` and `name -> callers`, both from `ast`."""
-    definitions: dict[str, set[str]] = defaultdict(set)
-    callers: dict[str, set[str]] = defaultdict(set)
+    """`name -> files defining it` and `name -> nearest-enclosing callers`."""
+    visitor = _Attribution()
     for relative in python_files(repo):
         try:
             tree = ast.parse((repo / relative).read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                definitions[node.name].add(relative)
-                for inner in ast.walk(node):
-                    if not isinstance(inner, ast.Call):
-                        continue
-                    target = inner.func
-                    called = (
-                        target.id
-                        if isinstance(target, ast.Name)
-                        else target.attr
-                        if isinstance(target, ast.Attribute)
-                        else None
-                    )
-                    if called and called != node.name:
-                        callers[called].add(node.name)
-    return definitions, callers
+        visitor.file = relative
+        visitor.visit(tree)
+    return visitor.definitions, visitor.callers
 
 
-def build_tasks(repo: pathlib.Path, wanted: int) -> list[dict]:
+def build_tasks(repo: pathlib.Path, wanted: int, min_callers: int = 5) -> list[dict]:
     """Unambiguous "who calls X" tasks, deterministic in selection order.
 
-    A symbol qualifies when exactly one file defines it and it has between two
-    and eight distinct callers — enough that guessing fails, few enough that
-    the answer fits in one line.
+    A symbol qualifies when exactly one file defines it and it has at least
+    `min_callers` distinct ones. Two callers turned out to be no test at all —
+    every producer scored 1.000 — so the default asks for five, which is where
+    the conditions start to separate.
     """
     definitions, callers = index_repository(repo)
     tasks = []
     for name in sorted(callers):
         sites = definitions.get(name, set())
         who = sorted(callers[name])
-        if len(sites) != 1 or not 2 <= len(who) <= 8 or len(name) < 5:
+        if len(sites) != 1 or not min_callers <= len(who) <= 15 or len(name) < 5:
             continue
         tasks.append(
             {
@@ -273,6 +305,13 @@ def main() -> int:
     parser.add_argument("repo", type=pathlib.Path)
     parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/release/aag"))
     parser.add_argument("--tasks", type=int, default=8)
+    parser.add_argument(
+        "--min-callers",
+        type=int,
+        default=5,
+        help="smallest answer set a task may have; low values make every "
+        "condition score 1.000 and measure nothing",
+    )
     parser.add_argument("--model", default="claude-sonnet-5")
     parser.add_argument("--conditions", nargs="+", default=list(CONDITIONS))
     parser.add_argument(
@@ -287,7 +326,7 @@ def main() -> int:
 
     repo = arguments.repo.resolve()
     binary = arguments.binary.resolve()
-    tasks = build_tasks(repo, arguments.tasks)
+    tasks = build_tasks(repo, arguments.tasks, arguments.min_callers)
     if not tasks:
         print("no unambiguous tasks could be generated", file=sys.stderr)
         return 1

@@ -17,8 +17,8 @@ Every corpus is external. Raw records are in `bench/empirical/`, append-only.
 |---|---|---|
 | A — protocol conformance | manifests this engine compiles | 11/11 rules on 2 corpora |
 | B — engine extraction | entities and calls, Python | P 1.000 / R 0.998 entities; P 0.974 / R 0.997 calls |
-| C — agent utility | consumer accuracy by producer | measured, 2 consumer tiers, 5 producers |
-| D — end-to-end economics | measured cost per condition | measured, in dollars per task |
+| C — agent utility | consumer accuracy by producer | graph 1.000 on both tiers; raw 0.857 / 0.982 |
+| D — end-to-end economics | measured cost per condition | graph costs ¼ of raw search, in one turn |
 | E — scale and operations | indexing, queries, memory, size | 4 corpora, 57 → 15 361 files |
 
 ## Track E — scale and operations
@@ -159,33 +159,60 @@ python3 scripts/track_cd_consumer.py <repo> --tasks 6 --repetitions 2 \
     --model claude-sonnet-5 --json bench/empirical/track-cd.json
 ```
 
-The transfer matrix, three tasks per cell, both consumer tiers:
+The transfer matrix, five tasks per cell, both consumer tiers. Each task asks
+for the callers of a symbol that has between five and fifteen of them — with
+only two, every condition scored 1.000 and the benchmark measured nothing.
 
-| producer | compact F1 | frontier F1 | compact $/task | frontier $/task | turns | frontier seconds |
+| producer | compact F1 | frontier F1 | compact $/task | frontier $/task | compact turns | frontier seconds |
 |---|--:|--:|--:|--:|--:|--:|
-| none (floor) | 0.000 | 0.000 | 0.0339 | 0.2902 | 5.0 | 18.2 |
-| reference manifest (oracle) | 1.000 | 0.667 | 0.0116 | 0.1875 | 1–4 | 19.6 |
-| **aag graph slice** | 0.445 | 0.611 | **0.0140** | **0.0594** | **1.0** | **4.6** |
-| LLM-only manifest | 0.000 | 0.000 | 0.0279 | 0.1485 | 1.0 | 4.2 |
-| raw repository access | 0.611 | 0.667 | 0.0176 | 0.0550 | 3.0 | 11.8 |
+| none (floor) | 0.000 | 0.000 | 0.0482 | 0.2348 | 4.0 | 16.5 |
+| reference manifest (oracle) | 1.000 | 0.800 | 0.0122 | 0.0816 | 1.0 | 8.7 |
+| **aag graph slice** | **1.000** | **1.000** | **0.0142** | **0.0639** | **1.0** | **5.3** |
+| LLM-only manifest | 0.500 | 0.674 | 0.0556 | 0.2195 | 1.0 | 4.7 |
+| raw repository access | 0.857 | 0.982 | 0.0573 | 0.1681 | 5.4 | 19.5 |
 
-Compact is `claude-haiku-4-5`, frontier is `claude-sonnet-5`. A separate
-repeated run — 8 tasks × 2 repetitions on the frontier tier, in
-`bench/empirical/track-cd-gitnexus.json` — gives the dispersion the matrix is
-too small for: aag mean F1 0.599 (median 0.667, σ 0.270) at $0.036/task, raw
-0.721 (median 0.667, σ 0.098) at $0.103/task, floor 0.000.
+Compact is `claude-haiku-4-5`, frontier is `claude-sonnet-5`. Records:
+`bench/empirical/track-cd-matrix-*-v2.json`.
 
-**What it says, including the part that is not flattering.** Raw repository
-access is as accurate as the graph or slightly better on this task family. What
-the graph buys is not accuracy here — it is one turn instead of three, four
-seconds instead of twelve, and a third to a half the cost. The floor is zero, so
-the tasks are not guessable, and an LLM-compiled manifest scores zero at twice
-the graph's price: a model asked to produce a context manifest dropped the
-answer it had just found.
+**What it says.** The graph answers every task exactly on both tiers, in one
+turn, for a quarter of what searching the repository costs and in a quarter to
+a third of the time. Searching still gets most of the way there — 0.857 and
+0.982 — but takes five to six turns to do it. The floor is zero, so the tasks
+are not guessable. An LLM-compiled manifest is the worst working condition:
+half to two-thirds accuracy at the highest price on the frontier tier, because
+a model asked to compile context drops findings it just made.
+
+The reference producer scoring 0.800 on the frontier tier while the graph scores
+1.000 is not a real ranking: it is one task where the consumer was handed the
+answer and talked itself out of it. With five tasks per cell, one such event
+moves a cell by 0.2.
+
+### A correction, and what caused it
+
+The first version of this matrix reported the graph *losing* to raw repository
+access (0.445 / 0.611 against 0.611 / 0.667). That was a defect in the
+benchmark, not a finding about the engine.
+
+The oracle attributed each call to the nearest enclosing function **and to every
+enclosing class**, so a call inside a method counted as a call by the method and
+by its class. Every answer key gained a phantom caller, and a producer that
+answered correctly scored 2 × 1 × 0.5 / 1.5 = 0.667 — which is exactly the value
+that kept recurring across unrelated conditions. The engine had been right and
+the benchmark had been wrong, in the direction that flattered nobody.
+
+Per the contract's rule that raw records are append-only and a corrected
+evaluation creates a new derived result rather than rewriting an execution
+record, the original run stays in `bench/empirical/track-cd-matrix-haiku.json`
+and `track-cd-matrix-sonnet.json`, superseded by the `-v2` files. The
+`track-cd-gitnexus.json` run (8 tasks × 2 repetitions) used the same broken
+oracle and is superseded too; its dispersion figures should not be quoted.
+
+The lesson is in the harness now: an oracle that punishes the correct answer is
+worse than no oracle, and the tell was a suspiciously constant score.
 
 **Costs are dollars, not estimates.** Every figure above is what the provider
-charged, per call, recorded per task. The published Tracks C and D runs cost
-$15.78 in total.
+charged, per call, recorded per task. The corrected matrix cost $4.86; all
+Tracks C and D runs together, including the superseded ones, cost $20.64.
 
 ## What this harness does not measure
 
@@ -196,14 +223,15 @@ carries its own limits:
 |---|---|---|
 | A | 11 conformance rules, 2 corpora | one producer — no second implementation to test interoperability against |
 | B | entities and calls, Python, 2 corpora | contract matching, impact false positives, affected-test accuracy; one language |
-| C | 5 producers × 2 consumer tiers | one task family, one vendor's models, 3 tasks per matrix cell |
+| C | 5 producers × 2 consumer tiers | one task family, one vendor's models, 5 tasks per matrix cell |
 | D | dollars per call, per task | no amortization model, no break-even count across a real workload |
 | E | 4 corpora, 57 → 15 361 files | one machine, one OS, warm cache |
 
-The sample sizes are the weakest part and are stated rather than hidden: three
-tasks per matrix cell, eight tasks with two repetitions in the repeated run, one
-task family (`who calls X`), one language for the oracle, and one model vendor
-for the consumer. Widening any of those is more of the same work, not new
+The sample sizes are the weakest part and are stated rather than hidden: five
+tasks per matrix cell, one task family (`who calls X`), one language for the
+oracle, one model vendor for the consumer, and no repetitions in the corrected
+matrix — the repeated run that provided dispersion used the broken oracle and
+was superseded. Widening any of those is more of the same work, not new
 machinery.
 
 ## Reproducing
