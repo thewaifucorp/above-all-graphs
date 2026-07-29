@@ -652,6 +652,25 @@ pub enum ApiView {
         path: PathBuf,
     },
 
+    /// Emit an `OpenAPI` 3.1 document for the routes this repository serves.
+    Spec {
+        /// Only endpoints whose name contains this.
+        #[arg(default_value = "")]
+        filter: String,
+
+        /// Repository root to query. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Also include endpoints a contract declares but no code serves.
+        #[arg(long)]
+        include_declared: bool,
+
+        /// Write to this file instead of standard output.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
     /// Compare declared response shapes with what the handlers return.
     Shapes {
         /// Only endpoints whose name contains this.

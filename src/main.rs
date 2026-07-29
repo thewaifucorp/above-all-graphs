@@ -188,6 +188,21 @@ fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
         aag::cli::ApiView::Tools { filter, path } => aag::api::tool_map(&path, &filter)?,
         aag::cli::ApiView::Shapes { filter, path } => aag::api::format_shape_check(&path, &filter)?,
         aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
+        aag::cli::ApiView::Spec {
+            filter,
+            path,
+            include_declared,
+            out,
+        } => {
+            let document = aag::api::spec(&path, &filter, include_declared)?;
+            match out {
+                Some(target) => {
+                    std::fs::write(&target, &document)?;
+                    format!("wrote {}", target.display())
+                }
+                None => document,
+            }
+        }
     };
     println!("{text}");
     Ok(())

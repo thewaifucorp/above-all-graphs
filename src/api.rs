@@ -186,6 +186,35 @@ fn shape_key(method: &str, path: &str) -> String {
     format!("{method} {}", flattened.join("/"))
 }
 
+/// The `OpenAPI` 3.1 document for the surface this repository serves.
+///
+/// `include_declared` adds the endpoints a contract declares but no code
+/// implements. They are off by default: emitting them would present a promise as
+/// an implementation, and they are already in the document that declared them.
+///
+/// # Errors
+///
+/// Propagates failures reading the graph.
+pub fn spec(root: &Path, filter: &str, include_declared: bool) -> Result<String> {
+    let mut surfaces = surfaces(root)?;
+    if !filter.is_empty() {
+        let needle = filter.to_lowercase();
+        surfaces.retain(|surface| surface.name.to_lowercase().contains(&needle));
+    }
+    let title = root
+        .canonicalize()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "repository".to_string());
+    let document = crate::openapi::document(&title, &surfaces, include_declared);
+    // A `Value` this code built cannot fail to serialise; the empty document is
+    // still a truthful answer if it somehow does.
+    Ok(serde_json::to_string_pretty(&document).unwrap_or_else(|_| "{}".into()))
+}
+
 /// The HTTP surface as text: one line per endpoint, its state, handler, and
 /// consumers.
 ///

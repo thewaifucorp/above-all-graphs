@@ -86,6 +86,7 @@ aag api routes [filter]      # every endpoint, its state, handler, consumers
 aag api tools [filter]       # every RPC/MCP tool and its handler
 aag api shapes [filter]      # declared response shapes vs what handlers return
 aag api impact "GET /pets"   # who is on the other side of one contract
+aag api spec [filter]        # OpenAPI 3.1 for the routes the code serves
 ```
 
 Over MCP the same four are `route_map`, `tool_map`, `shape_check`, and
