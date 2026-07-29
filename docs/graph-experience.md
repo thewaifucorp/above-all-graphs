@@ -633,6 +633,24 @@ with how far apart the endpoints are.
 direct call plus the six two-hop routes through `write_index`, `write_wiki_html`,
 `write_cypher`, `write_graphml`, `write_html`, and `write_json`.
 
+### Landed: the sidebar was hiding most of the repository
+
+- **The file tree listed 45 of 107 indexed files.** It was built by counting
+  symbols per file, so a file that produced none never appeared: three source
+  files here (`src/lib.rs`, `npm/bin/aag.js`, `npm/install.test.js`) and every
+  one of the 59 documentation files, which are `doc` nodes with nothing under
+  them. The tree is now built from the indexed files themselves, symbol counts
+  attached where there are any and no count shown where there are none. The
+  header pill counted only `file` nodes, so it said 48 while the tree said 45 —
+  two numbers, both wrong, disagreeing. Both now say 107.
+- **The row cap was 400 and silent.** It is 2000 and, when it truncates, the
+  tree says "N of M files" instead of quietly presenting a subset as the whole.
+- **The Filters tab could not be shown.** `#tab-filters { display: none }` — an
+  id rule, specificity 100 — outranked `.tab-body.on { display: block }` at 20,
+  so selecting the tab switched the highlight and left the panel blank. Node
+  kinds, relation kinds, and edge confidence had been unreachable since the
+  redesign. The id rule is gone; the class pair decides.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

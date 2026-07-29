@@ -83,7 +83,9 @@
   #sidebar .tabs button { flex: 1; background: none; border: none; color: var(--text-secondary); padding: 9px 0; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; }
   #sidebar .tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
   #sidebar .tab-body { flex: 1; overflow-y: auto; padding: 8px; }
-  #tab-filters { display: none; }
+  /* Which tab body shows is decided by `.tab-body.on` further down. An id rule
+     hiding one of them outranks that class rule, which is why the Filters tab
+     could be selected and still render nothing. */
   /* explorer tree */
   #tree details { margin-left: 0; }
   #tree details details { margin-left: 12px; }
@@ -3188,20 +3190,35 @@ function buildLegend() {
 // --- Sidebar -----------------------------------------------------------------
 // Ranked, not alphabetical: a real repository opens on `.github/` and
 // `.history/` when the tree is sorted by name, which buries the source.
+/// How many rows the file tree will build. Past this the sidebar is a scroll
+/// bar, and the count it reports says how many were left out.
+const FILE_ROW_CAP = 2000;
+
+/// Every indexed file, with how many symbols came out of it.
+///
+/// Counting only files that produced symbols is how the tree came to list 45 of
+/// this repository's 107 indexed files: three source files export nothing the
+/// parser calls a symbol, and every documentation file is a `doc` node with no
+/// symbols under it at all. A file missing from the tree reads as a file missing
+/// from the index.
 function fileEntries() {
   const counts = new Map();
   for (const node of nodes) {
-    if (node.kind === "file" || node.kind === "doc") continue;
+    if (node.kind === "file" || node.kind === "doc") {
+      if (!counts.has(node.file)) counts.set(node.file, 0);
+      continue;
+    }
     counts.set(node.file, (counts.get(node.file) || 0) + 1);
   }
-  return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
-    .slice(0, 400);
+  const ordered = [...counts.entries()].sort(
+    (left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1)
+  );
+  return { entries: ordered.slice(0, FILE_ROW_CAP), total: ordered.length };
 }
 
 function buildTree() {
   const host = document.getElementById("tree");
-  const entries = fileEntries();
+  const { entries, total } = fileEntries();
   // Grouped by directory, not a flat list. A flat list of 1836 paths sorted by
   // symbol count is a search box with extra steps; the directory is how anyone
   // who works in the repository already thinks about it.
@@ -3218,12 +3235,16 @@ function buildTree() {
   const ordered = [...groups.entries()].sort(
     (left, right) => right[1].total - left[1].total || left[0].localeCompare(right[0])
   );
+  const shown =
+    entries.length < total
+      ? `${entries.length} of ${total} files`
+      : `${total} file${total === 1 ? "" : "s"}`;
   host.innerHTML =
-    `<p class="cc-note">${entries.length} files in ${ordered.length} director${ordered.length === 1 ? "y" : "ies"}` +
+    `<p class="cc-note">${shown} in ${ordered.length} director${ordered.length === 1 ? "y" : "ies"}` +
     `<button class="treetog" data-all="collapse">collapse all</button></p>` +
     ordered
       .map(([directory, group]) => {
-        const open = ordered.length <= 12 || group.total >= entries.length;
+        const open = ordered.length <= 12 || group.total >= entries.length / 2;
         return (
           `<div class="tgroup${open ? " open" : ""}" data-dir="${escapeHtml(directory)}">` +
           `<div class="tdir" tabindex="0" role="button"><span class="caret">&#9656;</span>` +
@@ -3233,7 +3254,7 @@ function buildTree() {
             .map(
               ([file, leaf, count]) =>
                 `<div class="leaf" data-file="${escapeHtml(file)}" tabindex="0" role="button" title="${escapeHtml(file)}">` +
-                `<span class="name">${escapeHtml(leaf)}</span><span class="n">${count}</span></div>`
+                `<span class="name">${escapeHtml(leaf)}</span><span class="n">${count || ""}</span></div>`
             )
             .join("") +
           `</div></div>`
@@ -3466,7 +3487,9 @@ document.addEventListener("keydown", (event) => {
 
 // --- Bootstrap ----------------------------------------------------------------
 {
-  const fileCount = nodes.filter((node) => node.kind === "file").length;
+  // Documentation is indexed too, and the pill disagreeing with the file tree
+  // beside it is how a reader learns not to trust either number.
+  const fileCount = new Set(nodes.filter((node) => node.kind === "file" || node.kind === "doc").map((node) => node.file)).size;
   const repoName = "__REPO_NAME__";
   document.getElementById("repo-pill").innerHTML = `<b>${escapeHtml(repoName)}</b> \u00b7 ${fileCount} files`;
   document.getElementById("c-nodes").textContent = nodes.length;
