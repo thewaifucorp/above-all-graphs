@@ -21,9 +21,16 @@
     --red:            #c1121f;
     --red-bright:     #da3610;
     --mono:           "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    /* Prose, labels and numbers read better in a text face; identifiers and
+       source stay monospaced, where alignment carries meaning. */
+    --sans:           system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --spectrum:       linear-gradient(90deg, #ff3b3b, #ffcf3b, #3bff6e, #3bd8ff, #7a3bff);
   }
-  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--mono); overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-primary); font-family: var(--sans); overflow: hidden; font-variant-numeric: tabular-nums; }
+  /* Anything that names a symbol, a path, or a relation keeps the monospaced
+     face: those are identifiers, not prose. */
+  #tree .leaf .name, #tree .tdir .name, #legend .name, .callrow .cname, .callrow .cfile,
+  #panel dd, #panel code, #repo-pill, .agg-facts, #mode-controls input, #search { font-family: var(--mono); }
 
   /* ---- header ---- */
   #header { position: fixed; top: 0; left: 0; right: 0; height: 46px; box-sizing: border-box; background: var(--bg-1); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 12px; z-index: 20; font-size: 12px; color: var(--text-secondary); }
@@ -37,8 +44,8 @@
   /* Anchored to the true screen center (not flex-centered): siblings come
      and go — brand hides when embedded — and the search bar must not
      drift with them. */
-  #search-wrap { flex: 1 1 160px; min-width: 90px; max-width: 420px; margin: 0 4px; }
-  #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 8px; width: 100%; font-size: 13px; outline: none; box-sizing: border-box; }
+  #search-wrap { flex: 1 1 200px; min-width: 120px; max-width: 420px; margin: 0 4px; }
+  #search { background: var(--bg-0); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 12px; border-radius: 8px; width: 100%; font-size: 12px; outline: none; box-sizing: border-box; }
   #search:focus { border-color: var(--accent); }
   #search::placeholder { color: var(--text-dim); }
   #header .counts { display: none; }
@@ -125,9 +132,15 @@
   .fgroup .mod .n { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
   /* ---- status bar ---- */
-  #statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; box-sizing: border-box; background: var(--bg-1); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 12px; z-index: 20; font-size: 11px; color: var(--text-dim); }
-  #statusbar .ready { color: #3bff6e; }
-  #statusbar .right { margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* One line, always: the hints wrap and shove the bar over the canvas
+     otherwise, and a proportional face fits fewer characters per pixel than the
+     monospaced one this was measured with. */
+  #statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; box-sizing: border-box; background: var(--bg-1); border-top: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 12px; z-index: 20; font-size: 10.5px; color: var(--text-dim); overflow: hidden; white-space: nowrap; }
+  #statusbar > span { overflow: hidden; text-overflow: ellipsis; }
+  /* Only the hint text is allowed to shrink; the state light and the counts are
+     the parts a reader looks for. */
+  #statusbar .ready { color: #3bff6e; flex: none; }
+  #statusbar .right { margin-left: auto; font-variant-numeric: tabular-nums; flex: none; }
 
   /* ---- graph container (sigma renders its own canvases inside) ---- */
   #view { position: fixed; top: 46px; bottom: 24px; left: 250px; right: 0; }
@@ -281,6 +294,14 @@
   #legend .row { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; }
   #legend .row:hover .name { color: var(--accent, #ffc600); }
   #legend .row.on .name { color: var(--accent, #ffc600); }
+  /* Size and saturation are the channel that separates a file from a method, so
+     the legend has to show the scale, not just the hues. */
+  #legend-tiers { display: flex; gap: 12px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-dim); }
+  #legend-tiers span { display: inline-flex; align-items: center; gap: 5px; }
+  #legend-tiers .swatch { border-radius: 50%; background: var(--text-secondary); display: inline-block; }
+  #legend-tiers .tier-file { width: 11px; height: 11px; opacity: 1; }
+  #legend-tiers .tier-type { width: 7px; height: 7px; opacity: 0.72; }
+  #legend-tiers .tier-fn { width: 5px; height: 5px; opacity: 0.5; }
   #legend .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
   #legend .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #legend .n { color: var(--text-dim, #9a978f); }
@@ -360,7 +381,14 @@
 
 <div id="view"></div>
 <div id="empty-state" hidden></div>
-<div id="legend" hidden><h4>Modules</h4><div id="legend-list"></div></div>
+<div id="legend" hidden>
+  <h4>Modules</h4><div id="legend-list"></div>
+  <div id="legend-tiers">
+    <span><i class="swatch tier-file"></i>file</span>
+    <span><i class="swatch tier-type"></i>type</span>
+    <span><i class="swatch tier-fn"></i>function</span>
+  </div>
+</div>
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <div id="palette" role="dialog" aria-label="Command palette" hidden>
   <input id="palette-input" type="text" placeholder="Jump to a symbol, or run a command&hellip;" spellcheck="false" autocomplete="off">
@@ -616,10 +644,20 @@ function fade(hex, weight) {
   return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/// How much an edge recedes when both ends sit in the same file. A call between
+/// two methods of one file is structure a reader already assumes; a call that
+/// crosses a file boundary is the thing they came to see.
+const INTERNAL_EDGE_INK = 0.45;
+
 function edgeStyle(edge) {
   const style = REL_STYLE[edge.kind] || REL_STYLE.calls;
   const weight = CONF_WEIGHT[edge.confidence] ?? 0.5;
-  return { color: fade(style.color, weight), size: style.width * (0.6 + weight * 0.7) };
+  const internal = edge.s && edge.t && edge.s.file === edge.t.file;
+  const ink = internal ? weight * INTERNAL_EDGE_INK : weight;
+  return {
+    color: fade(style.color, ink),
+    size: style.width * (0.6 + weight * 0.7) * (internal ? 0.7 : 1.15),
+  };
 }
 
 function nodeLabel(node) {
@@ -692,8 +730,42 @@ function drawHoverLabel(context, data, settings) {
   context.restore();
 }
 
+/// What a reader is looking for is which files and modules reach each other. A
+/// method is where that happens, not what it is about, so the two are drawn as
+/// two tiers: containers get the size, the saturation, and the labels, and the
+/// symbols inside them stay legible without competing.
+///
+/// `tier` scales the radius; `ink` is how much of the module colour survives
+/// against the background, so a container reads as solid and a method as a
+/// tinted dot of the same family.
+const KIND_TIER = {
+  file: { tier: 1.75, ink: 1 },
+  doc: { tier: 1.3, ink: 0.72 },
+  schema: { tier: 1.5, ink: 0.95 },
+  database_table: { tier: 1.5, ink: 0.95 },
+  infra_resource: { tier: 1.5, ink: 0.95 },
+  endpoint: { tier: 1.15, ink: 0.9 },
+  struct: { tier: 1, ink: 0.72 },
+  interface: { tier: 1, ink: 0.72 },
+  function: { tier: 0.68, ink: 0.5 },
+  method: { tier: 0.6, ink: 0.44 },
+};
+const DEFAULT_TIER = { tier: 0.8, ink: 0.6 };
+
+function kindTier(kind) {
+  return KIND_TIER[kind] || DEFAULT_TIER;
+}
+
 function nodeSize(node) {
-  return (3 + Math.min(Math.sqrt(node.degree || 0) * 1.7, 13)) * settings.nodeScale;
+  const { tier } = kindTier(node.kind);
+  // Degree still decides size within a tier — the busiest file is the biggest
+  // file — but it can no longer make a method outweigh the file holding it.
+  return (3 + Math.min(Math.sqrt(node.degree || 0) * 1.7, 13)) * tier * settings.nodeScale;
+}
+
+/// The module colour a node is drawn in, dimmed for the tiers that should recede.
+function nodeInk(node) {
+  return fade(communityColor(node.community), kindTier(node.kind).ink);
 }
 
 // --- Adjacency ---------------------------------------------------------------
@@ -761,7 +833,10 @@ function nodeEntry(node, extra) {
     key: `n${node.id}`,
     label: sceneLabel(node),
     size: nodeSize(node),
-    color: communityColor(node.community),
+    color: nodeInk(node),
+    // Containers paint over symbols, so a file is never buried under the dots
+    // of its own methods.
+    zIndex: Math.round(kindTier(node.kind).tier * 10),
     _node: node,
     // Set here rather than per mode, so a pin is marked in every scene that
     // happens to contain the node instead of only in the one that pinned it.
@@ -828,8 +903,11 @@ function overviewSpec() {
   if (State.expanded.size) {
     let index = 0;
     for (const edge of links) {
-      if (edge.s.community !== edge.t.community) continue;
-      if (!State.expanded.has(edge.s.community) || !edgeAllowed(edge)) continue;
+      if (!edgeAllowed(edge)) continue;
+      // Both ends on screen is the only condition that matters. Requiring them
+      // to share a module drew nothing between two expanded modules, so the
+      // import that ties them together — the thing a reader opened two modules
+      // to see — was missing.
       if (!present.has(`n${edge.source}`) || !present.has(`n${edge.target}`)) continue;
       edges.push(Object.assign({ key: `i${index++}`, from: `n${edge.source}`, to: `n${edge.target}`, _edge: edge }, edgeStyle(edge)));
     }
@@ -1775,18 +1853,44 @@ function edgeReducer(key, data) {
 
 // Semantic zoom: which labels are worth drawing depends on how far out the
 // camera is, not on a fixed threshold.
-function labelFloorFor(ratio) {
-  if (ratio > 0.6) return 22;
-  if (ratio > 0.25) return 13;
-  return 4;
+/// Roughly how many labels a zoom band should carry. Fixed pixel thresholds do
+/// not survive a change in how nodes are sized: the floor was a constant tuned
+/// against the old sizes, and after the file/symbol tiers landed it sat just
+/// above the largest node in the scene, so a view of 90 files drew no names at
+/// all. Asking for a count instead and reading the threshold off the scene's own
+/// size distribution cannot drift that way.
+function labelBudgetFor(ratio) {
+  if (ratio > 0.6) return 16;
+  if (ratio > 0.25) return 44;
+  return 140;
 }
 
+/// Semantic zoom: which labels are worth drawing depends on how far out the
+/// camera is, not on a fixed threshold.
 function applySemanticZoom() {
   if (!renderer || !scene) return;
   const ratio = renderer.getCamera().getState().ratio;
   // Small scenes are never crowded, so the zoom band must not silently strip
   // their labels: a nine-node impact fan-out with no labels answers nothing.
-  const floor = scene.order <= 60 ? 0 : labelFloorFor(ratio) * (0.6 + settings.labelDensity / 8);
+  if (scene.order <= 60) {
+    if (renderer.getSetting("labelRenderedSizeThreshold") !== 0) {
+      renderer.setSetting("labelRenderedSizeThreshold", 0);
+    }
+    return;
+  }
+  const budget = Math.max(
+    4,
+    Math.round(labelBudgetFor(ratio) * (0.35 + settings.labelDensity / 6))
+  );
+  const sizes = [];
+  for (const key of scene.nodes()) {
+    const display = renderer.getNodeDisplayData(key);
+    if (display) sizes.push(renderer.scaleSize(display.size));
+  }
+  sizes.sort((left, right) => right - left);
+  // Just under the size of the last node inside the budget, so exactly that many
+  // clear the bar.
+  const floor = budget >= sizes.length ? 0 : Math.max(0, sizes[budget] - 0.01);
   if (renderer.getSetting("labelRenderedSizeThreshold") !== floor) {
     renderer.setSetting("labelRenderedSizeThreshold", floor);
   }
@@ -1830,6 +1934,8 @@ async function renderScene(spec) {
     // state here, not a misconfiguration.
     allowInvalidContainer: true,
     renderEdgeLabels: false,
+    // Needed for the per-node `zIndex` that keeps files above their methods.
+    zIndex: true,
     defaultEdgeColor: EDGE_COLOR,
     labelColor: { color: "#f2f2ee" },
     // Sigma's default hover renderer hardcodes a white plate and then paints
@@ -1838,8 +1944,11 @@ async function renderScene(spec) {
     hoverRenderer: drawHoverLabel,
     labelSize: 11,
     labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    labelGridCellSize: spec.layout === "layered" ? 90 : 150,
-    labelDensity: 0.7,
+    // Denser than sigma's default: the grid drops a label whose cell is taken,
+    // and a scene of large file circles sitting close together lost nearly all
+    // of them — every node visible, none of them named.
+    labelGridCellSize: spec.layout === "layered" ? 80 : 100,
+    labelDensity: 1.1,
     labelRenderedSizeThreshold: 13,
     nodeReducer,
     edgeReducer,
@@ -1993,10 +2102,53 @@ function drawGrammar() {
   context.setLineDash([]);
 }
 
+/// Share of the viewport the scene is asked to fill, leaving room for labels,
+/// which stick out past the nodes they belong to.
+const FIT_MARGIN = 0.86;
+
+/// Frames the scene on its own content.
+///
+/// A fixed camera ratio is not a fit: it assumed every layout ends up the same
+/// size, so a dense module sat in one corner of an empty canvas while a
+/// three-node path filled the screen. The extent is measured from where the
+/// nodes actually landed, at the 2nd and 98th percentile so one stray node
+/// cannot zoom the whole scene out, and the camera converges on it in a couple
+/// of passes rather than by inverting sigma's normalisation by hand.
 function fitScene() {
   if (!renderer) return;
-  const state = State.cam || { x: 0.5, y: 0.5, ratio: sceneSpec && sceneSpec.layout === "layered" ? 1.3 : 1.22 };
-  renderer.getCamera().setState({ x: state.x, y: state.y, ratio: state.ratio, angle: 0 });
+  if (State.cam) {
+    renderer.getCamera().setState({ x: State.cam.x, y: State.cam.y, ratio: State.cam.ratio, angle: 0 });
+    return;
+  }
+  const camera = renderer.getCamera();
+  camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  for (let pass = 0; pass < 3; pass++) {
+    const xs = [];
+    const ys = [];
+    for (const key of scene.nodes()) {
+      const display = renderer.getNodeDisplayData(key);
+      if (!display) continue;
+      const point = renderer.framedGraphToViewport(display);
+      xs.push(point.x);
+      ys.push(point.y);
+    }
+    if (xs.length < 2) return;
+    xs.sort((left, right) => left - right);
+    ys.sort((left, right) => left - right);
+    const low = (values) => values[Math.floor((values.length - 1) * 0.02)];
+    const high = (values) => values[Math.ceil((values.length - 1) * 0.98)];
+    const { width, height } = renderer.getDimensions();
+    const spanX = Math.max(high(xs) - low(xs), 1);
+    const spanY = Math.max(high(ys) - low(ys), 1);
+    const scale = Math.max(spanX / (width * FIT_MARGIN), spanY / (height * FIT_MARGIN));
+    const centre = renderer.viewportToFramedGraph({
+      x: (low(xs) + high(xs)) / 2,
+      y: (low(ys) + high(ys)) / 2,
+    });
+    const state = camera.getState();
+    camera.setState({ x: centre.x, y: centre.y, ratio: state.ratio * scale, angle: 0 });
+    if (Math.abs(scale - 1) < 0.02) break;
+  }
 }
 
 let cameraTimer = null;
@@ -2650,6 +2802,13 @@ const State = {
 const ALL_REL = [...new Set(links.map((edge) => edge.kind))];
 const ALL_CONF = [...new Set(links.map((edge) => edge.confidence))];
 const ALL_KIND = [...new Set(nodes.map((node) => node.kind))];
+/// The kinds that hold other code rather than being held: what a reader means by
+/// "which files talk to which". `Structure only` narrows the graph to these, so
+/// the import and reference skeleton is readable without the thousand functions
+/// hanging off it.
+const CONTAINER_KINDS = ["file", "doc", "schema", "database_table", "infra_resource", "endpoint"];
+const containersOnly = () =>
+  !!State.kind && ALL_KIND.every((kind) => State.kind.has(kind) === CONTAINER_KINDS.includes(kind));
 
 function parseSet(value, cast) {
   if (!value) return null;
@@ -3049,6 +3208,11 @@ function renderModeControls() {
         `${State.arrowsOnly ? "arrows only" : "any direction"}</button>`
     );
   }
+  parts.push(
+    `<button id="ctl-containers" aria-pressed="${containersOnly()}" ` +
+      `title="show only files, docs and other containers, or every symbol">` +
+      `${containersOnly() ? "structure only" : "all symbols"}</button>`
+  );
   if (State.mode === "overview") {
     const total = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0).length;
     const allOpen = State.expanded.size >= total && total > 0;
@@ -3089,6 +3253,11 @@ function renderModeControls() {
     .getElementById("ctl-dir")
     ?.addEventListener("click", () => setState({ arrowsOnly: !State.arrowsOnly }, { push: true }));
 
+  document.getElementById("ctl-containers")?.addEventListener("click", () => {
+    setState({
+      kind: containersOnly() ? null : new Set(ALL_KIND.filter((kind) => CONTAINER_KINDS.includes(kind))),
+    });
+  });
   document.getElementById("ctl-expand-all")?.addEventListener("click", () => {
     const all = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0);
     const open = State.expanded.size >= all.length && all.length > 0;

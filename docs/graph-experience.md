@@ -651,6 +651,45 @@ direct call plus the six two-hop routes through `write_index`, `write_wiki_html`
   kinds, relation kinds, and edge confidence had been unreachable since the
   redesign. The id rule is gone; the class pair decides.
 
+### Landed: files read as files, methods recede
+
+The page drew every node the same way, so nothing said which circle was a file
+and which was a method inside it. What a reader wants from this graph is which
+files and modules reach each other; a method is where that happens, not what it
+is about.
+
+- **Two tiers.** `KIND_TIER` scales the radius and how much of the module colour
+  survives against the background: a file is 1.75× and full ink, a type 1× at
+  0.72, a function 0.68× at 0.5, a method 0.6× at 0.44. Degree still decides size
+  within a tier — the busiest file is the biggest file — but it can no longer make
+  a method outweigh the file holding it. Containers also paint above their
+  symbols, so a file is never buried under its own dots, and the legend shows the
+  scale rather than only the hues.
+- **`structure only`** in the toolbar narrows the graph to files, docs, schemas,
+  tables, infra and endpoints, which is the import-and-reference skeleton without
+  the thousand functions hanging off it. It rides the existing kind filter, so it
+  is one click for what was three checkboxes in a tab that could not be opened.
+- **Edges favour the crossings.** A call between two methods of one file is
+  structure a reader already assumes; one that crosses a file boundary is what
+  they came to see. Internal edges keep 45% of their ink and 70% of their width.
+- **Cross-module edges are drawn at all.** Overview required both ends of an edge
+  to share a module, so expanding two modules drew nothing between them — the
+  import tying them together, which is the reason to expand two modules, was
+  missing. Both ends being on screen is the only condition now.
+- **The camera fits the scene.** `fitScene` set a fixed ratio, which is not a fit:
+  a dense module sat in a corner of an empty canvas while a three-node path
+  filled the screen. The extent is measured from where the nodes landed, at the
+  2nd and 98th percentile so one stray node cannot zoom everything out.
+- **The label threshold calibrates itself.** It was a constant tuned against the
+  old sizes; with the tiers in place it landed at 24.2 while the largest node in a
+  90-file scene rendered at 24, so that view drew no names at all. A zoom band now
+  asks for a number of labels and the threshold is read off the scene's own size
+  distribution, which cannot drift when sizing changes again.
+- **Chrome is set in a text face**, identifiers and source stay monospaced, and
+  numbers are tabular. The header and status bar were retuned to hold one line,
+  since a proportional face fits fewer characters per pixel than the monospaced
+  one they were measured with.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),
