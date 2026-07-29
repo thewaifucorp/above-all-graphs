@@ -24,7 +24,7 @@
 //! Either way, mentions of a known symbol name in a doc's text become
 //! `Explains` edges, resolved the same name-matching way as calls/imports.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -1003,7 +1003,15 @@ pub fn index_file(graph: &Graph, root: &Path, file: &Path) -> Result<IndexSummar
         .unwrap_or(file)
         .to_string_lossy()
         .replace('\\', "/");
+    // A manifest declares import aliases for the whole repository, so an edit
+    // to one can change how any file resolves. That is the one case where the
+    // cheap path is wrong, and it takes the full pass.
+    let manifest_changed = crate::toolchain::is_manifest(&relative);
     graph.transaction(|| {
+        // Names this file used to declare: every other file's reference to one
+        // of them has to be resolved again, because the node ids are about to
+        // change.
+        let names_before = graph.names_in_file(&relative)?;
         graph.remove_file(&relative)?;
         if file.is_file() {
             let mut summary = IndexSummary::default();
@@ -1029,19 +1037,125 @@ pub fn index_file(graph: &Graph, root: &Path, file: &Path) -> Result<IndexSummar
                 )?;
             }
         }
-        rebuild_resolved_edges(graph)
+        if manifest_changed {
+            return rebuild_resolved_edges(graph);
+        }
+        let mut touched: BTreeSet<String> = names_before.into_iter().collect();
+        touched.extend(graph.names_in_file(&relative)?);
+        rebuild_resolved_edges_scoped(graph, &relative, &touched)
     })
 }
 
-/// Rebuilds name-resolved relations using stored parser output only.
+/// Re-resolves only what the edit could have changed: the edited file's own
+/// references, and the references in other files that name a symbol this file
+/// declared before or declares now.
+///
+/// The full pass re-resolves every reference in the repository, which costs the
+/// same whether one line changed or all of them — 95 seconds on a 15 000-file
+/// repository, measured in `docs/benchmarks.md`. This one costs what the edit
+/// costs.
+///
+/// The approximation is deliberate and bounded: a reference that mentions no
+/// affected name cannot have changed target, because resolution reads a name
+/// and the tables built from the whole repository, and only the affected names
+/// moved. Manifest edits, which move the alias tables themselves, take the full
+/// pass instead.
 ///
 /// # Errors
-/// Returns an error when persisted references cannot be read or edges cannot be written.
-pub fn rebuild_resolved_edges(graph: &Graph) -> Result<IndexSummary> {
-    graph.clear_resolved_edges()?;
+/// Returns an error when persisted references cannot be read or edges cannot be
+/// written.
+pub fn rebuild_resolved_edges_scoped(
+    graph: &Graph,
+    changed_file: &str,
+    touched_names: &BTreeSet<String>,
+) -> Result<IndexSummary> {
     let nodes = graph.all_nodes()?;
     let mut pending = Pending::default();
-    for node in &nodes {
+    index_nodes(&nodes, &mut pending);
+    load_raw_references(graph, &mut pending)?;
+
+    let affected = affected_files(&pending, changed_file, touched_names);
+    graph.clear_resolved_edges_in_files(&affected.iter().cloned().collect::<Vec<_>>())?;
+    retain_affected(&mut pending, &affected);
+
+    let mut summary = IndexSummary::default();
+    resolve_pending(graph, &pending, &mut summary)?;
+    fill_counts(&nodes, &mut summary);
+    summary.edges = u32::try_from(graph.all_edges()?.len()).unwrap_or(u32::MAX);
+    Ok(summary)
+}
+
+/// Files whose references have to be resolved again: the edited one, plus every
+/// file that names something the edit moved.
+fn affected_files(
+    pending: &Pending,
+    changed_file: &str,
+    touched_names: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut affected = BTreeSet::new();
+    affected.insert(changed_file.to_string());
+    let mentions = |text: &str| touched_names.contains(text);
+
+    for (file, imports) in &pending.imports {
+        if imports.iter().any(|import| {
+            import.name.as_deref().is_some_and(mentions)
+                || import.alias.as_deref().is_some_and(mentions)
+                || mentions(&import.source)
+        }) {
+            affected.insert(file.clone());
+        }
+    }
+    for (file, call) in &pending.calls {
+        if mentions(&call.callee) || call.receiver.as_deref().is_some_and(mentions) {
+            affected.insert(file.clone());
+        }
+    }
+    for (file, inherit) in &pending.inherits {
+        if mentions(&inherit.parent) || mentions(&inherit.child) {
+            affected.insert(file.clone());
+        }
+    }
+    for (file, _, name) in &pending.routes {
+        if mentions(name) {
+            affected.insert(file.clone());
+        }
+    }
+    for (file, _, name) in &pending.tool_calls {
+        if mentions(name) {
+            affected.insert(file.clone());
+        }
+    }
+    affected
+}
+
+/// Drops every reference belonging to a file that does not need re-resolving.
+/// Doc mentions are kept whole: a doc's text is matched against symbol names,
+/// so a moved name can change which doc links where, and the set is small.
+fn retain_affected(pending: &mut Pending, affected: &BTreeSet<String>) {
+    pending.imports.retain(|file, _| affected.contains(file));
+    pending.calls.retain(|(file, _)| affected.contains(file));
+    pending.inherits.retain(|(file, _)| affected.contains(file));
+    pending
+        .routes
+        .retain(|(file, _, _)| affected.contains(file));
+    pending
+        .consumers
+        .retain(|(file, ..)| affected.contains(file));
+    pending
+        .emitters
+        .retain(|(file, _, _)| affected.contains(file));
+    pending
+        .listeners
+        .retain(|(file, _, _)| affected.contains(file));
+    pending
+        .tool_calls
+        .retain(|(file, _, _)| affected.contains(file));
+    pending.operations.clear();
+}
+
+/// Fills the name lookup tables every resolution pass needs.
+fn index_nodes(nodes: &[Node], pending: &mut Pending) {
+    for node in nodes {
         let Some(id) = node.id else { continue };
         if node.kind == NodeKind::File {
             pending.file_nodes.insert(node.file_path.clone(), id);
@@ -1057,43 +1171,41 @@ pub fn rebuild_resolved_edges(graph: &Graph) -> Result<IndexSummary> {
                 .insert((node.file_path.clone(), node.name.clone()), id);
         }
     }
+}
+
+/// Rebuilds name-resolved relations using stored parser output only.
+///
+/// # Errors
+/// Returns an error when persisted references cannot be read or edges cannot be written.
+pub fn rebuild_resolved_edges(graph: &Graph) -> Result<IndexSummary> {
+    graph.clear_resolved_edges()?;
+    let nodes = graph.all_nodes()?;
+    let mut pending = Pending::default();
+    index_nodes(&nodes, &mut pending);
     load_raw_references(graph, &mut pending)?;
     let mut summary = IndexSummary::default();
     resolve_pending(graph, &pending, &mut summary)?;
-    summary.files = u32::try_from(
-        nodes
-            .iter()
-            .filter(|node| node.kind == NodeKind::File)
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
-    summary.docs = u32::try_from(
-        nodes
-            .iter()
-            .filter(|node| node.kind == NodeKind::Doc)
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
-    summary.contracts = u32::try_from(
-        nodes
-            .iter()
-            .filter(|node| node.kind == NodeKind::Endpoint)
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
-    summary.artifacts = u32::try_from(
-        nodes
-            .iter()
-            .filter(|node| matches!(node.kind, NodeKind::DatabaseTable | NodeKind::InfraResource))
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
+    fill_counts(&nodes, &mut summary);
+    summary.edges = u32::try_from(graph.all_edges()?.len()).unwrap_or(u32::MAX);
+    Ok(summary)
+}
+
+/// Restates the summary as totals over the whole graph rather than as counts
+/// of what this pass happened to touch — an incremental pass that resolved one
+/// file still describes the repository it belongs to.
+fn fill_counts(nodes: &[Node], summary: &mut IndexSummary) {
+    let count = |predicate: &dyn Fn(&Node) -> bool| {
+        u32::try_from(nodes.iter().filter(|node| predicate(node)).count()).unwrap_or(u32::MAX)
+    };
+    summary.files = count(&|node| node.kind == NodeKind::File);
+    summary.docs = count(&|node| node.kind == NodeKind::Doc);
+    summary.contracts = count(&|node| node.kind == NodeKind::Endpoint);
+    summary.artifacts =
+        count(&|node| matches!(node.kind, NodeKind::DatabaseTable | NodeKind::InfraResource));
     summary.nodes = u32::try_from(nodes.len())
         .unwrap_or(u32::MAX)
         .saturating_sub(summary.files)
         .saturating_sub(summary.docs);
-    summary.edges = u32::try_from(graph.all_edges()?.len()).unwrap_or(u32::MAX);
-    Ok(summary)
 }
 
 /// Rehydrates every persisted unresolved reference into `pending`, so an

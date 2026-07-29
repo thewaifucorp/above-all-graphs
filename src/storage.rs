@@ -674,6 +674,68 @@ impl Graph {
     /// Removes only globally resolved edges before rebuilding them from raw references.
     /// # Errors
     /// Returns a storage error if deletion fails.
+    /// Symbol names a file declares. The incremental path needs them twice:
+    /// before a re-index, to know which other files' references pointed here,
+    /// and after, to know which ones now can.
+    ///
+    /// # Errors
+    /// Returns a storage error when the query fails.
+    pub fn names_in_file(&self, file_path: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM nodes WHERE file_path = ?1 AND kind != 'file'")
+            .map_err(|source| Error::Storage {
+                context: "prepare names-in-file query",
+                source,
+            })?;
+        let rows = stmt
+            .query_map((file_path,), |row| row.get::<_, String>(0))
+            .map_err(|source| Error::Storage {
+                context: "run names-in-file query",
+                source,
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|source| Error::Storage {
+                context: "read name",
+                source,
+            })?);
+        }
+        Ok(out)
+    }
+
+    /// Drops resolved edges originating in `files`, leaving every other
+    /// resolution in place.
+    ///
+    /// This is what makes an incremental pass incremental: re-resolving one
+    /// file must not throw away the other 400 000 edges first.
+    ///
+    /// # Errors
+    /// Returns a storage error when the delete fails.
+    pub fn clear_resolved_edges_in_files(&self, files: &[String]) -> Result<()> {
+        for file in files {
+            self.conn
+                .execute(
+                    "DELETE FROM edges
+                     WHERE (kind IN ('imports', 'calls', 'explains')
+                            OR (kind = 'implements' AND perspective = 'declared'))
+                       AND src IN (SELECT id FROM nodes WHERE file_path = ?1)",
+                    (file,),
+                )
+                .map_err(|source| Error::Storage {
+                    context: "clear resolved edges for one file",
+                    source,
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Drops every name-resolved edge in the graph — the full pass's first
+    /// step. [`clear_resolved_edges_in_files`](Self::clear_resolved_edges_in_files)
+    /// is the incremental counterpart.
+    ///
+    /// # Errors
+    /// Returns a storage error when the delete fails.
     pub fn clear_resolved_edges(&self) -> Result<()> {
         self.conn
             .execute(

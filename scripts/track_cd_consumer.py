@@ -129,6 +129,85 @@ def index_repository(repo: pathlib.Path) -> tuple[dict, dict]:
     return visitor.definitions, visitor.callers
 
 
+def build_definition_tasks(repo: pathlib.Path, wanted: int) -> list[dict]:
+    """"Which file defines X" — a different shape of question from "who calls
+    X", and one a graph should be trivially good at.
+
+    Only symbols defined in exactly one file qualify, so the answer is a single
+    path and grading needs no judgement.
+    """
+    definitions, callers = index_repository(repo)
+    tasks = []
+    for name in sorted(definitions):
+        sites = definitions[name]
+        # Something the repository actually uses, defined in exactly one place.
+        if len(sites) != 1 or len(name) < 6 or len(callers.get(name, ())) < 2:
+            continue
+        path = sorted(sites)[0]
+        tasks.append(
+            {
+                "id": f"defines::{name}",
+                "symbol": name,
+                "defined_in": path,
+                "question": (
+                    f"In this repository, which file defines the Python symbol `{name}`? "
+                    f"Answer with the repository-relative path."
+                ),
+                "answer": [path],
+            }
+        )
+        if len(tasks) >= wanted:
+            break
+    return tasks
+
+
+def build_callee_tasks(repo: pathlib.Path, wanted: int) -> list[dict]:
+    """"What does X call" — the other direction of the call graph, which a
+    lexical search has to read a whole function body to answer."""
+    definitions, _ = index_repository(repo)
+    outgoing: dict[str, set[str]] = defaultdict(set)
+    defined = set(definitions)
+    for relative in python_files(repo):
+        try:
+            tree = ast.parse((repo / relative).read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        visitor = _Attribution()
+        visitor.file = relative
+        visitor.visit(tree)
+        for callee, callers in visitor.callers.items():
+            if callee in defined:
+                for caller in callers:
+                    outgoing[caller].add(callee)
+    tasks = []
+    for name in sorted(outgoing):
+        callees = sorted(outgoing[name])
+        if len(definitions.get(name, ())) != 1 or not 4 <= len(callees) <= 15 or len(name) < 5:
+            continue
+        tasks.append(
+            {
+                "id": f"calls::{name}",
+                "symbol": name,
+                "defined_in": sorted(definitions[name])[0],
+                "question": (
+                    f"In this repository, which functions or methods defined in this same "
+                    f"repository does `{name}` call? Answer with their names."
+                ),
+                "answer": callees,
+            }
+        )
+        if len(tasks) >= wanted:
+            break
+    return tasks
+
+
+FAMILIES = {
+    "callers": lambda repo, wanted, minimum: build_tasks(repo, wanted, minimum),
+    "defines": lambda repo, wanted, _minimum: build_definition_tasks(repo, wanted),
+    "callees": lambda repo, wanted, _minimum: build_callee_tasks(repo, wanted),
+}
+
+
 def build_tasks(repo: pathlib.Path, wanted: int, min_callers: int = 5) -> list[dict]:
     """Unambiguous "who calls X" tasks, deterministic in selection order.
 
@@ -302,7 +381,12 @@ def grade(expected: list[str], given: list[str] | None) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("repo", type=pathlib.Path)
+    parser.add_argument(
+        "repos",
+        type=pathlib.Path,
+        nargs="+",
+        help="one or more corpora; tasks are drawn from each and reported together",
+    )
     parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/release/aag"))
     parser.add_argument("--tasks", type=int, default=8)
     parser.add_argument(
@@ -315,6 +399,13 @@ def main() -> int:
     parser.add_argument("--model", default="claude-sonnet-5")
     parser.add_argument("--conditions", nargs="+", default=list(CONDITIONS))
     parser.add_argument(
+        "--families",
+        nargs="+",
+        default=list(FAMILIES),
+        choices=list(FAMILIES),
+        help="which question shapes to draw tasks from",
+    )
+    parser.add_argument(
         "--repetitions",
         type=int,
         default=1,
@@ -324,13 +415,26 @@ def main() -> int:
     parser.add_argument("--json", type=pathlib.Path, default=None)
     arguments = parser.parse_args()
 
-    repo = arguments.repo.resolve()
     binary = arguments.binary.resolve()
-    tasks = build_tasks(repo, arguments.tasks, arguments.min_callers)
+    # Tasks carry their own repository, so one run can span corpora: a result on
+    # one repository is a result on one repository, and the contract asks for
+    # more than that.
+    tasks = []
+    for candidate in arguments.repos:
+        repo = candidate.resolve()
+        for family in arguments.families:
+            for task in FAMILIES[family](repo, arguments.tasks, arguments.min_callers):
+                task["repo"] = repo
+                task["family"] = family
+                task["id"] = f"{repo.name}/{task['id']}"
+                tasks.append(task)
     if not tasks:
         print("no unambiguous tasks could be generated", file=sys.stderr)
         return 1
-    print(f"{len(tasks)} task(s) from the oracle, {len(arguments.conditions)} condition(s)")
+    print(
+        f"{len(tasks)} task(s) from {len(arguments.repos)} corpus/corpora, "
+        f"{len(arguments.families)} family/families, {len(arguments.conditions)} condition(s)"
+    )
 
     records = []
     for task in tasks:
@@ -338,6 +442,7 @@ def main() -> int:
           for repetition in range(max(1, arguments.repetitions)):
               producer_cost = 0.0
               producer_call = None
+              repo = task["repo"]
               if condition == "none":
                 prompt = f"{task['question']}\n\n{ANSWER_PROTOCOL}"
                 tools = None
@@ -402,6 +507,8 @@ def main() -> int:
                 {
                     "task": task["id"],
                     "condition": condition,
+                    "family": task["family"],
+                    "repository": repo.name,
                     "repetition": repetition,
                     "consumer_model": arguments.model,
                     "producer_cost_usd": round(producer_cost, 6),
@@ -444,16 +551,47 @@ def main() -> int:
             "mean_wall_s": round(sum(row["wall_ms"] for row in rows) / len(rows) / 1000, 2),
         }
 
+    by_family = {}
+    for family in arguments.families:
+        for condition in arguments.conditions:
+            rows = [
+                row
+                for row in records
+                if row.get("family") == family and row["condition"] == condition and "f1" in row
+            ]
+            if rows:
+                by_family[f"{family}/{condition}"] = {
+                    "samples": len(rows),
+                    "mean_f1": round(statistics.fmean(row["f1"] for row in rows), 4),
+                    "mean_cost_usd": round(
+                        statistics.fmean(
+                            row["cost_usd"] + row.get("producer_cost_usd", 0.0) for row in rows
+                        ),
+                        4,
+                    ),
+                }
+
     report = {
         "track": "C: agent utility + D: end-to-end economics",
+        "by_family": by_family,
         "repetitions": max(1, arguments.repetitions),
         "run_kind": "empirical",
         "oracle": "CPython ast",
         "consumer_model": arguments.model,
-        "repository": repo.name,
-        "revision": subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=False
-        ).stdout.strip(),
+        "repositories": [
+            {
+                "name": candidate.resolve().name,
+                "revision": subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=candidate.resolve(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip(),
+            }
+            for candidate in arguments.repos
+        ],
+        "families": arguments.families,
         "tasks": len(tasks),
         "summary": summary,
         "records": records,

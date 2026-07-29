@@ -43,6 +43,8 @@ quick-xml = "0.41.0"
 kamadak-exif = "0.6.1"
 imagesize = "0.15.0"
 serde = { version = "1.0.229", features = ["derive"] }
+flate2 = "1.1.9"
+base64 = "0.23.0"
 
 [features]
 default = []

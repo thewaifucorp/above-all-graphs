@@ -652,16 +652,49 @@ fn write_html(
     let html = GRAPH_HTML_TEMPLATE
         .replace("/*__GRAPHOLOGY_JS__*/", GRAPHOLOGY_JS)
         .replace("/*__SIGMA_JS__*/", SIGMA_JS)
-        .replace(
-            "/*__GRAPH_DATA__*/",
-            &json_safe_for_script(&data.to_string()),
-        )
-        .replace(
-            "/*__FILES_DATA__*/",
-            &json_safe_for_script(&files.to_string()),
-        )
+        .replace("/*__GRAPH_DATA__*/", &embed(&data.to_string()))
+        .replace("/*__FILES_DATA__*/", &embed(&files.to_string()))
         .replace("__REPO_NAME__", &json_safe_for_script(&name));
     write_file(&aag_dir.join("graph.html"), &html)
+}
+
+/// Above this many bytes, an inline payload is gzipped and base64'd instead of
+/// pasted in as JSON. Below it the wrapper costs more than it saves, and a
+/// small page stays readable in a text editor.
+const COMPRESS_ABOVE: usize = 64 * 1024;
+
+/// Splices a JSON payload into the page, compressed when it is large enough to
+/// be worth it.
+///
+/// The page has to stay one self-contained file that works from `file://`, so
+/// fetching a sidecar is not an option: a browser refuses cross-origin reads of
+/// local files, which is why everything was inlined in the first place. Gzip
+/// keeps that property and takes the biggest cost out of it — the graph payload
+/// for a repository with 98 000 edges is the reason an export reached 458 MB
+/// (`docs/benchmarks.md`). The page inflates it with `DecompressionStream`,
+/// which every current browser has and which needs no library.
+fn embed(json: &str) -> String {
+    if json.len() < COMPRESS_ABOVE {
+        return json_safe_for_script(json);
+    }
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let deflated = std::io::Write::write_all(&mut encoder, json.as_bytes())
+        .and_then(|()| encoder.finish())
+        .ok();
+    let Some(deflated) = deflated else {
+        // Compression is an optimization, never a correctness requirement: a
+        // failure here falls back to the payload that always worked.
+        return json_safe_for_script(json);
+    };
+    let payload = base64_encode(&deflated);
+    format!("{{\"format\":\"gzip-base64-1\",\"data\":\"{payload}\"}}")
+}
+
+/// Base64 without a line-wrapping pass, because the result goes into one JSON
+/// string literal.
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Escapes every literal `<` in `text` to its Unicode escape sequence

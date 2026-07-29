@@ -388,12 +388,39 @@
 
 <script>/*__GRAPHOLOGY_JS__*/</script>
 <script>/*__SIGMA_JS__*/</script>
-<script>
-const RAW_DATA = /*__GRAPH_DATA__*/;
-const RAW_FILES = /*__FILES_DATA__*/;
+<script type="module">
+// A module, for one reason: the payloads below are gzipped when they are large,
+// and inflating needs `await`. Module scope is safe here — sigma and
+// graphology are loaded as classic scripts above and hang off `window`, and
+// nothing outside this block reads what it declares.
+const RAW_DATA = await hydrate(/*__GRAPH_DATA__*/);
+const RAW_FILES = await hydrate(/*__FILES_DATA__*/);
 const FILES = RAW_FILES.files || RAW_FILES;
 const FILES_OMITTED = RAW_FILES.omitted || 0;
 const DATA = decodePayload(RAW_DATA);
+
+/// Unwraps a payload the exporter compressed.
+///
+/// A page for a large repository carries megabytes of graph, and it has to stay
+/// one file that opens from `file://` — a browser will not fetch a sidecar next
+/// to a local file, which is why everything is inlined. Gzip keeps the single
+/// file and removes most of its weight; `DecompressionStream` is in every
+/// current browser and needs no library. A payload that was small enough to
+/// leave as plain JSON passes straight through.
+async function hydrate(payload) {
+  if (!payload || payload.format !== "gzip-base64-1") return payload;
+  if (typeof DecompressionStream !== "function") {
+    throw new Error(
+      "this page stores its graph compressed and this browser has no DecompressionStream; " +
+        "open it in a current browser, or read .aag/graph.json directly"
+    );
+  }
+  const binary = atob(payload.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
 
 /// Expands the columnar page payload into the object shape the rest of this
 /// page works with. The payload is columnar because an edge as four integers
