@@ -494,6 +494,10 @@ first pass either dropped or never wired to a control anyone could find.
   `src/bigbang.rs`, case no longer decides whether a path resolves, and a
   value that resolves to nothing stays in the field instead of silently
   blanking.
+- **The hover label is readable.** Sigma's default hover renderer hardcodes
+  a white plate and then paints the label with `labelColor` on top of it —
+  near-white text on white, on a dark page. A local `hoverRenderer` draws the
+  plate in the page's own surface colour with its border and text colours.
 - **Long labels stopped drawing white bars.** Sigma renders labels on an
   opaque plate, so a 78-character test function name became a bar across the
   scene. Canvas labels truncate at 34 characters; the inspector and the search

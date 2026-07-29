@@ -473,6 +473,10 @@ const PALETTE = [
   "#b8629e", "#54b8ad", "#a8944c", "#8a7ed9", "#c96a94", "#94b85e", "#c9944c", "#6aa2d9",
 ];
 const EDGE_COLOR = "#33332f";
+/// The hover plate matches the panels rather than sigma's white default, and
+/// is opaque so an edge running underneath cannot bleed through the name.
+const HOVER_PLATE = "#1c1c1c";
+const HOVER_PLATE_BORDER = "#3a3a36";
 const EDGE_HL = "#ffc600";
 
 const DEFAULT_SETTINGS = { repulsion: 8, gravity: 6, cluster: 8, nodeScale: 1, labelDensity: 4, edgeOpacity: 0.3, liveSim: false };
@@ -616,6 +620,56 @@ function sceneLabel(node) {
   const short =
     name.length > MAX_SCENE_LABEL_CHARS ? `${name.slice(0, MAX_SCENE_LABEL_CHARS - 1)}\u2026` : name;
   return `${KIND_GLYPH[node.kind] || "●"} ${short}`;
+}
+
+/// Hover label: a dark plate with the page's border and text colours, so the
+/// name stays readable instead of vanishing into sigma's white default.
+function drawHoverLabel(context, data, settings) {
+  if (typeof data.label !== "string" || !data.label) return;
+  const size = settings.labelSize;
+  const font = settings.labelFont;
+  const weight = settings.labelWeight || "400";
+  context.font = `${weight} ${size}px ${font}`;
+  const width = context.measureText(data.label).width;
+  const padX = 7;
+  const padY = 4;
+  const boxHeight = size + padY * 2;
+  const left = data.x + data.size + 3;
+  const top = data.y - boxHeight / 2;
+  const radius = 5;
+
+  context.save();
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 1;
+  context.shadowBlur = 8;
+  context.shadowColor = "rgba(0, 0, 0, 0.6)";
+  context.beginPath();
+  context.moveTo(left + radius, top);
+  context.lineTo(left + width + padX * 2 - radius, top);
+  context.quadraticCurveTo(left + width + padX * 2, top, left + width + padX * 2, top + radius);
+  context.lineTo(left + width + padX * 2, top + boxHeight - radius);
+  context.quadraticCurveTo(
+    left + width + padX * 2,
+    top + boxHeight,
+    left + width + padX * 2 - radius,
+    top + boxHeight
+  );
+  context.lineTo(left + radius, top + boxHeight);
+  context.quadraticCurveTo(left, top + boxHeight, left, top + boxHeight - radius);
+  context.lineTo(left, top + radius);
+  context.quadraticCurveTo(left, top, left + radius, top);
+  context.closePath();
+  context.fillStyle = HOVER_PLATE;
+  context.fill();
+  context.shadowColor = "transparent";
+  context.lineWidth = 1;
+  context.strokeStyle = HOVER_PLATE_BORDER;
+  context.stroke();
+
+  context.fillStyle = settings.labelColor.color || "#f2f2ee";
+  context.textBaseline = "middle";
+  context.fillText(data.label, left + padX, data.y + 0.5);
+  context.restore();
 }
 
 function nodeSize(node) {
@@ -1394,6 +1448,10 @@ function renderScene(spec) {
     renderEdgeLabels: false,
     defaultEdgeColor: EDGE_COLOR,
     labelColor: { color: "#f2f2ee" },
+    // Sigma's default hover renderer hardcodes a white plate and then paints
+    // the label with `labelColor` on top of it, which on a dark page is white
+    // on white. Ours uses the page's own surface colour.
+    hoverRenderer: drawHoverLabel,
     labelSize: 11,
     labelFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
     labelGridCellSize: spec.layout === "layered" ? 90 : 150,
