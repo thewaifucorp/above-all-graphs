@@ -183,6 +183,38 @@ pub enum Command {
         command: ApiView,
     },
 
+    /// Measure the engine on a repository (Track E of the evaluation
+    /// contract) and append an immutable run record.
+    Bench {
+        /// Repository to measure. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+
+        /// Evidence class: `empirical`, `pilot`, or `simulated`. A run
+        /// against this engine's own repository is recorded as `pilot`
+        /// whatever is asked for.
+        #[arg(long, default_value = "empirical")]
+        run_kind: String,
+
+        /// How many times each measurement repeats.
+        #[arg(long, default_value_t = 3)]
+        repetitions: usize,
+
+        /// Where run records are appended.
+        #[arg(long, default_value = "bench")]
+        out: PathBuf,
+
+        /// Print the recorded runs of this class as a table instead of
+        /// measuring anything.
+        #[arg(long)]
+        report: bool,
+
+        /// Skip the export measurement — the site for a very large repository
+        /// can be hundreds of megabytes.
+        #[arg(long)]
+        skip_export: bool,
+    },
+
     /// Compare two graph states: the workspace, a branch, a commit, or a
     /// pull request's head. Each ref is indexed once into `.aag/refs/`,
     /// through a detached worktree that never touches your checkout.

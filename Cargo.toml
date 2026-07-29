@@ -42,6 +42,7 @@ zip = "8.6.0"
 quick-xml = "0.41.0"
 kamadak-exif = "0.6.1"
 imagesize = "0.15.0"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [features]
 default = []

@@ -79,7 +79,34 @@ P2 gates expand reach after the core is measurable and dependable.
 
 ### P0 — correctness and product credibility
 
-- 1. Deliver the empirical evaluation contract specified below. It must
+- 1. **Open — Track E delivered, B/C/D outstanding.** The harness exists
+   (`src/bench.rs`, `aag bench`) and enforces three of the contract's rules in
+   code rather than in prose: `empirical`, `pilot`, and `simulated` are written
+   to separate immutable paths and never averaged together; a run against this
+   engine's own repository is recorded as a `pilot` whatever the command asked
+   for; and records are append-only, versioned, and refused when the
+   `schema_version` does not match. Each record carries producer name, version,
+   build features and profile, repository name, revision and dirty state, the
+   corpus profile, the repetition count, and every measurement as a
+   min/p50/p95/max/mean distribution.
+   Track E is measured on four **external** corpora — 57, 130, 1836, and 15 361
+   tracked files — and published in [benchmarks](benchmarks.md) with the raw
+   records in `bench/empirical/runs.jsonl` and the corpora described in
+   [corpora](corpora.md). Two limits the measurement exposed are recorded there
+   rather than rounded off: incremental update scales with total graph size
+   (26 ms at 57 files, 95 s at 15 361), and export size scales with edges
+   (458 MB from a 1836-file repository with 98 437 edges).
+   What is **not** delivered, and why the gate stays open: Track A needs the
+   protocol as a separate subject; Track B needs ground truth authored
+   independently of the extractor, which cannot be produced by the same session
+   that wrote the extractor without leaking answers; Tracks C and D need a
+   consumer model, a factorial producer × consumer design, and token and call
+   accounting, none of which this harness performs — it never calls a model.
+   Publishing Track E numbers is not closing the contract, and `aag bench
+   --report` prints that caveat table next to every result so a number cannot
+   be quoted as more than it is.
+   Original scope, for the record:
+   Deliver the empirical evaluation contract specified below. It must
    distinguish protocol conformance, engine extraction quality, agent utility,
    end-to-end economics, and scale. Protocol-only, LLM-only, simulated, and
    dogfood results cannot substantiate AboveAllGraphs Engine claims.
@@ -440,7 +467,24 @@ P2 gates expand reach after the core is measurable and dependable.
     `gh` and network; a shallow clone cannot check out a commit it does not
     have; and comparison is structural — two states with identical symbols and
     edges compare equal even when a function body changed completely.
-- 18. Improve public onboarding and proof: architecture docs, benchmark history,
+- 18. **Closed.** Public onboarding and proof:
+   [architecture](architecture.md) (pipeline, modules, invariants),
+   [benchmarks](benchmarks.md) (measured Track E history, append-only records
+   in `bench/`), [compatibility](compatibility.md) (languages by depth, 14
+   agents, 5 platforms, features, external tools),
+   [migration notes](migration.md) (on-disk layout, index markers, 0.1→0.2),
+   [example corpora](corpora.md) (four external repositories with profiles and
+   revisions), screenshots of the graph, wiki, and report in `docs/images/`,
+   quickstarts in [pt-BR](quickstart.pt-BR.md), [es](quickstart.es.md), and
+   [zh-CN](quickstart.zh-CN.md), and release automation that now publishes a
+   standard and a semantic asset per target, a `SHA256SUMS` file, a
+   tag/`package.json`/`Cargo.toml` version gate, and an npm publish job that
+   runs the installer tests first and skips cleanly without a token.
+   Not claimed: the translated quickstarts say in their own first lines that
+   English is authoritative when they drift, and the screenshots are of this
+   repository's own graph rather than of a large external one.
+   Original scope, for the record:
+   Improve public onboarding and proof: architecture docs, benchmark history,
    compatibility matrix, migration notes, example corpora, screenshots,
    multilingual quickstarts, and release automation for every supported
    platform.

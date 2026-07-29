@@ -9,26 +9,7 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::Bigbang {
-            path,
-            force,
-            no_viz,
-            obsidian,
-            obsidian_dir,
-            no_install,
-        } => {
-            let obsidian_dir =
-                obsidian_dir.or_else(|| obsidian.then(|| path.join(".aag").join("obsidian")));
-            aag::bigbang::run(
-                &path,
-                &aag::bigbang::Options {
-                    force,
-                    no_viz,
-                    obsidian_dir,
-                    no_install,
-                },
-            )?;
-        }
+        command @ Command::Bigbang { .. } => run_bigbang(command)?,
         Command::Sync { path, file, no_viz } => {
             aag::sync::run(&path, file.as_deref(), no_viz)?;
         }
@@ -56,6 +37,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Cypher { query, path, json } => print_query(&path, &query, json)?,
         Command::Api { command } => print_api(command)?,
+        command @ Command::Bench { .. } => run_bench(command)?,
         Command::GraphDiff {
             before,
             after,
@@ -208,6 +190,70 @@ fn print_api(view: aag::cli::ApiView) -> anyhow::Result<()> {
         aag::cli::ApiView::Impact { target, path } => aag::api::impact(&path, &target)?,
     };
     println!("{text}");
+    Ok(())
+}
+
+/// `aag bigbang` — index, export, and wire up every detected agent. Takes the
+/// parsed command rather than six loose flags, three of which are booleans.
+fn run_bigbang(command: Command) -> anyhow::Result<()> {
+    let Command::Bigbang {
+        path,
+        force,
+        no_viz,
+        obsidian,
+        obsidian_dir,
+        no_install,
+    } = command
+    else {
+        unreachable!("run_bigbang is only reached from the Bigbang arm")
+    };
+    let obsidian_dir =
+        obsidian_dir.or_else(|| obsidian.then(|| path.join(".aag").join("obsidian")));
+    aag::bigbang::run(
+        &path,
+        &aag::bigbang::Options {
+            force,
+            no_viz,
+            obsidian_dir,
+            no_install,
+        },
+    )?;
+    Ok(())
+}
+
+/// `aag bench` — measure, or print what was already measured.
+fn run_bench(command: Command) -> anyhow::Result<()> {
+    let Command::Bench {
+        repo,
+        run_kind,
+        repetitions,
+        out,
+        report,
+        skip_export,
+    } = command
+    else {
+        unreachable!("run_bench is only reached from the Bench arm")
+    };
+    let kind = aag::bench::RunKind::parse(&run_kind)?;
+    if report {
+        print!("{}", aag::bench::report(&out, kind)?);
+        print!("\n{}", aag::bench::caveats());
+        return Ok(());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    aag::bench::run(
+        &aag::bench::Options {
+            repo,
+            run_kind: kind,
+            repetitions,
+            out,
+            skip_export,
+        },
+        now,
+    )?;
     Ok(())
 }
 

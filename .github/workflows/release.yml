@@ -89,11 +89,58 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # One checksum file for every asset, so a download can be verified
+      # without trusting the transport or the mirror it came through.
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # The npm wrapper's postinstall downloads `v<package.json version>`, so
+      # publishing a package whose version has no matching release would give
+      # every installer a 404. Fail here instead.
+      - name: Package version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME:-${{ inputs.tag }}}"
+          npm_version="v$(node -p "require('./npm/package.json').version")"
+          crate_version="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          echo "tag=$tag npm=$npm_version crate=$crate_version"
+          test "$tag" = "$npm_version" || { echo "npm/package.json is $npm_version, tag is $tag"; exit 1; }
+          test "$tag" = "$crate_version" || { echo "Cargo.toml is $crate_version, tag is $tag"; exit 1; }
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+  # Publishing is a separate job so a failed npm publish never blocks the
+  # GitHub release the binaries are already attached to. It is skipped
+  # entirely when no token is configured, which keeps forks green.
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Installer tests
+        run: node --test "npm/*.test.js"
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not configured — skipping publish"
+            exit 0
+          fi
+          cd npm && npm publish --access public --provenance

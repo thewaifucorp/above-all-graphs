@@ -72,6 +72,10 @@ aag embeddings --path .
 
 ## The UI
 
+![The graph, overview mode: modules aggregated, edges between them](docs/images/graph-overview.png)
+
+![Explore mode focused on one file: its imports, its callers, and the types it declares](docs/images/graph-explore.png)
+
 `aag ui` starts a local server (127.0.0.1 only) and opens your browser:
 
 - **One bar of lib-level chrome**: workspace picker, stats, a `+ index` button to index a new repo without touching the terminal.
@@ -180,3 +184,15 @@ This repo dogfoods itself: the `aag` hooks are active here.
 ## License
 
 MIT
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — the pipeline, module by module, and the invariants
+- [Compatibility matrix](docs/compatibility.md) — languages, agents, platforms, features, external tools
+- [Benchmarks](docs/benchmarks.md) — measured scale and operations, with the limits they exposed
+- [Example corpora](docs/corpora.md) — the external repositories measured, and how to reproduce
+- [Migration notes](docs/migration.md) — what changes between versions, and what you have to do
+- [Capability coverage](docs/capability-coverage.md) — what is claimed, what is not, and why
+
+Quickstart in other languages: [português do Brasil](docs/quickstart.pt-BR.md) ·
+[español](docs/quickstart.es.md) · [简体中文](docs/quickstart.zh-CN.md)

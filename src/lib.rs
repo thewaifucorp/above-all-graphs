@@ -10,6 +10,7 @@ pub mod analysis;
 pub mod api;
 pub mod areas;
 mod artifacts;
+pub mod bench;
 pub mod bigbang;
 pub mod bindings;
 pub mod cli;
