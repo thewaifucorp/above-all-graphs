@@ -492,14 +492,6 @@ const EDGE_COLOR = "#33332f";
 /// is opaque so an edge running underneath cannot bleed through the name.
 const HOVER_PLATE = "#1c1c1c";
 const HOVER_PLATE_BORDER = "#3a3a36";
-/// A node drawn smaller than this carries no readable shape, so the kind
-/// outline is skipped rather than drawn around something invisible. The upper
-/// bound matters more: sigma keeps its circles small as the camera dives in,
-/// while `scaleSize` keeps growing, so an unclamped outline balloons past the
-/// node it describes and neighbouring outlines overlap into a rosette that
-/// reads as a rendering fault.
-const MIN_SHAPE_RADIUS = 2.5;
-const MAX_SHAPE_RADIUS = 16;
 const EDGE_HL = "#ffc600";
 
 const DEFAULT_SETTINGS = { repulsion: 8, gravity: 6, cluster: 8, nodeScale: 1, labelDensity: 4, edgeOpacity: 0.3, liveSim: false };
@@ -648,7 +640,10 @@ function sceneLabel(node) {
 /// Hover label: a dark plate with the page's border and text colours, so the
 /// name stays readable instead of vanishing into sigma's white default.
 function drawHoverLabel(context, data, settings) {
-  if (typeof data.label !== "string" || !data.label) return;
+  // No text, no plate. While one node is hovered the reducer clears the labels
+  // of everything unrelated, and a plate drawn for an empty label is a small
+  // empty box sitting next to a node for no reason.
+  if (typeof data.label !== "string" || !data.label.trim()) return;
   const size = settings.labelSize;
   const font = settings.labelFont;
   const weight = settings.labelWeight || "400";
@@ -1526,8 +1521,14 @@ function renderScene(spec) {
   renderer.getCamera().on("updated", () => {
     applySemanticZoom();
     scheduleCameraWrite();
+    // Sigma repaints a camera move without emitting `afterRender`, so an
+    // overlay bound only to that event keeps the outlines wherever the nodes
+    // used to be: the shapes stop following the graph and pile up wherever the
+    // last full render happened to leave them.
+    scheduleOverlay();
   });
   renderer.on("afterRender", drawGrammar);
+  window.addEventListener("resize", scheduleOverlay);
   fitScene();
   applySemanticZoom();
   renderSceneStatus(spec);
@@ -1545,16 +1546,6 @@ function renderScene(spec) {
 // Shapes are outlines around the node sigma already drew, not replacements, so
 // a small radius error degrades to a slightly loose ring rather than a wrong
 // picture.
-const KIND_SHAPE = {
-  file: "square",
-  doc: "diamond",
-  endpoint: "hexagon",
-  schema: "square",
-  database_table: "square",
-  infra_resource: "triangle",
-  struct: "diamond",
-  interface: "triangle",
-};
 // `calls` is the common case and stays solid; everything else is
 // distinguishable without reading a legend.
 const REL_DASH = {
@@ -1585,30 +1576,16 @@ function discardOverlay() {
   overlayCanvas = null;
 }
 
-function drawShape(context, shape, x, y, radius) {
-  context.beginPath();
-  if (shape === "square") {
-    context.rect(x - radius, y - radius, radius * 2, radius * 2);
-  } else if (shape === "diamond") {
-    context.moveTo(x, y - radius);
-    context.lineTo(x + radius, y);
-    context.lineTo(x, y + radius);
-    context.lineTo(x - radius, y);
-    context.closePath();
-  } else if (shape === "triangle") {
-    context.moveTo(x, y - radius);
-    context.lineTo(x + radius, y + radius * 0.8);
-    context.lineTo(x - radius, y + radius * 0.8);
-    context.closePath();
-  } else {
-    for (let corner = 0; corner < 6; corner++) {
-      const angle = (Math.PI / 3) * corner - Math.PI / 2;
-      const point = [x + Math.cos(angle) * radius, y + Math.sin(angle) * radius];
-      corner === 0 ? context.moveTo(point[0], point[1]) : context.lineTo(point[0], point[1]);
-    }
-    context.closePath();
-  }
-  context.stroke();
+let overlayFrame = null;
+
+/// Coalesces overlay redraws into one per animation frame. A camera move emits
+/// many `updated` events per frame and the overlay only has to be right once.
+function scheduleOverlay() {
+  if (overlayFrame !== null) return;
+  overlayFrame = requestAnimationFrame(() => {
+    overlayFrame = null;
+    drawGrammar();
+  });
 }
 
 function drawGrammar() {
@@ -1626,9 +1603,8 @@ function drawGrammar() {
   const context = canvas.getContext("2d");
   // Clear the whole backing store in device pixels, with no transform in
   // effect. Clearing in CSS pixels under a scaled transform only covers the
-  // canvas while the transform and the backing size agree; when they drift the
-  // uncleared band keeps every ring drawn into it and the leftovers stack up
-  // into a rosette.
+  // canvas while the transform and the backing size agree; when they drift,
+  // whatever was drawn into the uncleared band stays on screen.
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.setTransform(scale, 0, 0, scale, 0, 0);
@@ -1655,28 +1631,6 @@ function drawGrammar() {
   }
 
   context.setLineDash([]);
-  context.lineWidth = 1.4;
-  for (const key of scene.nodes()) {
-    const attributes = scene.getNodeAttributes(key);
-    const kind = attributes._node && attributes._node.kind;
-    const shape = KIND_SHAPE[kind];
-    if (!shape) continue;
-    const reduced = nodeReducer(key, attributes);
-    if (reduced.hidden) continue;
-    const display = renderer.getNodeDisplayData(key);
-    if (!display) continue;
-    // The ring has to hug the circle sigma actually drew. It used to be
-    // floored at a fixed radius, so a node too small to see still got a full
-    // sized outline: a stray diamond floating in open space, with nothing
-    // inside it and nothing to click, because sigma's hit area is the real
-    // node. Below a couple of pixels the shape carries no information anyway,
-    // so it is not drawn.
-    const drawn = renderer.scaleSize(display.size);
-    if (drawn < MIN_SHAPE_RADIUS) continue;
-    const point = renderer.graphToViewport(display);
-    context.strokeStyle = reduced.color || attributes.color;
-    drawShape(context, shape, point.x, point.y, Math.min(drawn, MAX_SHAPE_RADIUS) + 2.5);
-  }
 }
 
 function fitScene() {

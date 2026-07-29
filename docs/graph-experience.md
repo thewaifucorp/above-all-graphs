@@ -403,15 +403,15 @@ screen, so none of them asks for that.
   find: two equally short routes are two different answers, and showing one
   silently is showing half the truth. The primary route is drawn heavier so the
   alternatives are distinguishable without a legend.
-- **The visual grammar has its missing channels.** Sigma's default programs
+- **The visual grammar gained a relation channel.** Sigma's default programs
   draw circles and solid lines, so node kind lived only in a label glyph and
   relation kind only in a hue. A 2D canvas pinned over the WebGL layers, redrawn
-  after each sigma frame, now adds an outline shape per node kind (file and
-  table square, doc and struct diamond, endpoint hexagon, interface and infra
-  triangle) and a dash pattern per relation kind (`calls` stays solid;
-  imports, inherits, implements, explains, and references each get their own).
-  Measured with the overlay redrawing every frame while panning: 60.7 fps on a
-  31-node scene and 60.7 fps on a 423-node one, worst frame 17 ms in both.
+  after each sigma frame, adds a dash pattern per relation kind (`calls` stays
+  solid; imports, inherits, implements, explains, and references each get their
+  own). Measured with the overlay redrawing every frame while panning: 60.7 fps
+  on a 31-node scene and 60.7 fps on a 423-node one, worst frame 17 ms in both.
+  It also drew an outline shape per node kind; that half was removed later, for
+  the reasons in the second pass log below.
 - **Layout cache** in `localStorage`, keyed by scene shape and force settings,
   so a reload or a return from another mode lands on the same picture. A
   changed node set invalidates rather than partially reusing.
@@ -454,13 +454,11 @@ CI with everything else.
 - Overview at 146 modules is still a lot of small aggregates; the fold
   threshold and an "others" bucket want revisiting, and the outermost aggregate
   can sit partly off-screen.
-- Node kind is carried by a label glyph and relation kind by hue plus width,
-  because sigma's default programs draw circles and plain lines. The shape and
-  dash grammar in the specification above needs custom WebGL programs.
-- The grammar overlay draws an outline ring around the node sigma already drew,
-  sized from `size / camera ratio`. That is an approximation: a small error
-  reads as a slightly loose ring rather than a wrong shape, but it is not a
-  replacement for a custom node program.
+- Node kind is carried by a label glyph only. The shape grammar in the
+  specification above needs a custom WebGL node program: an overlay ring cannot
+  be made to sit on the circle, because the radius sigma draws is decided inside
+  its shader and every reconstruction of it from outside drifted (see the second
+  pass log below). Relation kind has both a hue and a dash.
 
 ### Landed: the second pass over what the redesign lost
 
@@ -517,12 +515,16 @@ first pass either dropped or never wired to a control anyone could find.
 - **The wiki link looked like a stray hyperlink** wedged between buttons: it
   carried the header's `hbtn` class inside a panel that styles only `button`.
   The action row now styles its anchor like its buttons.
-- **Kind outlines no longer balloon.** The overlay ring was floored at a fixed
-  radius and scaled with `1 / sqrt(zoom)` without limit, so a node too small to
-  see still got a full sized outline, and diving the camera in grew every ring
-  until neighbouring ones overlapped into a rosette that reads as a rendering
-  fault. The ring now takes the node's own drawn radius, is skipped below 2.5
-  px, and is clamped at 16 px.
+- **The kind outline channel is gone.** Reproducing sigma's node radius from
+  outside its shader never lined up: the ring was floored at a fixed radius, so
+  a node too small to see still got a full sized outline floating in open space
+  and not clickable; sized from `renderer.scaleSize` it used a ratio cached at
+  refresh time, so a camera-only repaint left the outlines describing the
+  previous zoom and they stopped following the graph; and matching the shader's
+  own `size / sqrt(ratio)` still came out about a fifth short of the circle
+  sigma drew. The channel was also redundant — the label already opens with a
+  kind glyph. The dash-per-relation channel stays: it is drawn from endpoint
+  positions through `graphToViewport`, which is exact.
 - **The overlay is cleared in device pixels** with no transform in effect, and
   is discarded together with the renderer that drew it. Clearing in CSS pixels
   under a scaled transform only covers the canvas while the transform and the
