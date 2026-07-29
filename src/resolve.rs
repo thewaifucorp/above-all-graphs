@@ -998,11 +998,7 @@ fn decode_inherit(owner: &str, target: &str) -> Option<InheritRef> {
 /// # Errors
 /// Returns an error when the changed file cannot be parsed or the graph cannot be updated.
 pub fn index_file(graph: &Graph, root: &Path, file: &Path) -> Result<IndexSummary> {
-    let relative = file
-        .strip_prefix(root)
-        .unwrap_or(file)
-        .to_string_lossy()
-        .replace('\\', "/");
+    let relative = repo_relative(root, file);
     // A manifest declares import aliases for the whole repository, so an edit
     // to one can change how any file resolves. That is the one case where the
     // cheap path is wrong, and it takes the full pass.
@@ -1044,6 +1040,25 @@ pub fn index_file(graph: &Graph, root: &Path, file: &Path) -> Result<IndexSummar
         touched.extend(graph.names_in_file(&relative)?);
         rebuild_resolved_edges_scoped(graph, &relative, &touched)
     })
+}
+
+/// One file's path as the graph spells it: relative to the repository root, with
+/// forward slashes.
+///
+/// Both sides are canonicalized first. The hooks hand `aag sync` an absolute
+/// path while `--path` defaults to `.`, and `Path::strip_prefix` is a literal
+/// component match: `/home/me/repo/src/x.rs` does not start with `.`, so the
+/// strip failed and the file was indexed under its absolute path. That silently
+/// duplicated the whole repository — every symbol once under `src/x.rs` from the
+/// full pass and again under `/home/me/repo/src/x.rs` from the next hook.
+fn repo_relative(root: &Path, file: &Path) -> String {
+    let rooted = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let target = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    target
+        .strip_prefix(&rooted)
+        .unwrap_or(&target)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Re-resolves only what the edit could have changed: the edited file's own
@@ -2698,5 +2713,50 @@ mod tests {
                 .any(|(caller, _, _)| caller.name == "go");
             assert_eq!(called_by_go, node.file_path == "engine.js");
         }
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::repo_relative;
+    use std::{fs, path::PathBuf};
+
+    fn scratch() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aag-relpath-{}", std::process::id()));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src").join("x.rs"), "pub fn x() {}").unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_absolute_file_under_a_dot_root_still_lands_on_the_relative_path() {
+        // What the hooks do: absolute file, `--path .`. Getting this wrong
+        // indexed the repository twice, once under each spelling.
+        let root = scratch();
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let relative = repo_relative(&PathBuf::from("."), &root.join("src").join("x.rs"));
+        std::env::set_current_dir(previous).unwrap();
+        assert_eq!(relative, "src/x.rs");
+    }
+
+    #[test]
+    fn a_relative_file_under_an_absolute_root_lands_on_the_same_path() {
+        let root = scratch();
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let relative = repo_relative(&root, &PathBuf::from("src/x.rs"));
+        std::env::set_current_dir(previous).unwrap();
+        assert_eq!(relative, "src/x.rs");
+    }
+
+    #[test]
+    fn a_file_outside_the_repository_keeps_its_own_path() {
+        let root = scratch();
+        let outside = std::env::temp_dir().join("aag-relpath-outside.rs");
+        fs::write(&outside, "pub fn y() {}").unwrap();
+        let relative = repo_relative(&root, &outside);
+        assert!(relative.ends_with("aag-relpath-outside.rs"), "{relative}");
+        assert!(!relative.starts_with("src/"), "{relative}");
     }
 }
