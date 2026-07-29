@@ -1083,20 +1083,31 @@ function pathSpec() {
   if (from.id === to.id) {
     return { layout: "layered", items: [], edges: [], omitted: 0, empty: "Source and target are the same node." };
   }
-  const routes = shortestPaths(from.id, to.id, 4, State.undirected);
+  // Asking for a path between two symbols should answer with a path. Following
+  // the arrows is the better answer when one exists, so it is tried first, but
+  // failing to find one is not a reason to show an empty canvas: the walk falls
+  // back to ignoring direction and says that it did. Only a pair with no
+  // connection at all gets nothing, which is the one case where nothing is the
+  // honest answer.
+  let routes = shortestPaths(from.id, to.id, 4, false);
+  let ignoredDirection = false;
+  if (!routes.length && !State.arrowsOnly) {
+    routes = shortestPaths(from.id, to.id, 4, true);
+    ignoredDirection = routes.length > 0;
+  }
   if (!routes.length) {
-    // Before reporting nothing, check whether direction is what is in the way.
-    // "There is no path" and "there is no path *following the arrows*" are
-    // different answers, and only one of them is actionable.
-    const either = State.undirected ? [] : shortestPaths(from.id, to.id, 1, true);
+    const either = State.arrowsOnly ? shortestPaths(from.id, to.id, 1, true) : [];
+    const stranded = [from, to].filter((node) => !(neighborsOf.get(node.id) || new Set()).size);
     return {
       layout: "layered",
       items: [],
       edges: [],
       omitted: 0,
       empty: either.length
-        ? `No directed path from ${from.name} to ${to.name}, but they are connected in ${either[0].length} hops if direction is ignored — turn on "any direction".`
-        : `No path from ${from.name} to ${to.name} under the current filters${State.undirected ? "" : ", in either direction"}.`,
+        ? `No path following the arrows, but ${from.name} and ${to.name} are connected in ${either[0].length} hops if direction is ignored — switch to "any direction".`
+        : stranded.length
+          ? `${stranded.map((node) => node.name).join(" and ")} ${stranded.length > 1 ? "have" : "has"} no edges at all in this graph, so no path can reach ${stranded.length > 1 ? "them" : "it"}.`
+          : `${from.name} and ${to.name} are in unconnected parts of the graph under the current filters.`,
     };
   }
   const layerOf = new Map([[from.id, 0]]);
@@ -1138,11 +1149,11 @@ function pathSpec() {
     caption: [
       `${routes[0].length} hops`,
       routes.length > 1 ? `${routes.length} equally short routes` : null,
-      State.undirected ? "any direction" : null,
-      State.undirected && routes.some((chain) => chain.some((step) => step.reversed)) ? "walks some edges backwards" : null,
+      ignoredDirection ? "no route follows the arrows — showing one that ignores direction" : null,
     ]
       .filter(Boolean)
       .join(" · "),
+    ignoredDirection,
     routes,
   };
 }
@@ -1544,15 +1555,125 @@ function layoutKey(spec) {
   return `aag-layout:${spec.layout}:${spec.items.length}:${(hash >>> 0).toString(36)}:${settings.repulsion},${settings.gravity},${settings.cluster}`;
 }
 
-function cachedLayout(spec) {
+/// Runs the layout off the main thread when the browser lets us.
+///
+/// The page is one self-contained file, so the worker source is assembled from
+/// the layout functions themselves — `Function.prototype.toString` rather than a
+/// second copy of the physics, which would drift. A blob worker is refused from
+/// an opaque `file://` origin in some browsers; construction is attempted once
+/// and every failure falls back to laying out on the main thread, which is
+/// slower to the eye but never wrong.
+let layoutWorker;
+let layoutWorkerBroken = false;
+let layoutJob = 0;
+const layoutJobs = new Map();
+
+function layoutWorkerSource() {
+  const parts = [
+    `const BARNES_HUT_THETA = ${BARNES_HUT_THETA};`,
+    `const QUADTREE_MAX_DEPTH = ${QUADTREE_MAX_DEPTH};`,
+    "let settings = {};",
+    buildQuadtree.toString(),
+    makeCell.toString(),
+    insertPoint.toString(),
+    childFor.toString(),
+    repel.toString(),
+    separate.toString(),
+    forceLayout.toString(),
+    layeredLayout.toString(),
+    `self.onmessage = (event) => {
+      const job = event.data;
+      settings = job.settings;
+      try {
+        const positions =
+          job.layout === "layered" ? layeredLayout(job.items) : forceLayout(job.items, job.edges);
+        const flat = {};
+        for (const [key, point] of positions) flat[key] = [point.x, point.y];
+        self.postMessage({ id: job.id, flat });
+      } catch (error) {
+        self.postMessage({ id: job.id, error: String(error) });
+      }
+    };`,
+  ];
+  return parts.join("\n");
+}
+
+function ensureLayoutWorker() {
+  if (layoutWorker || layoutWorkerBroken) return layoutWorker;
+  try {
+    const blob = new Blob([layoutWorkerSource()], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    layoutWorker = new Worker(url);
+    URL.revokeObjectURL(url);
+    layoutWorker.onmessage = (event) => {
+      const pending = layoutJobs.get(event.data.id);
+      if (!pending) return;
+      layoutJobs.delete(event.data.id);
+      pending(event.data.error ? null : event.data.flat);
+    };
+    layoutWorker.onerror = () => {
+      // One failure is enough: tear it down and stay on the main thread rather
+      // than retrying per render.
+      layoutWorkerBroken = true;
+      for (const [, pending] of layoutJobs) pending(null);
+      layoutJobs.clear();
+      layoutWorker.terminate();
+      layoutWorker = null;
+    };
+  } catch (error) {
+    void error;
+    layoutWorkerBroken = true;
+    layoutWorker = null;
+  }
+  return layoutWorker;
+}
+
+/// Below this many nodes the round trip through a worker costs more than the
+/// layout itself, and a scene that pops in one frame beats one that arrives a
+/// tick later.
+const WORKER_LAYOUT_FLOOR = 300;
+
+/// The layout for a scene, from cache when it is there, off-thread when that is
+/// worth it, on the main thread otherwise.
+async function layoutFor(spec) {
+  if (!spec.items.length) return new Map();
   const key = layoutKey(spec);
+  const stored = readLayoutCache(key);
+  if (stored) return stored;
+  const worker = spec.items.length >= WORKER_LAYOUT_FLOOR ? ensureLayoutWorker() : null;
+  if (worker) {
+    const id = ++layoutJob;
+    const flat = await new Promise((resolve) => {
+      layoutJobs.set(id, resolve);
+      worker.postMessage({
+        id,
+        layout: spec.layout,
+        settings: { ...settings },
+        // Only what the physics reads: keys, sizes, layer hints, endpoints.
+        items: spec.items.map((item) => ({ key: item.key, size: item.size, _layer: item._layer })),
+        edges: spec.edges.map((edge) => ({ from: edge.from, to: edge.to })),
+      });
+    });
+    if (flat) {
+      const positions = new Map(Object.entries(flat).map(([id2, value]) => [id2, { x: value[0], y: value[1], r: 6 }]));
+      writeLayoutCache(key, positions);
+      return positions;
+    }
+  }
+  return cachedLayout(spec);
+}
+
+function readLayoutCache(key) {
   try {
     const stored = JSON.parse(localStorage.getItem(key) || "null");
     if (stored) return new Map(Object.entries(stored).map(([id, value]) => [id, { x: value[0], y: value[1], r: 6 }]));
   } catch (error) {
     void error;
   }
-  const positions = spec.layout === "layered" ? layeredLayout(spec.items) : forceLayout(spec.items, spec.edges);
+  return null;
+}
+
+function writeLayoutCache(key, positions) {
   try {
     const flat = {};
     for (const [id, point] of positions) flat[id] = [Math.round(point.x * 100) / 100, Math.round(point.y * 100) / 100];
@@ -1560,6 +1681,14 @@ function cachedLayout(spec) {
   } catch (error) {
     void error; // a full quota is not a reason to fail a render
   }
+}
+
+function cachedLayout(spec) {
+  const key = layoutKey(spec);
+  const stored = readLayoutCache(key);
+  if (stored) return stored;
+  const positions = spec.layout === "layered" ? layeredLayout(spec.items) : forceLayout(spec.items, spec.edges);
+  writeLayoutCache(key, positions);
   return positions;
 }
 
@@ -1621,7 +1750,16 @@ function applySemanticZoom() {
   }
 }
 
-function renderScene(spec) {
+/// Every render takes a ticket. An off-thread layout can land after the user has
+/// already switched modes, and a stale scene overwriting the current one is
+/// worse than a slow one.
+let renderTicket = 0;
+
+async function renderScene(spec) {
+  const ticket = ++renderTicket;
+  const positions = await layoutFor(spec);
+  if (ticket !== renderTicket) return;
+
   sceneSpec = spec;
   sceneOmitted = spec.omitted || 0;
   scene = new graphology.Graph({ multi: true, type: "directed" });
@@ -1633,7 +1771,6 @@ function renderScene(spec) {
     if (!scene.hasNode(edge.from) || !scene.hasNode(edge.to)) continue;
     scene.addEdgeWithKey(edge.key, edge.from, edge.to, edge);
   }
-  const positions = spec.items.length ? cachedLayout(spec) : new Map();
   for (const key of scene.nodes()) {
     const point = positions.get(key) || { x: 0, y: 0 };
     scene.mergeNodeAttributes(key, { x: point.x, y: point.y });
@@ -1841,6 +1978,9 @@ function renderSceneStatus(spec) {
   empty.hidden = !spec.empty;
   if (spec.empty) empty.textContent = spec.empty;
   if (spec.omitted) notice(`Scene capped at ${MAX_SCENE_NODES} nodes — ${spec.omitted} more are hidden. Narrow the depth or filters to see them.`);
+  if (spec.ignoredDirection) {
+    notice("No route follows the arrows between these two, so this path walks some edges backwards. Switch to \u201carrows only\u201d to refuse that.");
+  }
 }
 
 // --- Panels -----------------------------------------------------------------
@@ -2460,7 +2600,7 @@ const State = {
   conf: null,
   kind: null,
   pins: new Set(),
-  undirected: false,
+  arrowsOnly: false,
   cam: null,
 };
 
@@ -2496,7 +2636,7 @@ function readUrl() {
   State.conf = parseSet(query.get("conf"), (value) => value.toUpperCase());
   State.kind = parseSet(query.get("kind"));
   State.pins = parseSet(query.get("pin"), Number) || new Set();
-  State.undirected = query.get("dir") === "any";
+  State.arrowsOnly = query.get("dir") === "arrows";
   const cam = query.get("cam");
   if (cam) {
     const [x, y, ratio] = cam.split(",").map(Number);
@@ -2520,7 +2660,7 @@ function writeUrl(push) {
   if (State.conf) query.set("conf", [...State.conf].join(","));
   if (State.kind) query.set("kind", [...State.kind].join(","));
   if (State.pins.size) query.set("pin", [...State.pins].join(","));
-  if (State.undirected) query.set("dir", "any");
+  if (State.arrowsOnly) query.set("dir", "arrows");
   if (State.cam) query.set("cam", `${State.cam.x.toFixed(4)},${State.cam.y.toFixed(4)},${State.cam.ratio.toFixed(4)}`);
   const url = `${location.pathname}?${query.toString()}`;
   // A mode or focus change is a navigation; a filter tweak is not, or the back
@@ -2846,8 +2986,9 @@ function renderModeControls() {
       `<label>to <input id="ctl-to" type="text" list="node-names" value="${escapeHtml(name(State.to))}" placeholder="symbol or file"></label>`,
       `<button id="ctl-to-sel" title="use the selected node">&#8593;</button>`,
       `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`,
-      `<button id="ctl-dir" aria-pressed="${State.undirected}" title="follow edge direction, or ignore it">` +
-        `${State.undirected ? "any direction" : "following arrows"}</button>`
+      `<button id="ctl-dir" aria-pressed="${!State.arrowsOnly}" ` +
+        `title="fall back to ignoring edge direction when no route follows the arrows, or refuse to">` +
+        `${State.arrowsOnly ? "arrows only" : "any direction"}</button>`
     );
   }
   if (State.mode === "overview") {
@@ -2887,7 +3028,7 @@ function renderModeControls() {
     ?.addEventListener("click", () => setState({ from: State.to, to: State.from }, { push: true }));
   document
     .getElementById("ctl-dir")
-    ?.addEventListener("click", () => setState({ undirected: !State.undirected }, { push: true }));
+    ?.addEventListener("click", () => setState({ arrowsOnly: !State.arrowsOnly }, { push: true }));
 
   document.getElementById("ctl-expand-all")?.addEventListener("click", () => {
     const all = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0);
@@ -2944,7 +3085,10 @@ function applyState() {
   if (State.focus && !resolveFocus(State.focus)) {
     notice(`No node named "${State.focus}" in this graph.`);
   }
-  renderScene((SPEC_BUILDERS[State.mode] || overviewSpec)());
+  renderScene((SPEC_BUILDERS[State.mode] || overviewSpec)()).catch((error) => {
+    // A render that throws must not take the rest of the page with it.
+    notice(`Could not draw this view: ${error}`);
+  });
   markTreeActive();
 }
 

@@ -577,6 +577,37 @@ first pass either dropped or never wired to a control anyone could find.
   and "no path following the arrows, but one hop if you ignore them" are
   different answers. Hops walked against an edge are marked in the caption.
 
+### Landed: layout off the main thread, and a path search that answers
+
+- **The layout runs in a worker.** 1.4 s at bastion's size was a tab frozen for
+  1.4 s. The worker source is assembled from the layout functions themselves via
+  `Function.prototype.toString`, not a second copy of the physics that would
+  drift, and only what the physics reads crosses the boundary: keys, sizes, layer
+  hints, endpoints. Scenes under 300 nodes stay on the main thread, where the
+  round trip costs more than the work.
+
+  A blob worker is refused from an opaque origin in some browsers, so
+  construction is attempted once and any failure — construction or runtime —
+  falls back to laying out on the main thread permanently. Verified over `http://`
+  (615 ms for the 1685-node expand-all, against 3058 ms before), from `file://`
+  (586 ms, no console errors), and with `window.Worker` sabotaged to throw
+  (499 ms, no page errors, same picture).
+
+  Renders take a ticket: an off-thread layout can land after the reader has
+  already switched modes, and a stale scene overwriting the current one is worse
+  than a slow one.
+
+- **Path answers with a path.** Following the arrows is still tried first,
+  because it is the better answer when it exists, but failing to find one is no
+  longer a reason to show an empty canvas. The search falls back to ignoring
+  direction, draws that route, and says so — in the caption, and once in the
+  notice. `arrows only` (`?dir=arrows`) refuses the fallback for readers who want
+  the strictly directed answer.
+
+  Nothing is drawn only when nothing connects the two, and that message
+  distinguishes the two ways it happens: an endpoint with no edges at all is
+  named as such, otherwise they are in unconnected parts of the graph.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),
