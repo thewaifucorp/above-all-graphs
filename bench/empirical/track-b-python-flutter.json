@@ -1,5 +1,5 @@
 {
-  "track": "B: engine extraction (entities, Python only)",
+  "track": "B: engine extraction (entities and calls, Python only)",
   "oracle": "CPython ast",
   "repository": "flutter",
   "revision": "00b0c91f06209d9e4a41f71b7a512d6eb3b9c694",
@@ -35,5 +35,15 @@
     "precision": 1.0,
     "recall": 0.9963,
     "f1": 0.9982
+  },
+  "calls": {
+    "truth": 620,
+    "found": 622,
+    "true_positives": 614,
+    "false_positives": 8,
+    "false_negatives": 6,
+    "precision": 0.9871,
+    "recall": 0.9903,
+    "f1": 0.9887
   }
 }

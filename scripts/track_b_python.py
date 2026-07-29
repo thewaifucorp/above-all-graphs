@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Track B, entity extraction, measured against an independent oracle.
+"""Track B, extraction quality, measured against an independent oracle.
 
 The evaluation contract asks for entity precision and recall per type, and
 warns that ground truth authored by whoever wrote the extractor proves
@@ -8,10 +8,12 @@ uses CPython's own ``ast`` module as the oracle. That parser was written by
 someone else, for another purpose, and is the definition of what a Python
 function or class is.
 
-It measures one language and one thing — did the engine find the declarations
-that exist — which is a slice of Track B, not Track B. Relationship precision,
-resolution ambiguity, contract matching, and impact accuracy all still need
-ground truth nobody here can supply honestly.
+It measures two things in one language: did the engine find the declarations
+that exist, and did it find the calls between them. Both are compared at name
+level, because the oracle cannot resolve a receiver's type any better than the
+engine can and a finer comparison would measure the comparison. Contract
+matching, impact false positives, and affected-test accuracy are not covered
+here.
 
 Usage:
 
@@ -75,6 +77,58 @@ def oracle(repo: pathlib.Path, files: list[str]) -> tuple[set, set, list[str]]:
             elif isinstance(node, ast.ClassDef):
                 classes.add((relative, node.name))
     return functions, classes, unparsable
+
+
+def oracle_calls(repo: pathlib.Path, files: list[str], defined: set[str]) -> set:
+    """`(caller name, callee name)` pairs CPython sees, restricted to callees
+    the repository itself defines.
+
+    Name level on both sides: the oracle cannot resolve a receiver's type any
+    better than the engine can, so comparing anything finer would measure the
+    comparison rather than the engine.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for relative in files:
+        try:
+            tree = ast.parse((repo / relative).read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call):
+                    continue
+                target = inner.func
+                callee = (
+                    target.id
+                    if isinstance(target, ast.Name)
+                    else target.attr
+                    if isinstance(target, ast.Attribute)
+                    else None
+                )
+                if callee and callee in defined and callee != node.name:
+                    pairs.add((node.name, callee))
+    return pairs
+
+
+def engine_calls(database: pathlib.Path, files: set[str]) -> set:
+    """`(caller name, callee name)` pairs the engine resolved, for Python."""
+    connection = sqlite3.connect(str(database))
+    pairs = set()
+    for caller, caller_file, callee, callee_file in connection.execute(
+        """
+        SELECT src.name, src.file_path, dst.name, dst.file_path
+        FROM edges
+        JOIN nodes src ON src.id = edges.src
+        JOIN nodes dst ON dst.id = edges.dst
+        WHERE edges.kind = 'calls'
+        """
+    ):
+        if caller_file in files and callee_file in files:
+            pairs.add((caller, callee))
+    connection.close()
+    return pairs
 
 
 def engine(database: pathlib.Path, files: set[str]) -> tuple[set, set]:
@@ -142,7 +196,7 @@ def main() -> int:
     found_functions, found_classes = engine(arguments.database, measured)
 
     report = {
-        "track": "B: engine extraction (entities, Python only)",
+        "track": "B: engine extraction (entities and calls, Python only)",
         "oracle": "CPython ast",
         "repository": arguments.repo.resolve().name,
         "revision": subprocess.run(
@@ -161,6 +215,13 @@ def main() -> int:
     report["all_entities"] = score(
         truth_functions | truth_classes, found_functions | found_classes
     )
+
+    # Relationships, same oracle, same restriction: only callees this
+    # repository defines, compared at name level on both sides.
+    defined_names = {name for _, name in truth_functions | truth_classes}
+    truth_calls = oracle_calls(arguments.repo, sorted(measured), defined_names)
+    found_calls = engine_calls(arguments.database, measured)
+    report["calls"] = score(truth_calls, found_calls)
 
     print(json.dumps(report, indent=2))
     for label, truth, found in (

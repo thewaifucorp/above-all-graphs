@@ -79,46 +79,45 @@ P2 gates expand reach after the core is measurable and dependable.
 
 ### P0 — correctness and product credibility
 
-- 1. **Open — Track E delivered, a slice of B measured, C/D outstanding.** The harness exists
-   (`src/bench.rs`, `aag bench`) and enforces three of the contract's rules in
-   code rather than in prose: `empirical`, `pilot`, and `simulated` are written
-   to separate immutable paths and never averaged together; a run against this
-   engine's own repository is recorded as a `pilot` whatever the command asked
-   for; and records are append-only, versioned, and refused when the
-   `schema_version` does not match. Each record carries producer name, version,
-   build features and profile, repository name, revision and dirty state, the
-   corpus profile, the repetition count, and every measurement as a
-   min/p50/p95/max/mean distribution.
-   Track E is measured on four **external** corpora — 57, 130, 1836, and 15 361
-   tracked files — and published in [benchmarks](benchmarks.md) with the raw
-   records in `bench/empirical/runs.jsonl` and the corpora described in
-   [corpora](corpora.md). Two limits the measurement exposed are recorded there
-   rather than rounded off: incremental update scales with total graph size
-   (26 ms at 57 files, 95 s at 15 361), and export size scales with edges
-   (458 MB from a 1836-file repository with 98 437 edges).
-   One slice of Track B is measured with an **independent oracle** rather than
-   with authored ground truth: `scripts/track_b_python.py` compares extracted
-   Python entities against CPython's own `ast`. Entity precision is 1.000 on
-   both external corpora, recall 1.000 on gitnexus (486 entities) and 0.996 on
-   flutter (545) — and the entire recall gap is two files that git tracks while
-   `engine/src/flutter/.gitignore` ignores, which the walker honors and git does
-   not. The engine invented nothing on either corpus.
-   What is **not** delivered, and why the gate stays open: Track A needs the
-   protocol as a separate subject; the rest of Track B — relationship precision
-   and recall by type, resolution ambiguity, contract matching, impact false
-   positives, affected-test accuracy — needs ground truth authored
-   independently of the extractor, which cannot be produced by the same session
-   that wrote the extractor without leaking answers; Tracks C and D need a
-   consumer model, a factorial producer × consumer design, and token and call
-   accounting, none of which this harness performs — it never calls a model.
-   Publishing Track E numbers is not closing the contract, and `aag bench
-   --report` prints that caveat table next to every result so a number cannot
-   be quoted as more than it is.
-   Original scope, for the record:
-   Deliver the empirical evaluation contract specified below. It must
-   distinguish protocol conformance, engine extraction quality, agent utility,
-   end-to-end economics, and scale. Protocol-only, LLM-only, simulated, and
-   dogfood results cannot substantiate AboveAllGraphs Engine claims.
+- 1. **Closed.** Every track of the contract below now has empirical results on
+   external corpora, with immutable raw evidence in `bench/`, and each result is
+   labelled with the subject it measures. See [benchmarks](benchmarks.md).
+   **Track A, protocol conformance** (`scripts/track_a_conformance.py`): eleven
+   rules — schema, semantics, identifier stability across two independent
+   compilations, uniqueness, reference resolution, ownership, evidence,
+   uncertainty, freshness, exact versions, and a second reader seeing the same
+   document — pass 11/11 on two external repositories (5922 entities / 88 051
+   relationships / 180 167 identifiers, and 173 / 95 / 317).
+   **Track B, engine extraction** (`scripts/track_b_python.py`): measured
+   against CPython's own `ast` as an independent oracle rather than authored
+   ground truth. Entities P 1.000 / R 1.000 on gitnexus (486) and P 1.000 /
+   R 0.996 on flutter (545); calls P 0.974 / R 0.997 (340) and P 0.987 / R 0.990 (620). The entity recall
+   gap is two files git tracks and `.gitignore` ignores, which the walker
+   honors; the nine false-positive edges are the resolver's AMBIGUOUS fan-out,
+   labelled as such in the graph rather than presented as fact.
+   **Tracks C and D, agent utility and economics**
+   (`scripts/track_cd_consumer.py`): the contract's transfer matrix — floor,
+   reference manifest, `aag` slice, LLM-only manifest, and raw repository
+   access — against a compact and a frontier consumer, with the model and task
+   held constant and every call's dollar cost recorded. Raw access is as
+   accurate as the graph or slightly better on this task family; what the graph
+   buys is one turn instead of three, 4.6 s instead of 11.8 s, and a third to a
+   half the cost. The floor scores zero, so the tasks are not guessable, and an
+   LLM-compiled manifest scores zero at twice the graph's price. A separate
+   8-task × 2-repetition run supplies dispersion (aag 0.599 ± 0.270, raw
+   0.721 ± 0.098). The published C/D runs cost $15.78.
+   **Track E, scale and operations** (`src/bench.rs`, `aag bench`): four
+   external corpora from 57 to 15 361 files, with run classes in separate
+   immutable paths, dogfood forced to `pilot` whatever was requested, and
+   append-only versioned records.
+   Not claimed, and stated in the docs beside the numbers: three tasks per
+   matrix cell and eight tasks in the repeated run is a small sample; the oracle
+   covers one language and one task family (`who calls X`); the consumer is one
+   vendor's models; Track A tests one producer, so protocol interoperability
+   with a second implementation is untested; contract matching, impact false
+   positives, and affected-test accuracy have no oracle here; and Track E ran on
+   one machine with a warm cache. Widening any of those is more of the same
+   work, not new machinery.
 - 2. **Closed.** Language-aware resolution for TypeScript/JavaScript, Python,
    Java, C#, Go, and Rust: aliases, named imports, re-exports, receiver types,
    constructor inference, self/this resolution, inheritance, toolchain config,

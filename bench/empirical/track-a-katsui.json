@@ -1,0 +1,27 @@
+{
+  "track": "A: protocol conformance",
+  "run_kind": "empirical",
+  "repository": "katsui",
+  "revision": "43d2842eda4f178299cd6efd5b544158baaa7e4d",
+  "manifest_version": "0.2.0-proposal",
+  "generator_version": "0.2.0",
+  "entities": 173,
+  "relationships": 95,
+  "identifiers": 317,
+  "rules": {
+    "schema_valid": true,
+    "semantics_valid": true,
+    "identifiers_stable": true,
+    "identifiers_unique": true,
+    "references_resolve": true,
+    "ownership_preserved": true,
+    "evidence_present": true,
+    "uncertainty_present": true,
+    "freshness_declared": true,
+    "versions_exact": true,
+    "consumer_roundtrip": true
+  },
+  "passed": 11,
+  "total": 11,
+  "diagnostic": ""
+}
