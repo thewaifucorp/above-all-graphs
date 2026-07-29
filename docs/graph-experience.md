@@ -462,6 +462,43 @@ CI with everything else.
   reads as a slightly loose ring rather than a wrong shape, but it is not a
   replacement for a custom node program.
 
+### Landed: the second pass over what the redesign lost
+
+Five complaints from using the page on this repository, all of them things the
+first pass either dropped or never wired to a control anyone could find.
+
+- **Module labels are unique.** `community_label` names a community after the
+  directory its members share, so four communities inside `src/` all came out
+  as `src/` and the legend named nothing. The largest keeps the bare directory
+  — it is what someone means by "the `src` module" — and the rest are
+  qualified by the file most of their symbols live in, falling back to the
+  community id when a vendored bundle splits across communities that share
+  both a directory and a dominant file.
+- **Clicking a module bubble opens it.** Expand-in-place existed but was
+  reachable only through a button in the inspector, so the aggregate read as a
+  dead end. The click now toggles the expansion, and an **Expand all modules**
+  control in the Overview toolbar opens every one of them — the whole graph,
+  which is what the scene cap had made unreachable. Past 5000 nodes it warns
+  first: rendering everything is a deliberate expense, not a surprise.
+- **The sidebar is a tree again.** It had become a flat list of every file
+  sorted by symbol count, which is a search box with extra steps. Files are
+  grouped under their directory with per-directory totals, collapsible, with
+  the focused file's directory opened automatically.
+- **Source is one gesture away.** The status bar had promised "click node for
+  source" while the click opened the inspector instead. Double-click opens the
+  file at the symbol's lines, and the status bar says what the controls
+  actually do.
+- **Path endpoints are pickable.** Both fields are backed by a datalist of
+  node names, take the current selection through an arrow button, and swap.
+  Endpoint resolution stopped being exact-match-only: `bigbang` finds
+  `src/bigbang.rs`, case no longer decides whether a path resolves, and a
+  value that resolves to nothing stays in the field instead of silently
+  blanking.
+- **Long labels stopped drawing white bars.** Sigma renders labels on an
+  opaque plate, so a 78-character test function name became a bar across the
+  scene. Canvas labels truncate at 34 characters; the inspector and the search
+  results still show the real name.
+
 ### Definition of done
 
 Inherited verbatim from P0.3 in [capability coverage](capability-coverage.md),

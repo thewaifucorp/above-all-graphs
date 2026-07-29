@@ -25,7 +25,7 @@
 //! The wiki groups by file instead, which is a source of ground truth
 //! `crate::resolve` already has, not a heuristic guess.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -254,6 +254,99 @@ struct CommunitySummary {
     representatives: Vec<i64>,
 }
 
+/// Makes every community label unique.
+///
+/// Communities that share a directory share a label, and a module legend with
+/// four rows called `src/` tells a reader nothing about which is which. The
+/// largest community of a colliding group keeps the plain directory — it is
+/// what someone means by "the `src` module" — and each smaller one is
+/// qualified by the file most of it lives in.
+fn disambiguate_labels(
+    labels: &mut HashMap<i64, String>,
+    communities: &[crate::analysis::Community],
+    node_files: &HashMap<i64, &str>,
+) {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for label in labels.values() {
+        *counts.entry(label.as_str()).or_default() += 1;
+    }
+    let colliding: BTreeSet<String> = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(label, _)| label.to_string())
+        .collect();
+    if colliding.is_empty() {
+        return;
+    }
+    let size: HashMap<i64, usize> = communities
+        .iter()
+        .map(|community| (community.id, community.members.len()))
+        .collect();
+    let members: HashMap<i64, &[i64]> = communities
+        .iter()
+        .map(|community| (community.id, community.members.as_slice()))
+        .collect();
+
+    let mut taken: BTreeSet<String> = labels
+        .values()
+        .filter(|label| !colliding.contains(*label))
+        .cloned()
+        .collect();
+    for label in &colliding {
+        let mut group: Vec<i64> = labels
+            .iter()
+            .filter(|(_, value)| *value == label)
+            .map(|(id, _)| *id)
+            .collect();
+        // Largest first, id as the tie-break so the naming never depends on
+        // hash order.
+        group.sort_by_key(|id| (std::cmp::Reverse(size.get(id).copied().unwrap_or(0)), *id));
+        // Two communities can share a directory *and* a dominant file — a
+        // vendored bundle split across several communities does exactly that —
+        // so the qualified names are checked against every name already handed
+        // out, and whatever is still ambiguous falls back to the id, which
+        // cannot repeat.
+        taken.insert(label.clone());
+        for id in group.into_iter().skip(1) {
+            let file = members
+                .get(&id)
+                .map(|ids| dominant_file(ids, node_files))
+                .unwrap_or_default();
+            let mut qualified = if file.is_empty() {
+                format!("{label} #{id}")
+            } else {
+                format!("{label} ({file})")
+            };
+            if taken.contains(&qualified) {
+                qualified = format!("{label} ({file} #{id})");
+            }
+            taken.insert(qualified.clone());
+            labels.insert(id, qualified);
+        }
+    }
+}
+
+/// The file holding most of a community's symbols, without its directory —
+/// `storage.rs`, not `src/storage.rs`, because the directory is already in the
+/// label being qualified.
+fn dominant_file(members: &[i64], node_files: &HashMap<i64, &str>) -> String {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for member in members {
+        if let Some(path) = node_files.get(member) {
+            *counts.entry(path).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(path, count)| (*count, std::cmp::Reverse(*path)))
+        .map(|(path, _)| {
+            path.rsplit_once('/')
+                .map_or(path, |(_, file)| file)
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
 /// A human-meaningful name for a community: the deepest directory every
 /// member file shares, else the directory most members live in, else the most
 /// common file, else the numeric id. An opaque `community 41` tells a reader
@@ -479,6 +572,21 @@ fn summarize_communities(nodes: &[Node], edges: &[Edge]) -> (Vec<CommunitySummar
         }
     }
 
+    // Two communities in one directory would both be called `src/`, and a
+    // legend with four entries called `src/` names nothing. The biggest keeps
+    // the directory; the others are named after the file that holds most of
+    // them.
+    let mut labels: HashMap<i64, String> = communities
+        .iter()
+        .map(|community| {
+            (
+                community.id,
+                community_label(&community.members, &node_files),
+            )
+        })
+        .collect();
+    disambiguate_labels(&mut labels, &communities, &node_files);
+
     let summaries = communities
         .into_iter()
         .map(|community| {
@@ -491,7 +599,10 @@ fn summarize_communities(nodes: &[Node], edges: &[Edge]) -> (Vec<CommunitySummar
             });
             representatives.truncate(5);
             CommunitySummary {
-                label: community_label(&community.members, &node_files),
+                label: labels
+                    .get(&community.id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", community.id)),
                 internal_edges: internal.get(&community.id).copied().unwrap_or(0),
                 external_edges: external.get(&community.id).copied().unwrap_or(0),
                 entrypoints: u32::try_from(
@@ -1890,6 +2001,72 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn colliding_module_labels_are_disambiguated() {
+        let files: HashMap<i64, &str> = [
+            (1, "src/a.rs"),
+            (2, "src/a.rs"),
+            (3, "src/b.rs"),
+            (4, "src/c.rs"),
+        ]
+        .into_iter()
+        .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 7,
+                members: vec![1, 2],
+            },
+            crate::analysis::Community {
+                id: 9,
+                members: vec![3],
+            },
+            crate::analysis::Community {
+                id: 11,
+                members: vec![4],
+            },
+        ];
+        let mut labels: HashMap<i64, String> = communities
+            .iter()
+            .map(|community| (community.id, community_label(&community.members, &files)))
+            .collect();
+        disambiguate_labels(&mut labels, &communities, &files);
+        // The biggest keeps the bare directory; the rest say which file they are.
+        assert_eq!(labels[&7], "src/");
+        assert_eq!(labels[&9], "src/ (b.rs)");
+        assert_eq!(labels[&11], "src/ (c.rs)");
+    }
+
+    #[test]
+    fn labels_stay_unique_when_the_dominant_file_also_collides() {
+        // A vendored bundle split across communities: same directory, same
+        // dominant file. Qualifying by file is not enough on its own.
+        let files: HashMap<i64, &str> =
+            [(1, "assets/v.js"), (2, "assets/v.js"), (3, "assets/v.js")]
+                .into_iter()
+                .collect();
+        let communities = vec![
+            crate::analysis::Community {
+                id: 2,
+                members: vec![1, 2],
+            },
+            crate::analysis::Community {
+                id: 3,
+                members: vec![3],
+            },
+        ];
+        let mut labels: HashMap<i64, String> = communities
+            .iter()
+            .map(|community| (community.id, community_label(&community.members, &files)))
+            .collect();
+        disambiguate_labels(&mut labels, &communities, &files);
+        let unique: HashSet<&String> = labels.values().collect();
+        assert_eq!(
+            unique.len(),
+            labels.len(),
+            "labels must be unique: {labels:?}"
+        );
     }
 
     #[test]

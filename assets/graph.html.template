@@ -95,6 +95,19 @@
   #tree .leaf:hover { background: var(--bg-2); color: var(--text-primary); }
   #tree .leaf.active { background: var(--accent-dim); color: var(--text-primary); }
   #tree .leaf .ic { color: var(--text-dim); margin-right: 5px; }
+  /* directory grouping: one row per directory, files nested under it */
+  #tree .tgroup { margin-bottom: 2px; }
+  #tree .tdir { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; color: var(--text-primary); cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; }
+  #tree .tdir:hover { background: var(--bg-2); }
+  #tree .tdir .caret { display: inline-block; width: 10px; color: var(--text-dim); transition: transform 0.1s; }
+  #tree .tgroup.open > .tdir .caret { transform: rotate(90deg); }
+  #tree .tdir .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  #tree .tdir .n, #tree .leaf .n { color: var(--text-dim); font-size: 10px; }
+  #tree .tfiles { display: none; }
+  #tree .tgroup.open > .tfiles { display: block; }
+  #tree .leaf { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  #tree .treetog { float: right; background: none; border: 0; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 10px; text-decoration: underline; }
+  #tree .treetog:hover { color: var(--text-primary); }
   /* filters */
   .fgroup { margin-bottom: 14px; }
   .fgroup h4 { margin: 6px 6px 6px; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
@@ -217,6 +230,9 @@
     font: inherit; font-size: 11px; padding: 2px 5px; border-radius: 3px; width: 4.5em;
   }
   #mode-controls input[type="text"] { width: 10em; }
+  #mode-controls button { background: var(--bg-2, #1b1b1b); color: var(--text-secondary, #c9c6bf); border: 1px solid var(--border, #2a2a2a); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+  #mode-controls button:hover { color: var(--text-primary, #f2f2ee); border-color: var(--accent, #ffc600); }
+  #mode-controls .ctl-note { font-size: 10px; color: var(--text-dim, #9a978f); }
   #palette {
     position: fixed; left: 50%; top: 14vh; transform: translateX(-50%); width: min(620px, 92vw); z-index: 60;
     background: var(--bg-1, #121212); border: 1px solid var(--line, #262624); border-radius: 5px;
@@ -382,7 +398,7 @@
 
 <div id="statusbar">
   <span class="ready">&#9679; ready</span>
-  <span>drag nodes &middot; scroll to zoom &middot; click node for source &middot; esc clears</span>
+  <span>click a module to open it &middot; double-click a node for its source &middot; drag &middot; scroll to zoom &middot; esc clears</span>
   <span class="right" id="status-counts"></span>
 </div>
 
@@ -589,6 +605,19 @@ function nodeLabel(node) {
   return `${KIND_GLYPH[node.kind] || "●"} ${node.name}`;
 }
 
+/// Long enough to identify a symbol, short enough that the label does not
+/// become a white bar across the scene: Sigma draws labels on an opaque plate,
+/// and a test function name runs past 70 characters. Only the canvas
+/// truncates — the panel and the search results have room for the real name.
+const MAX_SCENE_LABEL_CHARS = 34;
+
+function sceneLabel(node) {
+  const name = node.name || "";
+  const short =
+    name.length > MAX_SCENE_LABEL_CHARS ? `${name.slice(0, MAX_SCENE_LABEL_CHARS - 1)}\u2026` : name;
+  return `${KIND_GLYPH[node.kind] || "●"} ${short}`;
+}
+
 function nodeSize(node) {
   return (3 + Math.min(Math.sqrt(node.degree || 0) * 1.7, 13)) * settings.nodeScale;
 }
@@ -639,6 +668,10 @@ function neighborScore(node, edge) {
 // every symbol on screen at once, and the budgets in
 // `docs/graph-experience.md` say it must not try.
 const MAX_SCENE_NODES = 420;
+/// Past this many nodes, "expand all" is warned about before it runs: the
+/// scene budget above is what keeps the page responsive, and opening every
+/// module deliberately spends it.
+const WHOLE_GRAPH_WARN = 5000;
 
 let scene = null;
 let renderer = null;
@@ -652,7 +685,7 @@ const IMPACT_GLYPH = { changed: "◆", direct: "◐", transitive: "○" };
 function nodeEntry(node, extra) {
   const base = {
     key: `n${node.id}`,
-    label: nodeLabel(node),
+    label: sceneLabel(node),
     size: nodeSize(node),
     color: communityColor(node.community),
     _node: node,
@@ -1379,10 +1412,24 @@ function renderScene(spec) {
     hoveredNode = null;
     renderer.refresh();
   });
-  renderer.on("clickNode", ({ node }) => inspect(node));
+  renderer.on("clickNode", ({ node }) => {
+    // A module bubble is a thing to open, so opening it is the click. The
+    // panel still appears, so nothing is lost, but seeing what is inside no
+    // longer costs a trip through a side panel button.
+    const aggregate = scene.getNodeAttribute(node, "_aggregate");
+    if (aggregate) {
+      const expanded = new Set(State.expanded);
+      expanded.has(aggregate.id) ? expanded.delete(aggregate.id) : expanded.add(aggregate.id);
+      setState({ expanded });
+      return;
+    }
+    inspect(node);
+  });
   renderer.on("doubleClickNode", ({ node }) => {
+    // Double-click reads the code. The status bar has promised this since the
+    // first version of the page.
     const target = scene.getNodeAttribute(node, "_node");
-    if (target) setState({ mode: "explore", focus: String(target.id) }, { push: true });
+    if (target && target.file) openFile(target.file, target.startLine, target.endLine);
   });
   renderer.on("clickStage", () => {
     selected = null;
@@ -2294,12 +2341,24 @@ function resolveFocus(value) {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   if (Number.isInteger(numeric) && byId.has(numeric)) return byId.get(numeric);
-  return (
+  const exact =
     nodes.find((node) => node.file === value && node.kind === "file") ||
     nodes.find((node) => node.name === value) ||
-    nodes.find((node) => node.file === value) ||
-    null
+    nodes.find((node) => node.file === value);
+  if (exact) return exact;
+  // Typing is not dictation. `bigbang` should find `src/bigbang.rs`, and case
+  // should not decide whether a path resolves. Most connected wins, so the
+  // loose match lands on the symbol someone probably meant.
+  const lowered = String(value).toLowerCase();
+  const candidates = nodes.filter(
+    (node) =>
+      (node.name || "").toLowerCase() === lowered ||
+      (node.file || "").toLowerCase() === lowered ||
+      (node.file || "").toLowerCase().endsWith(`/${lowered}`) ||
+      (node.kind === "file" && (node.file || "").toLowerCase().split("/").pop()?.split(".")[0] === lowered)
   );
+  if (!candidates.length) return null;
+  return candidates.reduce((best, node) => ((node.degree || 0) > (best.degree || 0) ? node : best));
 }
 
 // --- Inspector ---------------------------------------------------------------
@@ -2522,13 +2581,30 @@ function renderModeControls() {
     );
   }
   if (State.mode === "path") {
+    // A typed endpoint that resolves to nothing used to blank the field, which
+    // reads as "the app ate my input". Keep the text and let the scene explain.
     const name = (value) => {
+      if (!value) return "";
       const node = resolveFocus(value);
-      return node ? node.name : "";
+      return node ? node.name || node.file : String(value);
     };
+    // Typing an exact symbol name from memory is not a user interface. The
+    // same list the search box uses backs both endpoints, and "use selection"
+    // fills one from whatever is currently selected.
     parts.push(
-      `<label>from <input id="ctl-from" type="text" value="${escapeHtml(name(State.from))}" placeholder="symbol"></label>`,
-      `<label>to <input id="ctl-to" type="text" value="${escapeHtml(name(State.to))}" placeholder="symbol"></label>`
+      `<label>from <input id="ctl-from" type="text" list="node-names" value="${escapeHtml(name(State.from))}" placeholder="symbol or file"></label>`,
+      `<button id="ctl-from-sel" title="use the selected node">&#8593;</button>`,
+      `<label>to <input id="ctl-to" type="text" list="node-names" value="${escapeHtml(name(State.to))}" placeholder="symbol or file"></label>`,
+      `<button id="ctl-to-sel" title="use the selected node">&#8593;</button>`,
+      `<button id="ctl-swap" title="swap the endpoints">&#8646;</button>`
+    );
+  }
+  if (State.mode === "overview") {
+    const total = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0).length;
+    const allOpen = State.expanded.size >= total && total > 0;
+    parts.push(
+      `<button id="ctl-expand-all">${allOpen ? "Collapse all" : "Expand all"} modules</button>`,
+      `<span class="ctl-note">${State.expanded.size}/${total} expanded &middot; click a bubble to open it</span>`
     );
   }
   host.innerHTML = parts.join("");
@@ -2545,6 +2621,52 @@ function renderModeControls() {
   bind("ctl-down", (value) => setState({ down: clampDepth(value, State.down) }));
   bind("ctl-from", (value) => setState({ from: value || null }, { push: true }));
   bind("ctl-to", (value) => setState({ to: value || null }, { push: true }));
+
+  const useSelection = (field) => {
+    if (!selected) {
+      notice("Select a node first, then use the arrow to make it an endpoint.");
+      return;
+    }
+    setState({ [field]: String(selected.id) }, { push: true });
+  };
+  document.getElementById("ctl-from-sel")?.addEventListener("click", () => useSelection("from"));
+  document.getElementById("ctl-to-sel")?.addEventListener("click", () => useSelection("to"));
+  document
+    .getElementById("ctl-swap")
+    ?.addEventListener("click", () => setState({ from: State.to, to: State.from }, { push: true }));
+
+  document.getElementById("ctl-expand-all")?.addEventListener("click", () => {
+    const all = communityMeta.filter((meta) => meta.id !== UNGROUPED && meta.size > 0);
+    const open = State.expanded.size >= all.length && all.length > 0;
+    if (!open && nodes.length > WHOLE_GRAPH_WARN) {
+      // Expanding everything means rendering everything. On a repository this
+      // size that is seconds of layout and a scene nobody can read, so say so
+      // rather than appearing to hang.
+      notice(`Opening all ${nodes.length.toLocaleString()} nodes — this will be slow and dense.`);
+    }
+    setState({ expanded: open ? new Set() : new Set(all.map((meta) => meta.id)) });
+  });
+}
+
+/// Every node name, once, for the endpoint pickers. Built lazily because a
+/// large repository has tens of thousands of them and the list is only needed
+/// when someone opens Path.
+let nodeNameList = null;
+function ensureNodeNameList() {
+  if (nodeNameList) return;
+  nodeNameList = document.createElement("datalist");
+  nodeNameList.id = "node-names";
+  const seen = new Set();
+  const options = [];
+  for (const node of nodes) {
+    const label = node.name || node.file;
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    options.push(`<option value="${escapeHtml(label)}"></option>`);
+    if (options.length >= 4000) break;
+  }
+  nodeNameList.innerHTML = options.join("");
+  document.body.appendChild(nodeNameList);
 }
 
 const SPEC_BUILDERS = {
@@ -2562,6 +2684,7 @@ function applyState() {
   for (const button of document.querySelectorAll("#modes button")) {
     button.setAttribute("aria-selected", String(button.dataset.mode === State.mode));
   }
+  if (State.mode === "path") ensureNodeNameList();
   renderModeControls();
   if (State.mode === "overview") buildLegend();
   if (State.focus && !resolveFocus(State.focus)) {
@@ -2624,15 +2747,63 @@ function fileEntries() {
 function buildTree() {
   const host = document.getElementById("tree");
   const entries = fileEntries();
+  // Grouped by directory, not a flat list. A flat list of 1836 paths sorted by
+  // symbol count is a search box with extra steps; the directory is how anyone
+  // who works in the repository already thinks about it.
+  const groups = new Map();
+  for (const [file, count] of entries) {
+    const cut = file.lastIndexOf("/");
+    const directory = cut === -1 ? "." : file.slice(0, cut);
+    const leaf = cut === -1 ? file : file.slice(cut + 1);
+    if (!groups.has(directory)) groups.set(directory, { total: 0, files: [] });
+    const group = groups.get(directory);
+    group.total += count;
+    group.files.push([file, leaf, count]);
+  }
+  const ordered = [...groups.entries()].sort(
+    (left, right) => right[1].total - left[1].total || left[0].localeCompare(right[0])
+  );
   host.innerHTML =
-    `<p class="cc-note">${entries.length} files, most symbols first</p>` +
-    entries
-      .map(
-        ([file, count]) =>
-          `<div class="leaf" data-file="${escapeHtml(file)}" tabindex="0" role="button" title="${escapeHtml(file)}">` +
-          `<span class="name">${escapeHtml(file)}</span><span class="n">${count}</span></div>`
-      )
+    `<p class="cc-note">${entries.length} files in ${ordered.length} director${ordered.length === 1 ? "y" : "ies"}` +
+    `<button class="treetog" data-all="collapse">collapse all</button></p>` +
+    ordered
+      .map(([directory, group]) => {
+        const open = ordered.length <= 12 || group.total >= entries.length;
+        return (
+          `<div class="tgroup${open ? " open" : ""}" data-dir="${escapeHtml(directory)}">` +
+          `<div class="tdir" tabindex="0" role="button"><span class="caret">&#9656;</span>` +
+          `<span class="name">${escapeHtml(directory)}</span><span class="n">${group.total}</span></div>` +
+          `<div class="tfiles">` +
+          group.files
+            .map(
+              ([file, leaf, count]) =>
+                `<div class="leaf" data-file="${escapeHtml(file)}" tabindex="0" role="button" title="${escapeHtml(file)}">` +
+                `<span class="name">${escapeHtml(leaf)}</span><span class="n">${count}</span></div>`
+            )
+            .join("") +
+          `</div></div>`
+        );
+      })
       .join("");
+  for (const directory of host.querySelectorAll(".tdir")) {
+    const toggle = () => directory.parentElement.classList.toggle("open");
+    directory.addEventListener("click", toggle);
+    directory.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  }
+  const all = host.querySelector(".treetog");
+  if (all) {
+    all.addEventListener("click", () => {
+      const collapsing = all.dataset.all === "collapse";
+      for (const group of host.querySelectorAll(".tgroup")) group.classList.toggle("open", !collapsing);
+      all.dataset.all = collapsing ? "expand" : "collapse";
+      all.textContent = collapsing ? "expand all" : "collapse all";
+    });
+  }
   for (const leaf of host.querySelectorAll(".leaf")) {
     const go = () => setState({ mode: State.mode === "overview" ? "explore" : State.mode, focus: leaf.dataset.file }, { push: true });
     leaf.addEventListener("click", go);
@@ -2648,7 +2819,11 @@ function buildTree() {
 function markTreeActive() {
   const target = resolveFocus(State.focus);
   for (const leaf of document.querySelectorAll("#tree .leaf")) {
-    leaf.classList.toggle("active", !!target && leaf.dataset.file === target.file);
+    const active = !!target && leaf.dataset.file === target.file;
+    leaf.classList.toggle("active", active);
+    // A highlighted file inside a collapsed directory is a highlight nobody
+    // sees.
+    if (active) leaf.closest(".tgroup")?.classList.add("open");
   }
 }
 
