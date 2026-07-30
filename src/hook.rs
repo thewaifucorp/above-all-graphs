@@ -352,7 +352,10 @@ mod tests {
         );
         // Blank, absent, and a Bash command line all yield nothing: a false
         // nudge trains the agent to ignore nudges.
-        assert_eq!(search_pattern(&json!({"tool_input": {"pattern": "  "}})), None);
+        assert_eq!(
+            search_pattern(&json!({"tool_input": {"pattern": "  "}})),
+            None
+        );
         assert_eq!(search_pattern(&json!({"tool_input": {}})), None);
         assert_eq!(
             search_pattern(&json!({"tool_input": {"command": "grep -rn foo src/"}})),
