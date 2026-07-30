@@ -478,6 +478,13 @@ pub enum HookEvent {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+
+    /// `PreToolUse` on Grep|Glob — point a code search at the graph instead.
+    PreSearch {
+        /// Repository root. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 /// Work-memory operations.

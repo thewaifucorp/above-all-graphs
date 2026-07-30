@@ -19,7 +19,7 @@ CI (`.github/workflows/ci.yml`) enforces fmt + clippy `-D warnings` + tests. Rel
 - `resolve.rs` — walk + parse + cross-file resolution; owns `SKIP_DIRS` (shared by watcher and sync)
 - `parse.rs` / `storage.rs` — tree-sitter extraction / SQLite graph (FTS5)
 - `install.rs` — agent detection + MCP/hooks/skills/rules registration, idempotent + reversible
-- `hook.rs` — `aag hook pre-edit|post-edit|session-start`: stdin JSON, always exit 0
+- `hook.rs` — `aag hook pre-edit|pre-search|post-edit|session-start`: stdin JSON, always exit 0
 - `sync.rs` — hook-driven refresh: full pass + per-file relevance short-circuit
 - `workspaces.rs` — global registry + hub.html (multi-repo = selection, not unification)
 - `database.rs` — live PostgreSQL catalog into the graph; credentials never stored
