@@ -70,8 +70,15 @@ const SKILLS: &[(&str, &str)] = &[
 /// Claude Code hook registrations for `.claude/settings.json`: (event,
 /// matcher, command). Empty matcher = match everything (`SessionStart`
 /// has no tools).
+/// `Grep|Glob` is the load-bearing one: without it the graph is installed but
+/// never reaches the agent at the moment it would replace the tool being
+/// reached for. `pre-edit` fires after navigation already happened by grep,
+/// which is too late to change how the code was found — observed 2026-07-30 in
+/// a full session with aag installed, MCP connected and skills registered:
+/// ~12 greps, zero graph calls.
 const HOOKS: &[(&str, &str, &str)] = &[
     ("PreToolUse", "Edit|Write", "aag hook pre-edit"),
+    ("PreToolUse", "Grep|Glob", "aag hook pre-search"),
     ("PostToolUse", "Write|Edit", "aag hook post-edit"),
     ("SessionStart", "", "aag hook session-start"),
 ];

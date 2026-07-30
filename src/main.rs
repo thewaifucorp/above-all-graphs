@@ -129,6 +129,7 @@ fn hook_target(event: aag::cli::HookEvent) -> (std::path::PathBuf, aag::hook::Ev
         aag::cli::HookEvent::PreEdit { path } => (path, aag::hook::Event::PreEdit),
         aag::cli::HookEvent::PostEdit { path } => (path, aag::hook::Event::PostEdit),
         aag::cli::HookEvent::SessionStart { path } => (path, aag::hook::Event::SessionStart),
+        aag::cli::HookEvent::PreSearch { path } => (path, aag::hook::Event::PreSearch),
     }
 }
 

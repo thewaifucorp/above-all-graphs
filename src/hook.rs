@@ -31,6 +31,13 @@ pub enum Event {
     PostEdit,
     /// `SessionStart` — reconcile the index and inject a graph digest.
     SessionStart,
+    /// `PreToolUse` on Grep|Glob — point a code search at the graph instead.
+    ///
+    /// Without this the graph is installed but never reaches the agent at the
+    /// one moment it would replace the tool being reached for: the search
+    /// itself. `pre-edit` fires after navigation already happened by grep,
+    /// which is too late to change how the code was found.
+    PreSearch,
 }
 
 /// Runs one hook event against the index under `root`, reading the hook
@@ -45,7 +52,79 @@ pub fn run(root: &Path, event: Event, input: &mut dyn Read) {
         Event::PreEdit => pre_edit(root, &payload),
         Event::PostEdit => post_edit(root, &payload),
         Event::SessionStart => session_start(root),
+        Event::PreSearch => pre_search(root, &payload),
     }
+}
+
+/// The search term from a `Grep`/`Glob` payload. Claude Code sends `pattern`;
+/// a `Bash` grep arrives as `command`, which we deliberately ignore — parsing a
+/// shell line is guesswork, and a false nudge trains the agent to skip nudges.
+fn search_pattern(payload: &Value) -> Option<String> {
+    let input = payload.get("tool_input")?;
+    let pattern = input.get("pattern")?.as_str()?.trim();
+    (!pattern.is_empty()).then(|| pattern.to_string())
+}
+
+/// `PreToolUse` on Grep|Glob: when the pattern names something the graph
+/// already knows, say so and point at the tool that answers better.
+///
+/// Silent unless the graph can actually beat the search — a pattern that
+/// matches no indexed symbol gets no output, because the honest answer there is
+/// "grep is the right tool".
+fn pre_search(root: &Path, payload: &Value) {
+    let Some(pattern) = search_pattern(payload) else {
+        return;
+    };
+    let Some(hint) = search_hint(root, &pattern) else {
+        return;
+    };
+    print_context("PreToolUse", &hint);
+}
+
+/// The nudge for `pattern`, or `None` when the index is missing or holds no
+/// symbol by that name.
+fn search_hint(root: &Path, pattern: &str) -> Option<String> {
+    let graph = Graph::open_existing(root).ok()?;
+    let nodes = graph.all_nodes().ok()?;
+
+    // Bare identifier-ish patterns only: a regex with metacharacters is a text
+    // search, not a symbol lookup, and the graph has nothing better to offer.
+    if !pattern
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+    {
+        return None;
+    }
+
+    let needle = pattern.rsplit(':').next().unwrap_or(pattern);
+    let matches: Vec<&str> = nodes
+        .iter()
+        .filter(|node| node.kind != NodeKind::File && node.name == needle)
+        .map(|node| node.file_path.as_str())
+        .collect();
+    if matches.is_empty() {
+        return None;
+    }
+
+    let mut files: Vec<&str> = matches.clone();
+    files.sort_unstable();
+    files.dedup();
+    let shown: Vec<&str> = files.iter().take(WARN_TOP).copied().collect();
+    let more = files.len().saturating_sub(shown.len());
+    let tail = if more > 0 {
+        format!(" (+{more} more)")
+    } else {
+        String::new()
+    };
+
+    Some(format!(
+        "aag: `{needle}` is already in the graph — {} definition(s) in {}{tail}. \
+         `aag explore {needle}` returns the source plus call paths, and \
+         `aag impact {needle}` the blast radius, across every indexed repo — \
+         which a grep of this repo cannot see.",
+        matches.len(),
+        shown.join(", "),
+    ))
 }
 
 fn read_payload(input: &mut dyn Read) -> Value {
@@ -263,6 +342,38 @@ mod tests {
     fn edited_file_absent_returns_none() {
         assert_eq!(edited_file(&Value::Null), None);
         assert_eq!(edited_file(&json!({"tool_input": {}})), None);
+    }
+
+    #[test]
+    fn search_pattern_reads_grep_payload_and_ignores_the_rest() {
+        assert_eq!(
+            search_pattern(&json!({"tool_input": {"pattern": "SecretResolver"}})).as_deref(),
+            Some("SecretResolver")
+        );
+        // Blank, absent, and a Bash command line all yield nothing: a false
+        // nudge trains the agent to ignore nudges.
+        assert_eq!(search_pattern(&json!({"tool_input": {"pattern": "  "}})), None);
+        assert_eq!(search_pattern(&json!({"tool_input": {}})), None);
+        assert_eq!(
+            search_pattern(&json!({"tool_input": {"command": "grep -rn foo src/"}})),
+            None
+        );
+        assert_eq!(search_pattern(&Value::Null), None);
+    }
+
+    /// No index, no output — the hook must stay silent rather than nudge toward
+    /// a graph that cannot answer.
+    #[test]
+    fn search_hint_without_an_index_is_none() {
+        let root = scratch_root();
+        assert_eq!(search_hint(&root, "AnySymbol"), None);
+    }
+
+    #[test]
+    fn pre_search_on_malformed_stdin_is_swallowed() {
+        let root = scratch_root();
+        let mut input = std::io::Cursor::new(b"{not json".to_vec());
+        run(&root, Event::PreSearch, &mut input);
     }
 
     #[test]
